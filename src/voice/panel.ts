@@ -58,29 +58,6 @@ function buildPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
   ];
 }
 
-function buildTierRows(ladder: VoiceLadderTier[]): ActionRowBuilder<ButtonBuilder>[] {
-  // Не показываем "нулевую" стартовую роль (обычно Стажёр).
-  const visible = ladder.filter((t) => t.voiceMinutesTotal !== 0);
-
-  // 4 ступени → 1 ряд. Если когда-нибудь станет >5, просто распилим по рядам.
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  let row = new ActionRowBuilder<ButtonBuilder>();
-  for (let i = 0; i < visible.length; i++) {
-    if (row.components.length >= 5) {
-      rows.push(row);
-      row = new ActionRowBuilder<ButtonBuilder>();
-    }
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`voiceLadder:tier:${i}`)
-        .setLabel(visible[i]!.roleName.slice(0, 80))
-        .setStyle(ButtonStyle.Secondary),
-    );
-  }
-  if (row.components.length) rows.push(row);
-  return rows;
-}
-
 function buildRefreshRow(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -91,7 +68,8 @@ function buildRefreshRow(): ActionRowBuilder<ButtonBuilder> {
 }
 
 function buildPersonalComponents(ladder: VoiceLadderTier[]): ActionRowBuilder<ButtonBuilder>[] {
-  return [...buildTierRows(ladder), buildRefreshRow()];
+  void ladder; // лестница не влияет на компоненты (кнопка одна)
+  return [buildRefreshRow()];
 }
 
 function buildPersonalEmbed(member: GuildMember, ladder: VoiceLadderTier[], totalMin: number): EmbedBuilder {
@@ -107,35 +85,7 @@ function buildPersonalEmbed(member: GuildMember, ladder: VoiceLadderTier[], tota
       [`Накоплено: **${fmtMinutes(totalMin)}** мин.`, `Текущая роль: **${current.roleName}**.`, nextLine].join("\n"),
     )
     .setFooter({ text: `Запросил: ${member.user.tag}` });
-
-  // Детали ступеней: не показываем "нулевую" стартовую роль (обычно Стажёр).
-  // Для достигнутых ступеней выводим "достигнуто", без "осталось 0".
-  for (const t of ladder) {
-    if (t.voiceMinutesTotal === 0) continue;
-    const remain = t.voiceMinutesTotal - totalMin;
-    const name = t.roleName.slice(0, 256);
-    const value =
-      remain <= 0
-        ? `Порог: **${fmtMinutes(t.voiceMinutesTotal)}** мин.\nСтатус: **достигнуто**`
-        : `Порог: **${fmtMinutes(t.voiceMinutesTotal)}** мин.\nОсталось: **${fmtMinutes(remain)}** мин.`;
-    e.addFields({ name, value: value.slice(0, 1024), inline: false });
-  }
   return e;
-}
-
-function buildTierEmbed(member: GuildMember, tier: VoiceLadderTier, totalMin: number): EmbedBuilder {
-  const remain = Math.max(0, tier.voiceMinutesTotal - totalMin);
-  return new EmbedBuilder()
-    .setColor(STATS_COLOR)
-    .setTitle(`Ступень: ${tier.roleName}`)
-    .setDescription(
-      [
-        `Накоплено: **${fmtMinutes(totalMin)}** мин.`,
-        `Порог: **${fmtMinutes(tier.voiceMinutesTotal)}** мин.`,
-        `Осталось: **${fmtMinutes(remain)}** мин.`,
-      ].join("\n"),
-    )
-    .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
 export async function ensureVoiceLadderPanel(client: Client) {
@@ -191,7 +141,7 @@ export async function handleVoiceLadderButton(interaction: ButtonInteraction): P
   if (
     customId !== VOICE_LADDER_BUTTON_ME &&
     customId !== VOICE_LADDER_BUTTON_REFRESH &&
-    !customId.startsWith("voiceLadder:tier:")
+    false
   ) {
     return false;
   }
@@ -221,8 +171,6 @@ export async function handleVoiceLadderButton(interaction: ButtonInteraction): P
   const totalSec = getVoiceSeconds(interaction.guildId, member.id);
   const totalMin = Math.floor(totalSec / 60);
 
-  const visible = ladder.filter((t) => t.voiceMinutesTotal !== 0);
-
   if (customId === VOICE_LADDER_BUTTON_ME || customId === VOICE_LADDER_BUTTON_REFRESH) {
     const embeds = [buildPersonalEmbed(member, ladder, totalMin)];
     const components = buildPersonalComponents(ladder);
@@ -235,23 +183,6 @@ export async function handleVoiceLadderButton(interaction: ButtonInteraction): P
     return true;
   }
 
-  const idxRaw = customId.slice("voiceLadder:tier:".length);
-  const idx = Number.parseInt(idxRaw, 10);
-  const tier = Number.isFinite(idx) ? visible[idx] : undefined;
-  if (!tier) {
-    await interaction.reply({ content: "Не нашёл эту ступень (возможно, лестница обновилась).", flags: MessageFlags.Ephemeral });
-    return true;
-  }
-
-  // Внутри "личного" ephemeral-окна лучше обновлять текущее сообщение, а не плодить новые.
-  if (interaction.message) {
-    await interaction.update({
-      embeds: [buildTierEmbed(member, tier, totalMin)],
-      components: buildPersonalComponents(ladder),
-    });
-  } else {
-    await interaction.reply({ embeds: [buildTierEmbed(member, tier, totalMin)], flags: MessageFlags.Ephemeral });
-  }
-  return true;
+  return false;
 }
 
