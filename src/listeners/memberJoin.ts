@@ -1,7 +1,10 @@
 import { Events, type Client, type GuildMember, type User } from "discord.js";
+import { welcomeChannelId } from "../config.js";
+import { randomJoinCopy, randomLeaveCopy } from "../copy/ussrMemberActivity.js";
 import { loadRolesCatalog } from "../catalog/loadCatalog.js";
 import { loadGuildState } from "../services/guildState.js";
 import { LOWEST_LADDER_ROLE_KEY } from "../config/constants.js";
+import { embedInfo, embedWarn } from "../theme.js";
 
 const NICK_MAX = 32;
 const PREFIX = "Товарищ (";
@@ -56,6 +59,46 @@ export function registerMemberJoin(client: Client) {
       await member.setNickname(nick, "ИИ Управление: униформа при вступлении");
     } catch (e) {
       console.warn("ИИ Управление: не удалось сменить ник:", member.id, e);
+    }
+
+    const activityId = welcomeChannelId();
+    if (activityId) {
+      try {
+        const ch = await member.guild.channels.fetch(activityId).catch(() => null);
+        if (ch?.isTextBased() && ch.isSendable()) {
+          const { title, description } = randomJoinCopy(member.user.tag, member.guild.name);
+          await ch.send({
+            content: member.toString(),
+            embeds: [embedInfo(title, description)],
+            allowedMentions: { users: [member.id] },
+          });
+        }
+      } catch (e) {
+        console.warn("ИИ Управление: не удалось отправить приветствие в канал:", activityId, e);
+      }
+    }
+  });
+
+  client.on(Events.GuildMemberRemove, async (member) => {
+    if (member.user?.bot) return;
+
+    const activityId = welcomeChannelId();
+    if (!activityId) return;
+
+    const tag = member.user?.tag ?? member.user?.username ?? member.id;
+
+    try {
+      const ch = await member.guild.channels.fetch(activityId).catch(() => null);
+      if (ch?.isTextBased() && ch.isSendable()) {
+        const { title, description } = randomLeaveCopy(tag, member.guild.name);
+        await ch.send({
+          content: `<@${member.id}>`,
+          embeds: [embedWarn(title, description)],
+          allowedMentions: { users: [member.id] },
+        });
+      }
+    } catch (e) {
+      console.warn("ИИ Управление: не удалось отправить запись о выбытии в канал:", activityId, e);
     }
   });
 }

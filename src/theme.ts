@@ -33,6 +33,15 @@ export function embedErr(title: string, description: string) {
     .setFooter({ text: footer });
 }
 
+/** Выбытие, предупреждения — янтарный тон. */
+export function embedWarn(title: string, description: string) {
+  return new EmbedBuilder()
+    .setColor(PALETTE.warn)
+    .setTitle(`📤 ${title}`)
+    .setDescription(description)
+    .setFooter({ text: footer });
+}
+
 export function hierarchyBlocked() {
   return embedErr(
     "Нарушение иерархии",
