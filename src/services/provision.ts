@@ -41,7 +41,10 @@ async function syncSingleCatalogRole(
   def: CatalogRole,
   state: GuildInstallState,
 ): Promise<void> {
-  let role = guild.roles.cache.find((r) => r.name === def.name);
+  // Не совпадать с интеграционной ролью приложения (managed): её нельзя править через Role#edit.
+  let role = guild.roles.cache.find(
+    (r) => r.name === def.name && !r.managed,
+  );
   const colorOpts = roleColorOptions(def.color);
   const perms = resolvePermissionNames(def.permissions);
 
