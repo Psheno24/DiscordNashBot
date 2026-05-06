@@ -86,13 +86,21 @@ function buildPersonalEmbed(member: GuildMember, ladder: VoiceLadderTier[], tota
   const e = new EmbedBuilder()
     .setColor(STATS_COLOR)
     .setTitle("Твоя голосовая лестница")
-    .setDescription([`Накоплено: **${fmtMinutes(totalMin)}** мин.`, `Текущая роль: **${current.roleName}**.`, nextLine].join("\n"))
+    .setDescription(
+      [`Накоплено: **${fmtMinutes(totalMin)}** мин.`, `Текущая роль: **${current.roleName}**.`, nextLine].join("\n"),
+    )
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 
+  // Детали ступеней: не показываем "нулевую" стартовую роль (обычно Стажёр).
+  // Для достигнутых ступеней выводим "достигнуто", без "осталось 0".
   for (const t of ladder) {
-    const remain = Math.max(0, t.voiceMinutesTotal - totalMin);
+    if (t.voiceMinutesTotal === 0) continue;
+    const remain = t.voiceMinutesTotal - totalMin;
     const name = t.roleName.slice(0, 256);
-    const value = [`Порог: **${fmtMinutes(t.voiceMinutesTotal)}** мин.`, `До достижения: **${fmtMinutes(remain)}** мин.`].join("\n");
+    const value =
+      remain <= 0
+        ? `Порог: **${fmtMinutes(t.voiceMinutesTotal)}** мин.\nСтатус: **достигнуто**`
+        : `Порог: **${fmtMinutes(t.voiceMinutesTotal)}** мин.\nОсталось: **${fmtMinutes(remain)}** мин.`;
     e.addFields({ name, value: value.slice(0, 1024), inline: false });
   }
   return e;
