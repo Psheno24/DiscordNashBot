@@ -16,6 +16,7 @@ import { loadNeurocontrol } from "./loadConfig.js";
 import type { NeuroRoleEntry, NeurocontrolFile } from "./types.js";
 import { getPanelMessageId, setPanelMessageId } from "./panelStore.js";
 import { getGuildConfig, patchGuildConfig } from "../guildConfig/store.js";
+import { ensureVoiceLadderPanel } from "../voice/panel.js";
 
 export const NEURO_BUTTON_ROLES = "neuro:roles";
 export const NEURO_BUTTON_SETTINGS = "neuro:settings";
@@ -94,6 +95,10 @@ export async function ensureNeuroPanel(client: Client) {
     const ch = await client.channels.fetch(chId).catch(() => null);
     if (!ch?.isTextBased() || ch.isDMBased()) {
       console.warn("ИИ Управление: канал нейроконтроля недоступен или не текстовый:", chId);
+      continue;
+    }
+    if (!ch.isSendable()) {
+      console.warn("ИИ Управление: нет прав отправлять в канал нейроконтроля:", chId);
       continue;
     }
 
@@ -244,6 +249,10 @@ export async function handleNeuroSettingsSelect(interaction: ChannelSelectMenuIn
   } else if (interaction.customId === NEURO_SELECT_VOICE_LADDER) {
     patchGuildConfig(interaction.guildId, { voiceLadderChannelId: picked });
   }
+
+  // Сразу выставляем/обновляем панели в новых каналах, без перезапуска бота.
+  await ensureNeuroPanel(interaction.client);
+  await ensureVoiceLadderPanel(interaction.client);
 
   await interaction.update({
     embeds: [buildSettingsEmbed(interaction.guildId)],

@@ -132,6 +132,10 @@ export async function ensureVoiceLadderPanel(client: Client) {
       console.warn("ИИ Управление: канал голосовой лестницы недоступен или не текстовый:", chId);
       continue;
     }
+    if (!ch.isSendable()) {
+      console.warn("ИИ Управление: нет прав отправлять в канал голосовой лестницы:", chId);
+      continue;
+    }
 
     const payload = {
       embeds: [buildPanelEmbed(ch.guild)],
