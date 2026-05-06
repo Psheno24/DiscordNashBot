@@ -1,10 +1,8 @@
 import { Events, type Client, type GuildMember, type User } from "discord.js";
 import { welcomeChannelId } from "../config.js";
 import { randomJoinCopy, randomLeaveCopy } from "../copy/ussrMemberActivity.js";
-import { loadRolesCatalog } from "../catalog/loadCatalog.js";
-import { loadGuildState } from "../services/guildState.js";
-import { LOWEST_LADDER_ROLE_KEY } from "../config/constants.js";
 import { embedInfo, embedWarn } from "../theme.js";
+import { resolveFirstLadderRoleId, syncVoiceLadderForMember } from "../voice/voiceLadder.js";
 
 const NICK_MAX = 32;
 const PREFIX = "Товарищ (";
@@ -25,33 +23,28 @@ export function buildTovarischNickname(user: User): string {
   return nick;
 }
 
-function resolveLowestLadderRoleId(member: GuildMember): string | undefined {
-  const state = loadGuildState(member.guild.id);
-  const fromState = state.roleIds[LOWEST_LADDER_ROLE_KEY];
-  if (fromState && member.guild.roles.cache.has(fromState)) return fromState;
-
-  const catalog = loadRolesCatalog();
-  const def = catalog.roles.find((r) => r.key === LOWEST_LADDER_ROLE_KEY);
-  if (!def) return undefined;
-  return member.guild.roles.cache.find((r) => r.name === def.name)?.id;
-}
-
 export function registerMemberJoin(client: Client) {
   client.on(Events.GuildMemberAdd, async (member) => {
     if (member.user.bot) return;
     if (member.id === member.guild.ownerId) return;
 
     try {
-      const roleId = resolveLowestLadderRoleId(member);
+      const roleId = await resolveFirstLadderRoleId(member.guild);
       if (roleId) {
-        await member.roles.add(roleId, "ИИ Управление: низшая ступень при вступлении");
+        await member.roles.add(roleId, "ИИ Управление: роль при вступлении");
       } else {
         console.warn(
-          "ИИ Управление: роль низшей ступени не найдена — выполните /nadzor bootstrap или migrate.",
+          "ИИ Управление: не найдена первая ступень лестницы — проверьте config/voice-ladder.json и имя роли на сервере.",
         );
       }
     } catch (e) {
-      console.warn("ИИ Управление: не удалось выдать роль стажёра:", member.id, e);
+      console.warn("ИИ Управление: не удалось выдать роль при вступлении:", member.id, e);
+    }
+
+    try {
+      await syncVoiceLadderForMember(member);
+    } catch {
+      /* voice-ladder.json может отсутствовать */
     }
 
     try {

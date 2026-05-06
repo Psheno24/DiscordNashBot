@@ -1,21 +1,13 @@
-import {
-  Client,
-  Events,
-  GatewayIntentBits,
-  Partials,
-  type Interaction,
-} from "discord.js";
+import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { discordToken } from "./config.js";
-import { handleRoleCommand } from "./commands/role.js";
-import { handleNadzorCommand } from "./commands/nadzor.js";
-import { handleButtonInteraction } from "./interactions/buttons.js";
 import { registerMemberJoin } from "./listeners/memberJoin.js";
+import { registerVoiceLadder } from "./voice/voiceLadder.js";
 
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildModeration,
+    GatewayIntentBits.GuildVoiceStates,
   ],
   partials: [Partials.GuildMember],
 });
@@ -25,21 +17,6 @@ client.once(Events.ClientReady, (c) => {
 });
 
 registerMemberJoin(client);
-
-client.on(Events.InteractionCreate, async (interaction: Interaction) => {
-  if (interaction.isButton()) {
-    const handled = await handleButtonInteraction(interaction);
-    if (handled) return;
-  }
-
-  if (!interaction.isChatInputCommand()) return;
-  if (interaction.commandName === "role") {
-    await handleRoleCommand(interaction);
-    return;
-  }
-  if (interaction.commandName === "nadzor") {
-    await handleNadzorCommand(interaction);
-  }
-});
+registerVoiceLadder(client);
 
 client.login(discordToken());

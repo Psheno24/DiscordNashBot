@@ -6,9 +6,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "deploy-commands": "node dist/deploy-commands.js",
     "dev": "tsx watch src/index.ts",
-    "dev:deploy": "tsx src/deploy-commands.ts"
+    "clear-guild-commands": "node dist/clear-guild-commands.js"
   },
   "engines": {
     "node": ">=20"
