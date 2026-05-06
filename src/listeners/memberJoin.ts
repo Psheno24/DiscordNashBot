@@ -54,7 +54,7 @@ export function registerMemberJoin(client: Client) {
       console.warn("ИИ Управление: не удалось сменить ник:", member.id, e);
     }
 
-    const activityId = welcomeChannelId();
+    const activityId = welcomeChannelId(member.guild.id);
     if (activityId) {
       try {
         const ch = await member.guild.channels.fetch(activityId).catch(() => null);
@@ -75,7 +75,7 @@ export function registerMemberJoin(client: Client) {
   client.on(Events.GuildMemberRemove, async (member) => {
     if (member.user?.bot) return;
 
-    const activityId = welcomeChannelId();
+    const activityId = welcomeChannelId(member.guild.id);
     if (!activityId) return;
 
     const tag = member.user?.tag ?? member.user?.username ?? member.id;

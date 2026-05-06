@@ -1,4 +1,5 @@
 import "dotenv/config";
+import { getGuildConfig } from "./guildConfig/store.js";
 
 function req(name: string): string {
   const v = process.env[name];
@@ -15,7 +16,13 @@ function opt(name: string): string | undefined {
 }
 
 /** ID текстового канала: учёт вступлений и выбытий. Необязательно. */
-export const welcomeChannelId = () => opt("DISCORD_WELCOME_CHANNEL_ID");
+export const welcomeChannelId = (guildId?: string) =>
+  (guildId ? getGuildConfig(guildId).welcomeChannelId : undefined) ?? opt("DISCORD_WELCOME_CHANNEL_ID");
 
 /** ID канала «Нейроком контроль»: панель с кнопкой «Роли». Необязательно. */
-export const neuroControlChannelId = () => opt("DISCORD_NEUROCONTROL_CHANNEL_ID");
+export const neuroControlChannelId = (guildId?: string) =>
+  (guildId ? getGuildConfig(guildId).neuroControlChannelId : undefined) ?? opt("DISCORD_NEUROCONTROL_CHANNEL_ID");
+
+/** ID текстового канала: общая панель голосовой лестницы (кнопка «Моя лестница»). Необязательно. */
+export const voiceLadderChannelId = (guildId?: string) =>
+  (guildId ? getGuildConfig(guildId).voiceLadderChannelId : undefined) ?? opt("DISCORD_VOICE_LADDER_CHANNEL_ID");

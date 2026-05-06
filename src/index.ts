@@ -1,7 +1,13 @@
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { discordToken } from "./config.js";
 import { registerMemberJoin } from "./listeners/memberJoin.js";
-import { ensureNeuroPanel, handleNeuroButton } from "./neurocontrol/panel.js";
+import {
+  ensureNeuroPanel,
+  handleNeuroButton,
+  handleNeuroSettingsButton,
+  handleNeuroSettingsSelect,
+} from "./neurocontrol/panel.js";
+import { ensureVoiceLadderPanel, handleVoiceLadderButton } from "./voice/panel.js";
 import { registerVoiceLadder } from "./voice/voiceLadder.js";
 
 const client = new Client({
@@ -16,15 +22,30 @@ const client = new Client({
 client.once(Events.ClientReady, async (c) => {
   console.log(`ИИ Управление на связи: ${c.user.tag}`);
   await ensureNeuroPanel(c);
+  await ensureVoiceLadderPanel(c);
 });
 
 registerMemberJoin(client);
 registerVoiceLadder(client);
 
 client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isButton()) return;
   try {
-    await handleNeuroButton(interaction);
+    if (interaction.isButton()) {
+      const handled =
+        (await handleNeuroButton(interaction)) ||
+        (await handleNeuroSettingsButton(interaction)) ||
+        (await handleVoiceLadderButton(interaction));
+      if (!handled) return;
+      return;
+    }
+
+    if (interaction.isChannelSelectMenu()) {
+      const handled = await handleNeuroSettingsSelect(interaction);
+      if (!handled) return;
+      return;
+    }
+
+    return;
   } catch (e) {
     console.error("ИИ Управление: кнопка панели:", e);
   }
