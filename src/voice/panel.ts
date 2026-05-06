@@ -2,8 +2,10 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ChannelType,
   EmbedBuilder,
   MessageFlags,
+  ThreadAutoArchiveDuration,
   type ButtonInteraction,
   type Client,
   type Guild,
@@ -14,6 +16,7 @@ import { loadVoiceLadder } from "./loadLadder.js";
 import type { VoiceLadderTier } from "./types.js";
 import { getVoiceSeconds } from "./timeStore.js";
 import { getVoiceLadderPanelMessageId, setVoiceLadderPanelMessageId } from "./panelStore.js";
+import { getUserVoicePanel, setUserVoicePanel } from "./userPanelStore.js";
 
 export const VOICE_LADDER_BUTTON_ME = "voiceLadder:me";
 
@@ -57,11 +60,20 @@ function buildPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
   ];
 }
 
+function threadNameFor(member: GuildMember): string {
+  const base = (member.user.username || member.id).toLowerCase();
+  const safe = base.replace(/[^a-z0-9а-яё_-]/gi, "-").slice(0, 40) || member.id;
+  return `лестница-${safe}`;
+}
+
 function buildTierRows(ladder: VoiceLadderTier[]): ActionRowBuilder<ButtonBuilder>[] {
+  // Не показываем "нулевую" стартовую роль (обычно Стажёр).
+  const visible = ladder.filter((t) => t.voiceMinutesTotal !== 0);
+
   // 4 ступени → 1 ряд. Если когда-нибудь станет >5, просто распилим по рядам.
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   let row = new ActionRowBuilder<ButtonBuilder>();
-  for (let i = 0; i < ladder.length; i++) {
+  for (let i = 0; i < visible.length; i++) {
     if (row.components.length >= 5) {
       rows.push(row);
       row = new ActionRowBuilder<ButtonBuilder>();
@@ -69,7 +81,7 @@ function buildTierRows(ladder: VoiceLadderTier[]): ActionRowBuilder<ButtonBuilde
     row.addComponents(
       new ButtonBuilder()
         .setCustomId(`voiceLadder:tier:${i}`)
-        .setLabel(ladder[i]!.roleName.slice(0, 80))
+        .setLabel(visible[i]!.roleName.slice(0, 80))
         .setStyle(ButtonStyle.Secondary),
     );
   }
@@ -198,10 +210,61 @@ export async function handleVoiceLadderButton(interaction: ButtonInteraction): P
   const totalSec = getVoiceSeconds(interaction.guildId, member.id);
   const totalMin = Math.floor(totalSec / 60);
 
+  const visible = ladder.filter((t) => t.voiceMinutesTotal !== 0);
+
   if (customId === VOICE_LADDER_BUTTON_ME) {
-    await interaction.reply({
+    // "Одно активное окно": создаём (или используем) приватную ветку и держим там одно актуальное сообщение.
+    const baseChannel = interaction.channel;
+    if (!baseChannel || baseChannel.type !== ChannelType.GuildText) {
+      await interaction.reply({
+        content: "Не могу открыть окно здесь. Нужен обычный текстовый канал сервера.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    let threadId: string | undefined;
+    const stored = getUserVoicePanel(interaction.guildId, member.id);
+    if (stored) threadId = stored.threadId;
+
+    const thread =
+      (threadId ? await interaction.guild?.channels.fetch(threadId).catch(() => null) : null) ??
+      (await baseChannel.threads
+        .create({
+          name: threadNameFor(member),
+          type: ChannelType.PrivateThread,
+          autoArchiveDuration: ThreadAutoArchiveDuration.OneWeek,
+          reason: "ИИ Управление: персональное окно голосовой лестницы",
+        })
+        .catch(() => null));
+
+    if (!thread || thread.type !== ChannelType.PrivateThread) {
+      await interaction.reply({
+        content:
+          "Не смог открыть приватную ветку. Проверь права бота: **Manage Threads** и доступ к каналу.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    // Добавляем пользователя в приватную ветку (на всякий случай).
+    await thread.members.add(member.id).catch(() => null);
+
+    // Удаляем старое активное сообщение (если есть) и отправляем новое.
+    if (stored?.messageId) {
+      const oldMsg = await thread.messages.fetch(stored.messageId).catch(() => null);
+      await oldMsg?.delete().catch(() => null);
+    }
+
+    const sent = await thread.send({
       embeds: [buildPersonalEmbed(member, ladder, totalMin)],
       components: buildTierRows(ladder),
+    });
+
+    setUserVoicePanel(interaction.guildId, member.id, { threadId: thread.id, messageId: sent.id });
+
+    await interaction.reply({
+      content: `Открыл твоё окно: <#${thread.id}>`,
       flags: MessageFlags.Ephemeral,
     });
     return true;
@@ -209,16 +272,22 @@ export async function handleVoiceLadderButton(interaction: ButtonInteraction): P
 
   const idxRaw = customId.slice("voiceLadder:tier:".length);
   const idx = Number.parseInt(idxRaw, 10);
-  const tier = Number.isFinite(idx) ? ladder[idx] : undefined;
+  const tier = Number.isFinite(idx) ? visible[idx] : undefined;
   if (!tier) {
     await interaction.reply({ content: "Не нашёл эту ступень (возможно, лестница обновилась).", flags: MessageFlags.Ephemeral });
     return true;
   }
 
-  await interaction.reply({
-    embeds: [buildTierEmbed(member, tier, totalMin)],
-    flags: MessageFlags.Ephemeral,
-  });
+  // Если кнопки нажаты в приватной ветке — обновляем сообщение (без накопления новых "окон").
+  if (interaction.message && interaction.channel?.type === ChannelType.PrivateThread) {
+    await interaction.update({
+      embeds: [buildTierEmbed(member, tier, totalMin)],
+      components: buildTierRows(ladder),
+    });
+    return true;
+  }
+
+  await interaction.reply({ embeds: [buildTierEmbed(member, tier, totalMin)], flags: MessageFlags.Ephemeral });
   return true;
 }
 
