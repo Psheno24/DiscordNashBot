@@ -1,0 +1,208 @@
+{
+  "meta": {
+    "setting": "Альтернативная кибер-СССР вселенная",
+    "note": "Роль «Генсек» не из каталога — создаётся вручную; бот её не удаляет и владельца не трогает. НЭП убран."
+  },
+  "server": {
+    "categories": {
+      "admin": "Административные дела",
+      "publicRoot": "Текстовые каналы"
+    },
+    "channels": {
+      "adminPanel": {
+        "name": "пульт-красноармейца",
+        "topic": "Секретный пульт: развёртывание, синхронизация ролей и служебные кнопки. Доступ ограничен высшим составом."
+      },
+      "publicPanel": {
+        "name": "терминал-наркомата",
+        "topic": "Народный терминал: справки и взаимодействие с ботом без доступа к администрированию."
+      }
+    },
+    "adminVisibilityRoles": ["politburo", "tsenzor", "sekretar"]
+  },
+  "layers": {
+    "apparatus": "Штаб — советская номенклатура, ручная выдача.",
+    "progression": "Лестница — авто по правилам (позже); одна основная ступень.",
+    "honored": "Почётный статус — вручную заслуженным гостям.",
+    "vestment": "Нашивки — по заявке/ивенту.",
+    "disciplinary": "Санкция — только модерация.",
+    "system": "Роль учётной записи бота."
+  },
+  "proposal": {
+    "ladder": ["Стажёр", "Участник", "Активист", "Доверенный"],
+    "honored": ["Почётный гость"],
+    "staff": ["Секретарь", "Цензор", "Политбюро"],
+    "bot": "ИИ Управление",
+    "vestments": ["Историк", "Организатор"],
+    "disciplinary": ["Нарушитель"]
+  },
+  "roleOrderTopToBottom": [
+    "ii_upravlenie",
+    "politburo",
+    "tsenzor",
+    "sekretar",
+    "pochetyy_gost",
+    "doverenny",
+    "aktivist",
+    "uchastnik",
+    "stazhyr",
+    "istorik",
+    "organizer",
+    "narushitel"
+  ],
+  "roles": [
+    {
+      "key": "ii_upravlenie",
+      "name": "ИИ Управление",
+      "layer": "system",
+      "assignment": "Учётная запись бота",
+      "color": "1A237E",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": ["Administrator"],
+      "discordDescription": "Верхний уровень автоматизации сервера; исполняет приказы каталога."
+    },
+    {
+      "key": "politburo",
+      "name": "Политбюро",
+      "layer": "apparatus",
+      "assignment": "Ручное",
+      "color": "B71C1C",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": ["Administrator"],
+      "discordDescription": "Высший административный контур: сервер, роли, каналы, санкции."
+    },
+    {
+      "key": "tsenzor",
+      "name": "Цензор",
+      "layer": "apparatus",
+      "assignment": "Ручное",
+      "color": "C62828",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": [
+        "KickMembers",
+        "BanMembers",
+        "ModerateMembers",
+        "ManageMessages",
+        "ManageThreads",
+        "ManageNicknames",
+        "ViewAuditLog",
+        "ManageChannels",
+        "ViewChannel",
+        "Connect",
+        "Speak"
+      ],
+      "discordDescription": "Модерация: чат, голос, тайм-ауты, порядок в каналах."
+    },
+    {
+      "key": "sekretar",
+      "name": "Секретарь",
+      "layer": "apparatus",
+      "assignment": "Ручное",
+      "color": "6D4C41",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": [
+        "ModerateMembers",
+        "ManageMessages",
+        "ManageThreads",
+        "ManageNicknames",
+        "ViewChannel",
+        "Connect",
+        "Speak",
+        "ManageRoles"
+      ],
+      "discordDescription": "Помощь штабу: жалобы, поддержка; роли ниже по иерархии."
+    },
+    {
+      "key": "pochetyy_gost",
+      "name": "Почётный гость",
+      "layer": "honored",
+      "assignment": "Ручное",
+      "color": "F9A825",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": ["ViewChannel", "Connect", "Speak", "UseVAD", "Stream"],
+      "discordDescription": "Заслуженный гость без полномочий штаба."
+    },
+    {
+      "key": "doverenny",
+      "name": "Доверенный",
+      "layer": "progression",
+      "assignment": "Авто",
+      "color": "2E7D32",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": ["ViewChannel", "Connect", "Speak", "UseVAD", "Stream"],
+      "discordDescription": "Высшая ступень доверия на лестнице."
+    },
+    {
+      "key": "aktivist",
+      "name": "Активист",
+      "layer": "progression",
+      "assignment": "Авто",
+      "color": "388E3C",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": ["ViewChannel", "Connect", "Speak", "UseVAD"],
+      "discordDescription": "Подтверждённая активность."
+    },
+    {
+      "key": "uchastnik",
+      "name": "Участник",
+      "layer": "progression",
+      "assignment": "Авто",
+      "color": "1565C0",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": ["ViewChannel", "Connect", "Speak", "UseVAD"],
+      "discordDescription": "Базовый полноценный доступ."
+    },
+    {
+      "key": "stazhyr",
+      "name": "Стажёр",
+      "layer": "progression",
+      "assignment": "Авто при входе",
+      "color": "546E7A",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": ["ViewChannel", "Connect", "Speak", "UseVAD"],
+      "discordDescription": "Низшая ступень: первичный контур после вступления."
+    },
+    {
+      "key": "narushitel",
+      "name": "Нарушитель",
+      "layer": "disciplinary",
+      "assignment": "Ручная санкция",
+      "color": "4A148C",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": ["ViewChannel", "Connect", "Speak"],
+      "discordDescription": "Дисциплинарная метка; снимается решением модерации."
+    },
+    {
+      "key": "istorik",
+      "name": "Историк",
+      "layer": "vestment",
+      "assignment": "Ручное / заявка",
+      "color": "37474F",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": ["ViewChannel", "Connect", "Speak", "UseVAD"],
+      "discordDescription": "Эксперт по историческому контексту."
+    },
+    {
+      "key": "organizer",
+      "name": "Организатор",
+      "layer": "vestment",
+      "assignment": "Ручное",
+      "color": "00695C",
+      "hoist": true,
+      "mentionable": false,
+      "permissions": ["ViewChannel", "Connect", "Speak", "ManageChannels", "ManageEvents"],
+      "discordDescription": "Мероприятия; каналы — по регламенту в отведённых зонах."
+    }
+  ]
+}
