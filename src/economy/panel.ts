@@ -164,19 +164,22 @@ function buildFocusRows(cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(ECON_BUTTON_FOCUS_ROLE)
-        .setLabel(cur === "role" ? "Роль ✓" : "Роль")
+        .setLabel("Роль")
         .setEmoji("🎖️")
-        .setStyle(cur === "role" ? ButtonStyle.Primary : ButtonStyle.Primary),
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(cur === "role"),
       new ButtonBuilder()
         .setCustomId(ECON_BUTTON_FOCUS_BALANCE)
-        .setLabel(cur === "balance" ? "Баланс ✓" : "Баланс")
+        .setLabel("Баланс")
         .setEmoji("⚖️")
-        .setStyle(cur === "balance" ? ButtonStyle.Secondary : ButtonStyle.Secondary),
+        .setStyle(ButtonStyle.Danger)
+        .setDisabled(cur === "balance"),
       new ButtonBuilder()
         .setCustomId(ECON_BUTTON_FOCUS_MONEY)
-        .setLabel(cur === "money" ? "Деньги ✓" : "Деньги")
+        .setLabel("Деньги")
         .setEmoji("💰")
-        .setStyle(cur === "money" ? ButtonStyle.Success : ButtonStyle.Success),
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(cur === "money"),
     ),
     ...buildProfileHubRows("focus"),
   ];
