@@ -165,15 +165,18 @@ function buildFocusRows(cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
       new ButtonBuilder()
         .setCustomId(ECON_BUTTON_FOCUS_ROLE)
         .setLabel(cur === "role" ? "Роль ✓" : "Роль")
-        .setStyle(cur === "role" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+        .setEmoji("🎖️")
+        .setStyle(cur === "role" ? ButtonStyle.Primary : ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(ECON_BUTTON_FOCUS_BALANCE)
         .setLabel(cur === "balance" ? "Баланс ✓" : "Баланс")
-        .setStyle(cur === "balance" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+        .setEmoji("⚖️")
+        .setStyle(cur === "balance" ? ButtonStyle.Secondary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(ECON_BUTTON_FOCUS_MONEY)
         .setLabel(cur === "money" ? "Деньги ✓" : "Деньги")
-        .setStyle(cur === "money" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+        .setEmoji("💰")
+        .setStyle(cur === "money" ? ButtonStyle.Success : ButtonStyle.Success),
     ),
     ...buildProfileHubRows("focus"),
   ];
@@ -293,6 +296,8 @@ function buildLadderEmbed(member: GuildMember): EmbedBuilder {
   lines.push("");
   lines.push("Пороги:");
   for (const t of ladder) {
+    // "Стажёр" (порог 0) есть у всех — не показываем.
+    if (t.voiceMinutesTotal <= 0) continue;
     lines.push(`- **${t.roleName}**: ${fmt(t.voiceMinutesTotal)} СР`);
   }
 
