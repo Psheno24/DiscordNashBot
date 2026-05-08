@@ -100,6 +100,22 @@ function buildTerminalPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
   ];
 }
 
+function buildTerminalPublicEmbed(guildName: string): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Терминал страны")
+    .setDescription(["Нажми кнопку ниже — откроется **твоё личное меню** управления."].join("\n"))
+    .setFooter({ text: `Сервер: ${guildName}` });
+}
+
+function buildTerminalPublicRows(): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Мой профиль").setStyle(ButtonStyle.Primary),
+    ),
+  ];
+}
+
 function buildMenuRow(): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
@@ -282,7 +298,7 @@ const JOBS_STARTER: JobDef[] = [
     title: "Курьер",
     baseCooldownMs: 3 * 60 * 60 * 1000,
     // Тир-1: кликабельная прибыль, но с обязательными расходами.
-    basePayoutRub: 70,
+    basePayoutRub: 80,
     description:
       [
         "Активная работа: чем чаще выходишь на смену — тем больше заработок.",
@@ -336,7 +352,7 @@ const JOBS_TIER2: JobDef[] = [
     title: "Диспетчер",
     baseCooldownMs: 6 * 60 * 60 * 1000,
     // Тир-2: меньше кликов, стабильнее, чуть выгоднее за день без “разрыва”.
-    basePayoutRub: 150,
+    basePayoutRub: 140,
     description: ["Самая стабильная работа тира 2. Без штрафов и без рандома."].join("\n"),
     reqSkills: { communication: 2 },
   },
@@ -530,7 +546,10 @@ function buildJobInfoRows(u: ReturnType<typeof getEconomyUser>, jobId: AnyJobId,
   return [row, buildMenuRow()];
 }
 
-function buildCurrentJobEmbed(member: GuildMember): EmbedBuilder {
+function buildCurrentJobEmbed(
+  member: GuildMember,
+  opts?: { lastShiftDeltaRub?: number; lastShiftNotes?: string[] },
+): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   if (!u.jobId) {
     return new EmbedBuilder()
@@ -547,10 +566,19 @@ function buildCurrentJobEmbed(member: GuildMember): EmbedBuilder {
   const lines = [
     `Текущая работа: **${def.title}**`,
     `Опыт смен: **${exp}**`,
+    `Баланс: **${fmt(u.rubles)} ₽**`,
     `Оплата за смену: **${def.basePayoutRub} ₽**`,
     `КД смены: **${Math.round(cd / 60000)} мин**`,
     state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
   ];
+
+  if (opts?.lastShiftDeltaRub != null) {
+    lines.push("");
+    lines.push(`Последняя смена: **${formatDelta(opts.lastShiftDeltaRub)}**`);
+    if (opts.lastShiftNotes?.length) {
+      lines.push(`Детали: ${opts.lastShiftNotes.join(", ")}`);
+    }
+  }
   if (u.jobId === "courier") {
     const simLeft = u.courierSimShiftsLeft ?? 0;
     const bikeLeft = u.courierBikeShiftsLeft ?? 0;
@@ -717,7 +745,7 @@ export async function ensureEconomyTerminalPanel(client: Client) {
     if (!ch?.isTextBased() || ch.isDMBased()) continue;
     if (!ch.isSendable()) continue;
 
-    const payload = { embeds: [buildTerminalPanelEmbed(ch.guild.name)], components: buildTerminalPanelRows() };
+    const payload = { embeds: [buildTerminalPublicEmbed(ch.guild.name)], components: buildTerminalPublicRows() };
 
     const storedId = getEconomyTerminalPanelMessageId(chId);
     if (storedId) {
@@ -827,10 +855,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   const id = interaction.customId;
 
   if (id === ECON_BUTTON_MENU) {
-    await interaction.reply({
+    await replyOrUpdate(interaction, {
       embeds: [buildTerminalPanelEmbed(member.guild.name)],
       components: buildTerminalPanelRows(),
-      flags: MessageFlags.Ephemeral,
     });
     return true;
   }
@@ -1073,7 +1100,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       text: `${member.toString()} вышел на смену: **${def.title}** (${formatDelta(total)}).${notes.length ? ` (${notes.join(", ")})` : ""}`,
     });
     await ensureEconomyFeedPanel(interaction.client);
-    await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+    // Показать игроку в его же окне: сколько получил и текущий баланс.
+    const after = getEconomyUser(guildId, member.id);
+    const embed = buildCurrentJobEmbed(member, { lastShiftDeltaRub: total, lastShiftNotes: notes });
+    // В embed баланс/эксп считаются через store; убедимся, что берем уже обновлённый rubles.
+    // (buildCurrentJobEmbed сам читает store, который уже обновили)
+    void after;
+    await replyOrUpdate(interaction, { embeds: [embed], components: buildCurrentJobRows(member) });
     return true;
   }
 
