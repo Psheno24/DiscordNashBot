@@ -3,10 +3,10 @@ import { join } from "node:path";
 
 export type FeedEventType =
   | "voice:earn"
-  | "focus:set"
   | "bet:created"
   | "bet:placed"
   | "bet:resolved"
+  | "job:shift"
   | "admin:budget";
 
 export interface FeedEvent {

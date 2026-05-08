@@ -3,6 +3,9 @@ import { join } from "node:path";
 
 export type FocusPreset = "role" | "balance" | "money";
 
+export type JobId = "courier" | "waiter" | "watchman";
+export type SkillId = "communication" | "logistics" | "discipline";
+
 export interface EconomyUser {
   psTotal: number;
   rubles: number;
@@ -11,6 +14,24 @@ export interface EconomyUser {
   voiceDay?: string;
   /** Минуты голоса, уже учтённые сегодня для расчёта PS (diminishing returns) */
   voiceMinutesToday?: number;
+
+  jobId?: JobId;
+  jobChosenAt?: number;
+  /** Последний выход на смену (unix ms) */
+  lastWorkAt?: number;
+
+  /** День, когда была оплачена симка курьера (UTC YYYY-MM-DD) */
+  courierSimShiftsLeft?: number;
+  /** Сколько смен курьера осталось с активным электровелом (снижение КД). */
+  courierBikeShiftsLeft?: number;
+
+  /** Навыки: skillId → level (1..10). Отсутствует = 0. */
+  skills?: Partial<Record<SkillId, number>>;
+  /** Последняя тренировка навыков (unix ms) */
+  lastTrainAt?: number;
+
+  /** Опыт работы: jobId → кол-во смен на этой работе */
+  jobExp?: Partial<Record<string, number>>;
 }
 
 interface StoreShape {
@@ -38,12 +59,37 @@ function writeStore(s: StoreShape) {
 }
 
 function normalizeUser(u: Partial<EconomyUser> | undefined): EconomyUser {
+  const rawSkills = u?.skills ?? {};
+  const skills: Partial<Record<SkillId, number>> = {};
+  for (const k of ["communication", "logistics", "discipline"] as const) {
+    const v = (rawSkills as any)?.[k];
+    if (Number.isFinite(v) && v > 0) skills[k] = Math.min(10, Math.floor(v));
+  }
+
+  const rawJobExp = (u as any)?.jobExp ?? {};
+  const jobExp: Partial<Record<string, number>> = {};
+  for (const [k, v] of Object.entries(rawJobExp)) {
+    if (typeof k !== "string") continue;
+    if (!Number.isFinite(v) || (v as number) <= 0) continue;
+    jobExp[k] = Math.floor(v as number);
+  }
+
   return {
     psTotal: Math.max(0, Math.floor(u?.psTotal ?? 0)),
     rubles: Math.max(0, Math.floor(u?.rubles ?? 0)),
     focus: (u?.focus ?? "balance") as FocusPreset,
     voiceDay: typeof u?.voiceDay === "string" ? u.voiceDay : undefined,
     voiceMinutesToday: Number.isFinite(u?.voiceMinutesToday) ? Math.max(0, Math.floor(u!.voiceMinutesToday!)) : undefined,
+    jobId: (u?.jobId === "courier" || u?.jobId === "waiter" || u?.jobId === "watchman" ? u.jobId : undefined) as
+      | JobId
+      | undefined,
+    jobChosenAt: Number.isFinite(u?.jobChosenAt) ? Math.max(0, Math.floor(u!.jobChosenAt!)) : undefined,
+    lastWorkAt: Number.isFinite(u?.lastWorkAt) ? Math.max(0, Math.floor(u!.lastWorkAt!)) : undefined,
+    courierSimShiftsLeft: Number.isFinite(u?.courierSimShiftsLeft) ? Math.max(0, Math.floor(u!.courierSimShiftsLeft!)) : undefined,
+    courierBikeShiftsLeft: Number.isFinite(u?.courierBikeShiftsLeft) ? Math.max(0, Math.floor(u!.courierBikeShiftsLeft!)) : undefined,
+    skills,
+    lastTrainAt: Number.isFinite(u?.lastTrainAt) ? Math.max(0, Math.floor(u!.lastTrainAt!)) : undefined,
+    jobExp,
   };
 }
 
@@ -51,6 +97,12 @@ export function getEconomyUser(guildId: string, userId: string): EconomyUser {
   const s = readStore();
   const raw = s.guilds[guildId]?.[userId];
   return normalizeUser(raw);
+}
+
+export function listEconomyUsers(guildId: string): Array<{ userId: string; user: EconomyUser }> {
+  const s = readStore();
+  const g = s.guilds[guildId] ?? {};
+  return Object.entries(g).map(([userId, u]) => ({ userId, user: normalizeUser(u) }));
 }
 
 export function setEconomyUser(guildId: string, userId: string, next: EconomyUser): EconomyUser {

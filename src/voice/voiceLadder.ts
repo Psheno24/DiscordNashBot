@@ -1,4 +1,4 @@
-import { ChannelType, Events, type Client, type Guild, type GuildMember } from "discord.js";
+import { ChannelType, Events, type Client, type Guild, type GuildMember, type VoiceState } from "discord.js";
 import { loadVoiceLadder } from "./loadLadder.js";
 import type { VoiceLadderTier } from "./types.js";
 import { addVoiceSeconds } from "./timeStore.js";
@@ -18,6 +18,12 @@ function isCountableChannelId(guild: Guild, channelId: string | null): boolean {
   if (guild.afkChannelId === channelId) return false;
   const ch = guild.channels.cache.get(channelId);
   return ch?.type === ChannelType.GuildVoice;
+}
+
+function isCountableState(state: VoiceState): boolean {
+  // Не считаем, если self mute/deaf — пользователь “в канале”, но не участвует.
+  if (state.selfMute || state.selfDeaf) return false;
+  return isCountableChannelId(state.guild, state.channelId);
 }
 
 function resolveTierRoleIds(guild: Guild, ladder: VoiceLadderTier[]): Map<string, string> {
@@ -102,8 +108,8 @@ export function registerVoiceLadder(client: Client) {
       if (!guild.channels.cache.has(id)) await guild.channels.fetch(id).catch(() => null);
     }
 
-    const wasOk = isCountableChannelId(guild, oldState.channelId);
-    const nowOk = isCountableChannelId(guild, newState.channelId);
+    const wasOk = isCountableState(oldState);
+    const nowOk = isCountableState(newState);
     const key = sessionKey(guild.id, member.id);
 
     if (wasOk && !nowOk) {

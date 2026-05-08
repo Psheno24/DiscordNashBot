@@ -17,22 +17,26 @@ import { economyFeedChannelId } from "../config.js";
 import { appendFeedEvent } from "../economy/feedStore.js";
 import { ensureEconomyFeedPanel } from "../economy/panel.js";
 import { getEconomyUser, patchEconomyUser } from "../economy/userStore.js";
-import { getBetEvent, upsertBetEvent, type BetEvent } from "./store.js";
+import { getBetEvent, listBetEvents, upsertBetEvent, type BetEvent } from "./store.js";
 
 export const NEURO_ADMIN_BUTTON_MENU = "neuroAdmin:menu";
 export const NEURO_ADMIN_BUTTON_CREATE_BET = "neuroAdmin:createBet";
 export const NEURO_ADMIN_BUTTON_GRANT_RUB = "neuroAdmin:grantRub";
+export const NEURO_ADMIN_BUTTON_BETS = "neuroAdmin:bets";
 
 const MODAL_CREATE_BET = "modal:bet:create";
 const MODAL_GRANT_RUB = "modal:econ:grantRub";
 
 const BET_BUTTON_PICK_PREFIX = "bet:pick:";
-const BET_BUTTON_RESOLVE_PREFIX = "bet:resolve:";
-const BET_BUTTON_CANCEL_PREFIX = "bet:cancel:";
 
 const MODAL_BET_AMOUNT_PREFIX = "modal:bet:amount:";
 
 const BET_COLOR = 0xb71c1c;
+
+const ADMIN_BET_MANAGE_PREFIX = "neuroAdmin:bet:";
+const ADMIN_BET_CHOOSE_PREFIX = "neuroAdmin:betChoose:";
+const ADMIN_BET_CONFIRM_PREFIX = "neuroAdmin:betConfirm:";
+const ADMIN_BET_CANCEL_PREFIX = "neuroAdmin:betCancel:";
 
 function canAdmin(interaction: ButtonInteraction | ModalSubmitInteraction): boolean {
   return (
@@ -53,6 +57,7 @@ function buildAdminMenuRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_CREATE_BET).setLabel("Создать ставку").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_BETS).setLabel("Ставки").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_GRANT_RUB).setLabel("Выдать ₽").setStyle(ButtonStyle.Secondary),
     ),
   ];
@@ -60,7 +65,20 @@ function buildAdminMenuRows(): ActionRowBuilder<ButtonBuilder>[] {
 
 export async function handleNeuroAdminButton(interaction: ButtonInteraction): Promise<boolean> {
   const id = interaction.customId;
-  if (![NEURO_ADMIN_BUTTON_MENU, NEURO_ADMIN_BUTTON_CREATE_BET, NEURO_ADMIN_BUTTON_GRANT_RUB].includes(id)) return false;
+  if (
+    ![
+      NEURO_ADMIN_BUTTON_MENU,
+      NEURO_ADMIN_BUTTON_CREATE_BET,
+      NEURO_ADMIN_BUTTON_GRANT_RUB,
+      NEURO_ADMIN_BUTTON_BETS,
+    ].includes(id) &&
+    !id.startsWith(ADMIN_BET_MANAGE_PREFIX) &&
+    !id.startsWith(ADMIN_BET_CHOOSE_PREFIX) &&
+    !id.startsWith(ADMIN_BET_CONFIRM_PREFIX) &&
+    !id.startsWith(ADMIN_BET_CANCEL_PREFIX)
+  ) {
+    return false;
+  }
 
   if (!interaction.inGuild() || !interaction.guildId) {
     await interaction.reply({ content: "Админ-меню доступно только на сервере.", flags: MessageFlags.Ephemeral });
@@ -76,6 +94,37 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
     return true;
   }
 
+  if (id === NEURO_ADMIN_BUTTON_BETS) {
+    const guildId = interaction.guildId;
+    const events = listBetEvents(guildId).filter((e) => e.status === "open").sort((a, b) => b.createdAt - a.createdAt);
+    const embed = new EmbedBuilder()
+      .setColor(0x0d47a1)
+      .setTitle("Ставки: управление")
+      .setDescription(events.length ? "Выберите ставку ниже." : "Открытых ставок нет.");
+
+    const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+    if (events.length) {
+      const row = new ActionRowBuilder<ButtonBuilder>();
+      for (const ev of events.slice(0, 5)) {
+        row.addComponents(
+          new ButtonBuilder()
+            .setCustomId(`${ADMIN_BET_MANAGE_PREFIX}${ev.id}`)
+            .setLabel(ev.title.slice(0, 80))
+            .setStyle(ButtonStyle.Secondary),
+        );
+      }
+      rows.push(row);
+    }
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_MENU).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      ),
+    );
+
+    await interaction.reply({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
   if (id === NEURO_ADMIN_BUTTON_CREATE_BET) {
     const modal = new ModalBuilder().setCustomId(MODAL_CREATE_BET).setTitle("Создать ставку");
     modal.addComponents(
@@ -83,15 +132,23 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
         new TextInputBuilder().setCustomId("title").setLabel("Название события").setStyle(TextInputStyle.Short).setRequired(true),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("a").setLabel("Исход A (например Team A)").setStyle(TextInputStyle.Short).setRequired(true),
-      ),
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("b").setLabel("Исход B (например Team B)").setStyle(TextInputStyle.Short).setRequired(true),
+        new TextInputBuilder()
+          .setCustomId("a")
+          .setLabel("Исход A (пример: Team A | 1.8)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
-          .setCustomId("closeMin")
-          .setLabel("Закрыть через минут (например 120)")
+          .setCustomId("b")
+          .setLabel("Исход B (пример: Team B | 2.1)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("closeAt")
+          .setLabel("Закрытие: +минуты или YYYY-MM-DD HH:MM")
           .setStyle(TextInputStyle.Short)
           .setRequired(true),
       ),
@@ -121,6 +178,40 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
   return false;
 }
 
+function parseOptionWithOdds(raw: string, fallbackId: string): { id: string; label: string; odds: number } | undefined {
+  const t = raw.trim();
+  if (!t) return undefined;
+  const parts = t.split("|").map((x) => x.trim()).filter(Boolean);
+  const label = (parts[0] ?? "").slice(0, 80);
+  if (!label) return undefined;
+  const oddsRaw = parts[1] ?? "2.0";
+  const odds = Number.parseFloat(oddsRaw.replace(",", "."));
+  if (!Number.isFinite(odds) || odds < 1.01 || odds > 100) return undefined;
+  return { id: fallbackId, label, odds };
+}
+
+function parseCloseAt(raw: string, now = Date.now()): number | undefined {
+  const t = raw.trim();
+  if (!t) return undefined;
+  if (t.startsWith("+")) {
+    const min = Number.parseInt(t.slice(1), 10);
+    if (!Number.isFinite(min) || min <= 0) return undefined;
+    return now + min * 60_000;
+  }
+  // YYYY-MM-DD HH:MM (локальное время сервера)
+  const m = t.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/);
+  if (!m) return undefined;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const hh = Number(m[4]);
+  const mm = Number(m[5]);
+  const dt = new Date(y, mo - 1, d, hh, mm, 0, 0);
+  const ts = dt.getTime();
+  if (!Number.isFinite(ts) || ts <= now) return undefined;
+  return ts;
+}
+
 function parseUserId(raw: string): string | undefined {
   const m = raw.trim().match(/^<@!?(\d+)>$/);
   if (m) return m[1];
@@ -138,13 +229,14 @@ function buildBetEmbed(ev: BetEvent): EmbedBuilder {
         : "Событие отменено.";
 
   const total = Object.values(ev.bets).reduce((s, b) => s + b.amount, 0);
+  const opts = ev.options.map((o) => `• **${o.label}** — x${o.odds.toLocaleString("ru-RU")}`).join("\n");
   return new EmbedBuilder()
     .setColor(BET_COLOR)
     .setTitle(`Ставка: ${ev.title}`)
-    .setDescription([statusLine, "", `Банк: **${total.toLocaleString("ru-RU")} ₽**`].join("\n"));
+    .setDescription([statusLine, "", "Коэффициенты:", opts, "", `Банк: **${total.toLocaleString("ru-RU")} ₽**`].join("\n"));
 }
 
-function buildBetRows(ev: BetEvent, includeAdminControls: boolean): ActionRowBuilder<ButtonBuilder>[] {
+function buildBetRows(ev: BetEvent): ActionRowBuilder<ButtonBuilder>[] {
   const row1 = new ActionRowBuilder<ButtonBuilder>();
   for (const opt of ev.options.slice(0, 3)) {
     row1.addComponents(
@@ -156,37 +248,12 @@ function buildBetRows(ev: BetEvent, includeAdminControls: boolean): ActionRowBui
     );
   }
 
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [row1];
-  if (includeAdminControls) {
-    const row2 = new ActionRowBuilder<ButtonBuilder>();
-    for (const opt of ev.options.slice(0, 3)) {
-      row2.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`${BET_BUTTON_RESOLVE_PREFIX}${ev.id}:${opt.id}`)
-          .setLabel(`Решить: ${opt.label}`)
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(ev.status !== "open"),
-      );
-    }
-    row2.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${BET_BUTTON_CANCEL_PREFIX}${ev.id}`)
-        .setLabel("Отмена")
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(ev.status !== "open"),
-    );
-    rows.push(row2);
-  }
-  return rows;
+  return [row1];
 }
 
 export async function handleBetButton(interaction: ButtonInteraction): Promise<boolean> {
   const id = interaction.customId;
-  if (
-    !id.startsWith(BET_BUTTON_PICK_PREFIX) &&
-    !id.startsWith(BET_BUTTON_RESOLVE_PREFIX) &&
-    !id.startsWith(BET_BUTTON_CANCEL_PREFIX)
-  ) {
+  if (!id.startsWith(BET_BUTTON_PICK_PREFIX)) {
     return false;
   }
 
@@ -231,86 +298,6 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
     return true;
   }
 
-  if (id.startsWith(BET_BUTTON_CANCEL_PREFIX)) {
-    if (!canAdmin(interaction)) {
-      await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    const eventId = id.slice(BET_BUTTON_CANCEL_PREFIX.length);
-    const ev = eventId ? getBetEvent(guildId, eventId) : undefined;
-    if (!ev) {
-      await interaction.reply({ content: "Событие не найдено.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    if (ev.status !== "open") {
-      await interaction.reply({ content: "Событие уже закрыто.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-
-    // Возврат ставок
-    for (const [userId, bet] of Object.entries(ev.bets)) {
-      const u = getEconomyUser(guildId, userId);
-      patchEconomyUser(guildId, userId, { rubles: u.rubles + bet.amount });
-    }
-
-    ev.status = "cancelled";
-    upsertBetEvent(ev);
-    appendFeedEvent({ ts: Date.now(), guildId, type: "bet:resolved", text: `Ставка «${ev.title}» отменена. Ставки возвращены.` });
-    await ensureEconomyFeedPanel(interaction.client);
-
-    await interaction.update({
-      embeds: [buildBetEmbed(ev)],
-      components: buildBetRows(ev, true),
-    });
-    return true;
-  }
-
-  if (id.startsWith(BET_BUTTON_RESOLVE_PREFIX)) {
-    if (!canAdmin(interaction)) {
-      await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    const rest = id.slice(BET_BUTTON_RESOLVE_PREFIX.length);
-    const [eventId, optionId] = rest.split(":");
-    if (!eventId || !optionId) return false;
-    const ev = getBetEvent(guildId, eventId);
-    if (!ev) {
-      await interaction.reply({ content: "Событие не найдено.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    if (ev.status !== "open") {
-      await interaction.reply({ content: "Событие уже закрыто.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-
-    const total = Object.values(ev.bets).reduce((s, b) => s + b.amount, 0);
-    const winners = Object.entries(ev.bets).filter(([, b]) => b.optionId === optionId);
-    const winnersSum = winners.reduce((s, [, b]) => s + b.amount, 0);
-
-    if (total > 0 && winnersSum > 0) {
-      for (const [userId, bet] of winners) {
-        const payout = Math.floor((bet.amount * total) / winnersSum);
-        const u = getEconomyUser(guildId, userId);
-        patchEconomyUser(guildId, userId, { rubles: u.rubles + payout });
-      }
-    }
-
-    ev.status = "resolved";
-    ev.winningOptionId = optionId;
-    upsertBetEvent(ev);
-    const winningLabel = ev.options.find((o) => o.id === optionId)?.label ?? optionId;
-    appendFeedEvent({
-      ts: Date.now(),
-      guildId,
-      type: "bet:resolved",
-      text: `Ставка «${ev.title}» решена: победил исход **${winningLabel}**.`,
-    });
-    await ensureEconomyFeedPanel(interaction.client);
-
-    await interaction.update({ embeds: [buildBetEmbed(ev)], components: buildBetRows(ev, true) });
-    return true;
-  }
-
   return false;
 }
 
@@ -329,12 +316,18 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
 
     const guildId = interaction.guildId;
     const title = interaction.fields.getTextInputValue("title").trim();
-    const a = interaction.fields.getTextInputValue("a").trim();
-    const b = interaction.fields.getTextInputValue("b").trim();
-    const closeMinRaw = interaction.fields.getTextInputValue("closeMin").trim();
-    const closeMin = Number.parseInt(closeMinRaw, 10);
-    if (!title || !a || !b || !Number.isFinite(closeMin) || closeMin <= 0) {
-      await interaction.reply({ content: "Некорректные поля (проверьте минуты/названия).", flags: MessageFlags.Ephemeral });
+    const aRaw = interaction.fields.getTextInputValue("a").trim();
+    const bRaw = interaction.fields.getTextInputValue("b").trim();
+    const closeAtRaw = interaction.fields.getTextInputValue("closeAt").trim();
+    const optA = parseOptionWithOdds(aRaw, "A");
+    const optB = parseOptionWithOdds(bRaw, "B");
+    const closesAt = parseCloseAt(closeAtRaw, Date.now());
+    if (!title || !optA || !optB || !closesAt) {
+      await interaction.reply({
+        content:
+          "Некорректные поля.\n- Исходы: `Название | 1.8`\n- Закрытие: `+120` или `2026-05-08 18:30`",
+        flags: MessageFlags.Ephemeral,
+      });
       return true;
     }
 
@@ -358,20 +351,17 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       id: eventId,
       guildId,
       title,
-      options: [
-        { id: "A", label: a.slice(0, 80) },
-        { id: "B", label: b.slice(0, 80) },
-      ],
+      options: [optA, optB],
       createdByUserId: interaction.user.id,
       createdAt: Date.now(),
-      closesAt: Date.now() + closeMin * 60_000,
+      closesAt,
       status: "open",
       bets: {},
     };
 
     const sent = await feed.send({
       embeds: [buildBetEmbed(ev)],
-      components: buildBetRows(ev, true),
+      components: buildBetRows(ev),
     });
     ev.channelId = sent.channelId;
     ev.messageId = sent.id;
@@ -476,7 +466,7 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       if (ch?.isTextBased() && !ch.isDMBased()) {
         const msg = await ch.messages.fetch(ev.messageId).catch(() => null);
         if (msg) {
-          await msg.edit({ embeds: [buildBetEmbed(ev)], components: buildBetRows(ev, true) }).catch(() => null);
+          await msg.edit({ embeds: [buildBetEmbed(ev)], components: buildBetRows(ev) }).catch(() => null);
         }
       }
     }
@@ -491,5 +481,164 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
 export async function ensureBetsHealth(client: Client) {
   void client;
   // placeholder: позже можно добавить авто-закрытие по времени и т.п.
+}
+
+export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): Promise<boolean> {
+  const id = interaction.customId;
+  if (
+    !id.startsWith(ADMIN_BET_MANAGE_PREFIX) &&
+    !id.startsWith(ADMIN_BET_CHOOSE_PREFIX) &&
+    !id.startsWith(ADMIN_BET_CONFIRM_PREFIX) &&
+    !id.startsWith(ADMIN_BET_CANCEL_PREFIX)
+  ) {
+    return false;
+  }
+  if (!interaction.inGuild() || !interaction.guildId) return false;
+  if (!canAdmin(interaction)) {
+    await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  const guildId = interaction.guildId;
+
+  if (id.startsWith(ADMIN_BET_MANAGE_PREFIX)) {
+    const eventId = id.slice(ADMIN_BET_MANAGE_PREFIX.length);
+    const ev = eventId ? getBetEvent(guildId, eventId) : undefined;
+    if (!ev) {
+      await interaction.reply({ content: "Ставка не найдена.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const embed = new EmbedBuilder()
+      .setColor(0x0d47a1)
+      .setTitle(`Ставка: ${ev.title}`)
+      .setDescription("Выберите победителя (только для админов).");
+
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ADMIN_BET_CHOOSE_PREFIX}${ev.id}:A`)
+        .setLabel(`Победитель: ${ev.options.find((o) => o.id === "A")?.label ?? "A"}`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(ev.status !== "open"),
+      new ButtonBuilder()
+        .setCustomId(`${ADMIN_BET_CHOOSE_PREFIX}${ev.id}:B`)
+        .setLabel(`Победитель: ${ev.options.find((o) => o.id === "B")?.label ?? "B"}`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(ev.status !== "open"),
+      new ButtonBuilder()
+        .setCustomId(`${ADMIN_BET_CANCEL_PREFIX}${ev.id}`)
+        .setLabel("Отменить ставку")
+        .setStyle(ButtonStyle.Danger)
+        .setDisabled(ev.status !== "open"),
+    );
+
+    await interaction.reply({
+      embeds: [embed],
+      components: [
+        row,
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_BETS).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  if (id.startsWith(ADMIN_BET_CHOOSE_PREFIX)) {
+    const rest = id.slice(ADMIN_BET_CHOOSE_PREFIX.length);
+    const [eventId, optionId] = rest.split(":");
+    const ev = eventId ? getBetEvent(guildId, eventId) : undefined;
+    if (!ev) {
+      await interaction.reply({ content: "Ставка не найдена.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (ev.status !== "open") {
+      await interaction.reply({ content: "Ставка уже закрыта.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const label = ev.options.find((o) => o.id === optionId)?.label ?? optionId;
+    const embed = new EmbedBuilder()
+      .setColor(0x0d47a1)
+      .setTitle("Подтверждение")
+      .setDescription(`Вы уверены, что победитель: **${label}**?\n\nСтавка: **${ev.title}**`);
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`${ADMIN_BET_CONFIRM_PREFIX}${ev.id}:${optionId}`).setLabel("Да, подтвердить").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(`${ADMIN_BET_MANAGE_PREFIX}${ev.id}`).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id.startsWith(ADMIN_BET_CANCEL_PREFIX)) {
+    const eventId = id.slice(ADMIN_BET_CANCEL_PREFIX.length);
+    const ev = eventId ? getBetEvent(guildId, eventId) : undefined;
+    if (!ev) {
+      await interaction.reply({ content: "Ставка не найдена.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (ev.status !== "open") {
+      await interaction.reply({ content: "Ставка уже закрыта.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    for (const [userId, bet] of Object.entries(ev.bets)) {
+      const u = getEconomyUser(guildId, userId);
+      patchEconomyUser(guildId, userId, { rubles: u.rubles + bet.amount });
+    }
+    ev.status = "cancelled";
+    upsertBetEvent(ev);
+    appendFeedEvent({ ts: Date.now(), guildId, type: "bet:resolved", text: `Ставка «${ev.title}» отменена. Ставки возвращены.` });
+    await ensureEconomyFeedPanel(interaction.client);
+    if (ev.channelId && ev.messageId) {
+      const ch = await interaction.client.channels.fetch(ev.channelId).catch(() => null);
+      if (ch?.isTextBased() && !ch.isDMBased()) {
+        const msg = await ch.messages.fetch(ev.messageId).catch(() => null);
+        if (msg) await msg.edit({ embeds: [buildBetEmbed(ev)], components: buildBetRows(ev) }).catch(() => null);
+      }
+    }
+    await interaction.reply({ content: "Ставка отменена.", flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id.startsWith(ADMIN_BET_CONFIRM_PREFIX)) {
+    const rest = id.slice(ADMIN_BET_CONFIRM_PREFIX.length);
+    const [eventId, optionId] = rest.split(":");
+    const ev = eventId ? getBetEvent(guildId, eventId) : undefined;
+    if (!ev) {
+      await interaction.reply({ content: "Ставка не найдена.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (ev.status !== "open") {
+      await interaction.reply({ content: "Ставка уже закрыта.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    // fixed-odds payouts: payout = amount * odds
+    const opt = ev.options.find((o) => o.id === optionId);
+    if (!opt) {
+      await interaction.reply({ content: "Исход не найден.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const winners = Object.entries(ev.bets).filter(([, b]) => b.optionId === optionId);
+    for (const [userId, bet] of winners) {
+      const payout = Math.floor(bet.amount * opt.odds);
+      const u = getEconomyUser(guildId, userId);
+      patchEconomyUser(guildId, userId, { rubles: u.rubles + payout });
+    }
+    ev.status = "resolved";
+    ev.winningOptionId = optionId;
+    upsertBetEvent(ev);
+    appendFeedEvent({ ts: Date.now(), guildId, type: "bet:resolved", text: `Ставка «${ev.title}» решена: победил исход **${opt.label}**.` });
+    await ensureEconomyFeedPanel(interaction.client);
+    if (ev.channelId && ev.messageId) {
+      const ch = await interaction.client.channels.fetch(ev.channelId).catch(() => null);
+      if (ch?.isTextBased() && !ch.isDMBased()) {
+        const msg = await ch.messages.fetch(ev.messageId).catch(() => null);
+        if (msg) await msg.edit({ embeds: [buildBetEmbed(ev)], components: buildBetRows(ev) }).catch(() => null);
+      }
+    }
+    await interaction.reply({ content: "Победитель зафиксирован, выплаты начислены.", flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  return false;
 }
 

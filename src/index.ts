@@ -9,8 +9,8 @@ import {
 } from "./neurocontrol/panel.js";
 import { ensureVoiceLadderPanel, handleVoiceLadderButton } from "./voice/panel.js";
 import { registerVoiceLadder } from "./voice/voiceLadder.js";
-import { ensureEconomyFeedPanel, ensureEconomyTerminalPanel, handleEconomyButton } from "./economy/panel.js";
-import { handleBetButton, handleBetModal, handleNeuroAdminButton } from "./bets/bets.js";
+import { ensureEconomyFeedPanel, ensureEconomyTerminalPanel, handleEconomyButton, handleEconomyModal } from "./economy/panel.js";
+import { handleBetButton, handleBetModal, handleNeuroAdminBetFlow, handleNeuroAdminButton } from "./bets/bets.js";
 
 const client = new Client({
   intents: [
@@ -41,6 +41,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         (await handleVoiceLadderButton(interaction)) ||
         (await handleEconomyButton(interaction)) ||
         (await handleNeuroAdminButton(interaction)) ||
+        (await handleNeuroAdminBetFlow(interaction)) ||
         (await handleBetButton(interaction));
       if (!handled) return;
       return;
@@ -53,7 +54,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isModalSubmit()) {
-      const handled = await handleBetModal(interaction);
+      const handled = (await handleBetModal(interaction)) || (await handleEconomyModal(interaction));
       if (!handled) return;
       return;
     }

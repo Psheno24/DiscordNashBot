@@ -12,7 +12,6 @@ import {
 import { voiceLadderChannelId } from "../config.js";
 import { loadVoiceLadder } from "./loadLadder.js";
 import type { VoiceLadderTier } from "./types.js";
-import { getVoiceSeconds } from "./timeStore.js";
 import { getEconomyUser } from "../economy/userStore.js";
 import { getVoiceLadderPanelMessageId, setVoiceLadderPanelMessageId } from "./panelStore.js";
 
@@ -45,7 +44,7 @@ function buildPanelEmbed(guild: Guild): EmbedBuilder {
     .setDescription(
       [
         "Нажми кнопку ниже, чтобы получить **персональную** статистику и список ступеней.",
-        "Лестница считается по **PS** (ProgressScore), начисляемому за голос.",
+        "Лестница считается по **Социальному рейтингу (СР)**, начисляемому за голос.",
         "Ответ придёт **только тебе** (ephemeral), хотя канал общий.",
       ].join("\n"),
     )
@@ -74,7 +73,7 @@ function buildPersonalComponents(ladder: VoiceLadderTier[]): ActionRowBuilder<Bu
   return [buildRefreshRow()];
 }
 
-function buildPersonalEmbed(member: GuildMember, ladder: VoiceLadderTier[], totalPS: number, rawMinutes: number): EmbedBuilder {
+function buildPersonalEmbed(member: GuildMember, ladder: VoiceLadderTier[], totalPS: number): EmbedBuilder {
   const { current, next } = computeCurrentTier(ladder, totalPS);
 
   const e = new EmbedBuilder()
@@ -82,11 +81,9 @@ function buildPersonalEmbed(member: GuildMember, ladder: VoiceLadderTier[], tota
     .setTitle("Твоя голосовая лестница")
     .setDescription(
       [
-        `Накоплено PS: **${fmtPoints(totalPS)}**`,
+        `Накоплено СР: **${fmtPoints(totalPS)}**`,
         `Текущая роль: **${current.roleName}**.`,
-        next ? `Следующая роль: **${next.roleName}** через **${fmtPoints(next.voiceMinutesTotal - totalPS)}** PS.` : "Ты уже на **последней ступени** этой лестницы.",
-        "",
-        `Сырые минуты голоса (история): **${fmtPoints(rawMinutes)}**`,
+        next ? `Следующая роль: **${next.roleName}** через **${fmtPoints(next.voiceMinutesTotal - totalPS)}** СР.` : "Ты уже на **последней ступени** этой лестницы.",
       ].join("\n"),
     )
     .setFooter({ text: `Запросил: ${member.user.tag}` });
@@ -173,12 +170,10 @@ export async function handleVoiceLadderButton(interaction: ButtonInteraction): P
     return true;
   }
 
-  const rawSec = getVoiceSeconds(interaction.guildId, member.id);
-  const rawMin = Math.floor(rawSec / 60);
   const totalPS = getEconomyUser(interaction.guildId, member.id).psTotal;
 
   if (customId === VOICE_LADDER_BUTTON_ME || customId === VOICE_LADDER_BUTTON_REFRESH) {
-    const embeds = [buildPersonalEmbed(member, ladder, totalPS, rawMin)];
+    const embeds = [buildPersonalEmbed(member, ladder, totalPS)];
     const components = buildPersonalComponents(ladder);
 
     if (customId === VOICE_LADDER_BUTTON_REFRESH && interaction.message) {

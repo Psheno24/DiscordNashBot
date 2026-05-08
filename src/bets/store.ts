@@ -6,6 +6,8 @@ export type BetStatus = "open" | "resolved" | "cancelled";
 export interface BetOption {
   id: string;
   label: string;
+  /** Коэффициент (например 1.8). Выплата = ставка * odds (включая тело). */
+  odds: number;
 }
 
 export interface PlacedBet {

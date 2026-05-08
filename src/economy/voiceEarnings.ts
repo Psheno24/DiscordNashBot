@@ -17,7 +17,29 @@ function focusShares(f: FocusPreset): { psShare: number; rubShare: number } {
 }
 
 function psFromMinutesWithDiminishing(alreadyToday: number, addMinutes: number): number {
-  // 0–180: 1.0 PS/мин, 180–360: 0.5, 360+: 0.2
+  // 0–180: 1.0 СР/мин, 180–360: 0.5, 360+: 0.2
+  let gained = 0;
+  let start = alreadyToday;
+  let left = addMinutes;
+
+  const take = (until: number, rate: number) => {
+    if (left <= 0) return;
+    if (start >= until) return;
+    const chunk = Math.min(left, until - start);
+    gained += chunk * rate;
+    start += chunk;
+    left -= chunk;
+  };
+
+  take(180, 1.0);
+  take(360, 0.5);
+  if (left > 0) gained += left * 0.2;
+
+  return gained;
+}
+
+function rubFromMinutesWithDiminishing(alreadyToday: number, addMinutes: number): number {
+  // 0–180: 1.0 ₽/мин, 180–360: 0.5, 360+: 0.2
   let gained = 0;
   let start = alreadyToday;
   let left = addMinutes;
@@ -58,9 +80,10 @@ export function applyVoiceEarnings(args: {
   const psRaw = psFromMinutesWithDiminishing(already, minutes);
   const psAdded = Math.floor(psRaw * psShare);
 
-  // ₽ начисляем линейно от минут, но с учётом фокуса (без diminishing — иначе экономика слишком медленная).
-  const RUB_PER_MIN = 1;
-  const rubAdded = Math.floor(minutes * RUB_PER_MIN * rubShare);
+  // ₽ начисляем с diminishing returns по минутам/сутки (как и для СР),
+  // и дополнительно умножаем на долю фокуса.
+  const rubRaw = rubFromMinutesWithDiminishing(already, minutes);
+  const rubAdded = Math.floor(rubRaw * rubShare);
 
   const nextMinutesToday = already + minutes;
   patchEconomyUser(guildId, userId, {
@@ -73,7 +96,7 @@ export function applyVoiceEarnings(args: {
   if (psAdded > 0 || rubAdded > 0) {
     const who = args.actorMention ?? `<@${userId}>`;
     const parts: string[] = [];
-    if (psAdded > 0) parts.push(`+${psAdded.toLocaleString("ru-RU")} PS`);
+    if (psAdded > 0) parts.push(`+${psAdded.toLocaleString("ru-RU")} СР`);
     if (rubAdded > 0) parts.push(`+${rubAdded.toLocaleString("ru-RU")} ₽`);
     appendFeedEvent({
       ts: now,
