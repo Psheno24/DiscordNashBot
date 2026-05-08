@@ -26,14 +26,16 @@ import { loadVoiceLadder } from "../voice/loadLadder.js";
 
 export const ECON_BUTTON_MENU = "econ:menu";
 export const ECON_BUTTON_PROFILE = "econ:profile";
-export const ECON_BUTTON_FOCUS = "econ:focus";
-export const ECON_BUTTON_FOCUS_ROLE = "econ:focus:role";
-export const ECON_BUTTON_FOCUS_BALANCE = "econ:focus:balance";
-export const ECON_BUTTON_FOCUS_MONEY = "econ:focus:money";
 export const ECON_BUTTON_PLAYERS = "econ:players";
 export const ECON_BUTTON_WORK = "econ:work";
 export const ECON_BUTTON_SKILLS = "econ:skills";
-export const ECON_BUTTON_LADDER = "econ:ladder";
+const ECON_PROFILE_BUTTON_INFO = "econ:profile:info";
+const ECON_PROFILE_BUTTON_FOCUS = "econ:profile:focus";
+const ECON_PROFILE_BUTTON_LADDER = "econ:profile:ladder";
+
+const ECON_BUTTON_FOCUS_ROLE = "econ:focus:role";
+const ECON_BUTTON_FOCUS_BALANCE = "econ:focus:balance";
+const ECON_BUTTON_FOCUS_MONEY = "econ:focus:money";
 const ECON_WORK_BUTTON_STARTERS = "econ:work:starters";
 const ECON_WORK_BUTTON_JOB_PREFIX = "econ:work:job:";
 const ECON_WORK_BUTTON_TAKE_PREFIX = "econ:work:take:";
@@ -93,12 +95,8 @@ function buildTerminalPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_PROFILE).setLabel("Профиль").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_FOCUS).setLabel("Фокус").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Работа").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_SKILLS).setLabel("Навыки").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_LADDER).setLabel("Лестница").setStyle(ButtonStyle.Secondary),
-    ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_PLAYERS).setLabel("Игроки").setStyle(ButtonStyle.Secondary),
     ),
   ];
@@ -126,6 +124,41 @@ function buildMenuRow(): ActionRowBuilder<ButtonBuilder> {
   );
 }
 
+function buildProfileHubEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  return new EmbedBuilder()
+    .setColor(PROFILE_COLOR)
+    .setTitle("Профиль")
+    .setDescription(
+      [
+        `${progressName()}: **${fmt(u.psTotal)}** · ₽: **${fmt(u.rubles)}**`,
+        "",
+        "Выбери вкладку ниже.",
+      ].join("\n"),
+    )
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildProfileHubRows(active: "info" | "focus" | "ladder"): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(ECON_PROFILE_BUTTON_INFO)
+        .setLabel(active === "info" ? "Инфо ✓" : "Инфо")
+        .setStyle(active === "info" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(ECON_PROFILE_BUTTON_FOCUS)
+        .setLabel(active === "focus" ? "Фокус ✓" : "Фокус")
+        .setStyle(active === "focus" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(ECON_PROFILE_BUTTON_LADDER)
+        .setLabel(active === "ladder" ? "Лестница ✓" : "Лестница")
+        .setStyle(active === "ladder" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    ),
+    buildMenuRow(),
+  ];
+}
+
 function buildFocusRows(cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -142,7 +175,7 @@ function buildFocusRows(cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
         .setLabel(cur === "money" ? "Деньги ✓" : "Деньги")
         .setStyle(cur === "money" ? ButtonStyle.Primary : ButtonStyle.Secondary),
     ),
-    buildMenuRow(),
+    ...buildProfileHubRows("focus"),
   ];
 }
 
@@ -863,12 +896,13 @@ function isEconomyButton(id: string): boolean {
     [
       ECON_BUTTON_MENU,
       ECON_BUTTON_PROFILE,
-      ECON_BUTTON_FOCUS,
+      ECON_PROFILE_BUTTON_INFO,
+      ECON_PROFILE_BUTTON_FOCUS,
+      ECON_PROFILE_BUTTON_LADDER,
       ECON_BUTTON_FOCUS_ROLE,
       ECON_BUTTON_FOCUS_BALANCE,
       ECON_BUTTON_FOCUS_MONEY,
       ECON_BUTTON_WORK,
-      ECON_BUTTON_LADDER,
       ECON_WORK_BUTTON_STARTERS,
       ECON_WORK_BUTTON_TIER2,
       ECON_WORK_BUTTON_SHIFT,
@@ -925,12 +959,23 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_BUTTON_PROFILE) {
-    await replyOrUpdate(interaction, { embeds: [buildProfileEmbed(member)], components: [buildMenuRow()] });
+    await replyOrUpdate(interaction, { embeds: [buildProfileHubEmbed(member)], components: buildProfileHubRows("info") });
     return true;
   }
 
-  if (id === ECON_BUTTON_LADDER) {
-    await replyOrUpdate(interaction, { embeds: [buildLadderEmbed(member)], components: [buildMenuRow()] });
+  if (id === ECON_PROFILE_BUTTON_INFO) {
+    await replyOrUpdate(interaction, { embeds: [buildProfileEmbed(member)], components: buildProfileHubRows("info") });
+    return true;
+  }
+
+  if (id === ECON_PROFILE_BUTTON_FOCUS) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    await replyOrUpdate(interaction, { embeds: [buildFocusEmbed(member)], components: buildFocusRows(u.focus) });
+    return true;
+  }
+
+  if (id === ECON_PROFILE_BUTTON_LADDER) {
+    await replyOrUpdate(interaction, { embeds: [buildLadderEmbed(member)], components: buildProfileHubRows("ladder") });
     return true;
   }
 
@@ -1240,12 +1285,6 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       lastTrainAt: now,
     });
     await replyOrUpdate(interaction, { embeds: [buildSkillsEmbed(member)], components: buildSkillsRows(member) });
-    return true;
-  }
-
-  if (id === ECON_BUTTON_FOCUS) {
-    const u = getEconomyUser(member.guild.id, member.id);
-    await replyOrUpdate(interaction, { embeds: [buildFocusEmbed(member)], components: buildFocusRows(u.focus) });
     return true;
   }
 

@@ -28,6 +28,8 @@ const MODAL_CREATE_BET = "modal:bet:create";
 const MODAL_GRANT_RUB = "modal:econ:grantRub";
 
 const BET_BUTTON_PICK_PREFIX = "bet:pick:";
+const BET_BUTTON_CONFIRM_PREFIX = "bet:confirm:";
+const BET_BUTTON_CONFIRM_CANCEL = "bet:confirmCancel";
 
 const MODAL_BET_AMOUNT_PREFIX = "modal:bet:amount:";
 
@@ -261,12 +263,11 @@ function buildBetEmbed(ev: BetEvent): EmbedBuilder {
         ? `Результат: **${ev.options.find((o) => o.id === ev.winningOptionId)?.label ?? "—"}**.`
         : "Событие отменено.";
 
-  const total = Object.values(ev.bets).reduce((s, b) => s + b.amount, 0);
   const opts = ev.options.map((o) => `• **${o.label}** — x${o.odds.toLocaleString("ru-RU")}`).join("\n");
   return new EmbedBuilder()
     .setColor(BET_COLOR)
     .setTitle(`Ставка: ${ev.title}`)
-    .setDescription([statusLine, "", "Коэффициенты:", opts, "", `Банк: **${total.toLocaleString("ru-RU")} ₽**`].join("\n"));
+    .setDescription([statusLine, "", "Коэффициенты:", opts].join("\n"));
 }
 
 function buildBetRows(ev: BetEvent): ActionRowBuilder<ButtonBuilder>[] {
@@ -286,7 +287,7 @@ function buildBetRows(ev: BetEvent): ActionRowBuilder<ButtonBuilder>[] {
 
 export async function handleBetButton(interaction: ButtonInteraction): Promise<boolean> {
   const id = interaction.customId;
-  if (!id.startsWith(BET_BUTTON_PICK_PREFIX)) {
+  if (!id.startsWith(BET_BUTTON_PICK_PREFIX) && !id.startsWith(BET_BUTTON_CONFIRM_PREFIX) && id !== BET_BUTTON_CONFIRM_CANCEL) {
     return false;
   }
 
@@ -310,6 +311,10 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
       await interaction.reply({ content: "Приём ставок закрыт.", flags: MessageFlags.Ephemeral });
       return true;
     }
+    if (ev.bets[interaction.user.id]) {
+      await interaction.reply({ content: "Вы уже сделали ставку на это событие. Изменить или вернуть ставку нельзя.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
 
     const opt = ev.options.find((o) => o.id === optionId);
     if (!opt) {
@@ -317,17 +322,95 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
       return true;
     }
 
+    const u = getEconomyUser(guildId, interaction.user.id);
     const modal = new ModalBuilder().setCustomId(`${MODAL_BET_AMOUNT_PREFIX}${eventId}:${optionId}`).setTitle("Сумма ставки");
     modal.addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("amount")
-          .setLabel(`Сколько ₽ поставить на «${opt.label}»`)
+          .setLabel(`Сколько ₽ поставить? Баланс: ${u.rubles.toLocaleString("ru-RU")} ₽`)
           .setStyle(TextInputStyle.Short)
           .setRequired(true),
       ),
     );
     await interaction.showModal(modal);
+    return true;
+  }
+
+  if (id === BET_BUTTON_CONFIRM_CANCEL) {
+    const isEphemeralMessage = Boolean(interaction.message?.flags?.has(MessageFlags.Ephemeral));
+    if (interaction.message && isEphemeralMessage) {
+      await interaction.update({ content: "Ставка отменена.", embeds: [], components: [] });
+    } else {
+      await interaction.reply({ content: "Ставка отменена.", flags: MessageFlags.Ephemeral });
+    }
+    return true;
+  }
+
+  if (id.startsWith(BET_BUTTON_CONFIRM_PREFIX)) {
+    const rest = id.slice(BET_BUTTON_CONFIRM_PREFIX.length);
+    const [eventId, optionId, amountRaw] = rest.split(":");
+    const amount = Number.parseInt(amountRaw ?? "", 10);
+    if (!eventId || !optionId || !Number.isFinite(amount) || amount <= 0) {
+      await interaction.reply({ content: "Некорректное подтверждение ставки.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const ev = getBetEvent(guildId, eventId);
+    if (!ev) {
+      await interaction.reply({ content: "Событие не найдено.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (ev.status !== "open" || Date.now() > ev.closesAt) {
+      await interaction.reply({ content: "Приём ставок закрыт.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const opt = ev.options.find((o) => o.id === optionId);
+    if (!opt) {
+      await interaction.reply({ content: "Исход не найден.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    const userId = interaction.user.id;
+    if (ev.bets[userId]) {
+      await interaction.reply({ content: "Вы уже сделали ставку на это событие. Изменить или вернуть ставку нельзя.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const u = getEconomyUser(guildId, userId);
+    if (u.rubles < amount) {
+      await interaction.reply({ content: `Недостаточно ₽. Баланс: ${u.rubles.toLocaleString("ru-RU")} ₽.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    patchEconomyUser(guildId, userId, { rubles: u.rubles - amount });
+    ev.bets[userId] = { optionId, amount, ts: Date.now() };
+    upsertBetEvent(ev);
+
+    appendFeedEvent({
+      ts: Date.now(),
+      guildId,
+      type: "bet:placed",
+      actorUserId: userId,
+      text: `${interaction.user.toString()} поставил **${amount.toLocaleString("ru-RU")} ₽** на «${opt.label}» (ставка: ${ev.title}).`,
+    });
+    await ensureEconomyFeedPanel(interaction.client);
+
+    if (ev.channelId && ev.messageId) {
+      const ch = await interaction.client.channels.fetch(ev.channelId).catch(() => null);
+      if (ch?.isTextBased() && !ch.isDMBased()) {
+        const msg = await ch.messages.fetch(ev.messageId).catch(() => null);
+        if (msg) {
+          await msg.edit({ embeds: [buildBetEmbed(ev)], components: buildBetRows(ev) }).catch(() => null);
+        }
+      }
+    }
+
+    const isEphemeralMessage = Boolean(interaction.message?.flags?.has(MessageFlags.Ephemeral));
+    const doneText = `Ставка принята: **${amount.toLocaleString("ru-RU")} ₽** на «${opt.label}» (x${opt.odds.toLocaleString("ru-RU")}).`;
+    if (interaction.message && isEphemeralMessage) {
+      await interaction.update({ content: doneText, embeds: [], components: [] });
+    } else {
+      await interaction.reply({ content: doneText, flags: MessageFlags.Ephemeral });
+    }
     return true;
   }
 
@@ -461,13 +544,21 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       await interaction.reply({ content: "Приём ставок закрыт.", flags: MessageFlags.Ephemeral });
       return true;
     }
+    if (ev.bets[interaction.user.id]) {
+      await interaction.reply({ content: "Вы уже сделали ставку на это событие. Изменить или вернуть ставку нельзя.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
     const opt = ev.options.find((o) => o.id === optionId);
     if (!opt) {
       await interaction.reply({ content: "Исход не найден.", flags: MessageFlags.Ephemeral });
       return true;
     }
 
-    const amountRaw = interaction.fields.getTextInputValue("amount").trim();
+    const amountRaw = interaction.fields.getTextInputValue("amount").trim().replace(/\s+/g, "");
+    if (!/^\d+$/.test(amountRaw)) {
+      await interaction.reply({ content: "Сумма должна быть числом (только цифры).", flags: MessageFlags.Ephemeral });
+      return true;
+    }
     const amount = Number.parseInt(amountRaw, 10);
     if (!Number.isFinite(amount) || amount <= 0) {
       await interaction.reply({ content: "Некорректная сумма.", flags: MessageFlags.Ephemeral });
@@ -482,31 +573,30 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       return true;
     }
 
-    patchEconomyUser(guildId, userId, { rubles: u.rubles - amount });
-    ev.bets[userId] = { optionId, amount, ts: Date.now() };
-    upsertBetEvent(ev);
-
-    appendFeedEvent({
-      ts: Date.now(),
-      guildId,
-      type: "bet:placed",
-      actorUserId: userId,
-      text: `${interaction.user.toString()} поставил **${amount.toLocaleString("ru-RU")} ₽** на «${opt.label}» (ставка: ${ev.title}).`,
-    });
-    await ensureEconomyFeedPanel(interaction.client);
-
-    // Обновим карточку ставки, если можем.
-    if (ev.channelId && ev.messageId) {
-      const ch = await interaction.client.channels.fetch(ev.channelId).catch(() => null);
-      if (ch?.isTextBased() && !ch.isDMBased()) {
-        const msg = await ch.messages.fetch(ev.messageId).catch(() => null);
-        if (msg) {
-          await msg.edit({ embeds: [buildBetEmbed(ev)], components: buildBetRows(ev) }).catch(() => null);
-        }
-      }
-    }
-
-    await interaction.reply({ content: "Ставка принята.", flags: MessageFlags.Ephemeral });
+    const potential = Math.floor(amount * opt.odds);
+    const embed = new EmbedBuilder()
+      .setColor(BET_COLOR)
+      .setTitle("Подтверждение ставки")
+      .setDescription(
+        [
+          `Ставка: **${ev.title}**`,
+          `Исход: **${opt.label}**`,
+          `Коэффициент: **x${opt.odds.toLocaleString("ru-RU")}**`,
+          "",
+          `Ставите: **${amount.toLocaleString("ru-RU")} ₽**`,
+          `Можно выиграть: **${potential.toLocaleString("ru-RU")} ₽**`,
+          "",
+          `Ваш баланс: **${u.rubles.toLocaleString("ru-RU")} ₽**`,
+        ].join("\n"),
+      );
+    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${BET_BUTTON_CONFIRM_PREFIX}${eventId}:${optionId}:${amount}`)
+        .setLabel("Подтвердить")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(BET_BUTTON_CONFIRM_CANCEL).setLabel("Отмена").setStyle(ButtonStyle.Secondary),
+    );
+    await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
     return true;
   }
 
