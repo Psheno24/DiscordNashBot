@@ -9,7 +9,7 @@ import {
 } from "./neurocontrol/panel.js";
 import { registerVoiceLadder } from "./voice/voiceLadder.js";
 import { ensureEconomyFeedPanel, ensureEconomyTerminalPanel, handleEconomyButton, handleEconomyModal } from "./economy/panel.js";
-import { handleBetButton, handleBetModal, handleNeuroAdminBetFlow, handleNeuroAdminButton } from "./bets/bets.js";
+import { ensureBetsHealth, handleBetButton, handleBetModal, handleNeuroAdminBetFlow, handleNeuroAdminButton } from "./bets/bets.js";
 
 const client = new Client({
   intents: [
@@ -25,6 +25,7 @@ client.once(Events.ClientReady, async (c) => {
   await ensureNeuroPanel(c);
   await ensureEconomyTerminalPanel(c);
   await ensureEconomyFeedPanel(c);
+  await ensureBetsHealth(c);
 });
 
 registerMemberJoin(client);

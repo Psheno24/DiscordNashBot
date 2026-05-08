@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-export type BetStatus = "open" | "resolved" | "cancelled";
+export type BetStatus = "open" | "closed" | "resolved" | "cancelled";
 
 export interface BetOption {
   id: string;
