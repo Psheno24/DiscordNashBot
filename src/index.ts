@@ -9,6 +9,8 @@ import {
 } from "./neurocontrol/panel.js";
 import { ensureVoiceLadderPanel, handleVoiceLadderButton } from "./voice/panel.js";
 import { registerVoiceLadder } from "./voice/voiceLadder.js";
+import { ensureEconomyFeedPanel, ensureEconomyTerminalPanel, handleEconomyButton } from "./economy/panel.js";
+import { handleBetButton, handleBetModal, handleNeuroAdminButton } from "./bets/bets.js";
 
 const client = new Client({
   intents: [
@@ -23,6 +25,8 @@ client.once(Events.ClientReady, async (c) => {
   console.log(`ИИ Управление на связи: ${c.user.tag}`);
   await ensureNeuroPanel(c);
   await ensureVoiceLadderPanel(c);
+  await ensureEconomyTerminalPanel(c);
+  await ensureEconomyFeedPanel(c);
 });
 
 registerMemberJoin(client);
@@ -34,13 +38,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const handled =
         (await handleNeuroButton(interaction)) ||
         (await handleNeuroSettingsButton(interaction)) ||
-        (await handleVoiceLadderButton(interaction));
+        (await handleVoiceLadderButton(interaction)) ||
+        (await handleEconomyButton(interaction)) ||
+        (await handleNeuroAdminButton(interaction)) ||
+        (await handleBetButton(interaction));
       if (!handled) return;
       return;
     }
 
     if (interaction.isChannelSelectMenu()) {
       const handled = await handleNeuroSettingsSelect(interaction);
+      if (!handled) return;
+      return;
+    }
+
+    if (interaction.isModalSubmit()) {
+      const handled = await handleBetModal(interaction);
       if (!handled) return;
       return;
     }

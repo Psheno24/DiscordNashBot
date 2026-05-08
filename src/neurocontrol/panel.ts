@@ -17,6 +17,8 @@ import type { NeuroRoleEntry, NeurocontrolFile } from "./types.js";
 import { getPanelMessageId, setPanelMessageId } from "./panelStore.js";
 import { getGuildConfig, patchGuildConfig } from "../guildConfig/store.js";
 import { ensureVoiceLadderPanel } from "../voice/panel.js";
+import { ensureEconomyFeedPanel, ensureEconomyTerminalPanel } from "../economy/panel.js";
+import { NEURO_ADMIN_BUTTON_MENU } from "../bets/bets.js";
 
 export const NEURO_BUTTON_ROLES = "neuro:roles";
 export const NEURO_BUTTON_SETTINGS = "neuro:settings";
@@ -24,6 +26,8 @@ export const NEURO_BUTTON_SETTINGS = "neuro:settings";
 const NEURO_SELECT_WELCOME = "neuro:cfg:welcome";
 const NEURO_SELECT_NEUROCONTROL = "neuro:cfg:neurocontrol";
 const NEURO_SELECT_VOICE_LADDER = "neuro:cfg:voiceLadder";
+const NEURO_SELECT_ECONOMY_TERMINAL = "neuro:cfg:economyTerminal";
+const NEURO_SELECT_ECONOMY_FEED = "neuro:cfg:economyFeed";
 
 const PANEL_COLOR = 0x263238;
 const ROLES_COLOR = 0xb71c1c;
@@ -48,6 +52,10 @@ function buildRolesRows(): ActionRowBuilder<ButtonBuilder>[] {
       .setCustomId(NEURO_BUTTON_SETTINGS)
       .setLabel("Настройки")
       .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId(NEURO_ADMIN_BUTTON_MENU)
+      .setLabel("Админ")
+      .setStyle(ButtonStyle.Danger),
   );
   return [row];
 }
@@ -148,6 +156,8 @@ function buildSettingsEmbed(guildId: string): EmbedBuilder {
         `Канал приветствий: ${fmtChannel(cfg.welcomeChannelId)}`,
         `Канал контроля (панель): ${fmtChannel(cfg.neuroControlChannelId)}`,
         `Канал статистики/лестницы: ${fmtChannel(cfg.voiceLadderChannelId)}`,
+        `Канал экономики (терминал): ${fmtChannel(cfg.economyTerminalChannelId)}`,
+        `Канал экономики (лента): ${fmtChannel(cfg.economyFeedChannelId)}`,
         "",
         "Выбери новый канал в селекте — настройка сохранится сразу.",
       ].join("\n"),
@@ -176,6 +186,22 @@ function buildSettingsRows(): ActionRowBuilder<ChannelSelectMenuBuilder>[] {
       new ChannelSelectMenuBuilder()
         .setCustomId(NEURO_SELECT_VOICE_LADDER)
         .setPlaceholder("Выбрать канал статистики/лестницы")
+        .setChannelTypes(ChannelType.GuildText)
+        .setMinValues(1)
+        .setMaxValues(1),
+    ),
+    new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId(NEURO_SELECT_ECONOMY_TERMINAL)
+        .setPlaceholder("Выбрать канал экономики (терминал)")
+        .setChannelTypes(ChannelType.GuildText)
+        .setMinValues(1)
+        .setMaxValues(1),
+    ),
+    new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
+      new ChannelSelectMenuBuilder()
+        .setCustomId(NEURO_SELECT_ECONOMY_FEED)
+        .setPlaceholder("Выбрать канал экономики (лента)")
         .setChannelTypes(ChannelType.GuildText)
         .setMinValues(1)
         .setMaxValues(1),
@@ -222,7 +248,15 @@ export async function handleNeuroSettingsButton(interaction: ButtonInteraction):
 }
 
 export async function handleNeuroSettingsSelect(interaction: ChannelSelectMenuInteraction): Promise<boolean> {
-  if (![NEURO_SELECT_WELCOME, NEURO_SELECT_NEUROCONTROL, NEURO_SELECT_VOICE_LADDER].includes(interaction.customId)) {
+  if (
+    ![
+      NEURO_SELECT_WELCOME,
+      NEURO_SELECT_NEUROCONTROL,
+      NEURO_SELECT_VOICE_LADDER,
+      NEURO_SELECT_ECONOMY_TERMINAL,
+      NEURO_SELECT_ECONOMY_FEED,
+    ].includes(interaction.customId)
+  ) {
     return false;
   }
   if (!interaction.inGuild() || !interaction.guildId) {
@@ -248,11 +282,17 @@ export async function handleNeuroSettingsSelect(interaction: ChannelSelectMenuIn
     patchGuildConfig(interaction.guildId, { neuroControlChannelId: picked });
   } else if (interaction.customId === NEURO_SELECT_VOICE_LADDER) {
     patchGuildConfig(interaction.guildId, { voiceLadderChannelId: picked });
+  } else if (interaction.customId === NEURO_SELECT_ECONOMY_TERMINAL) {
+    patchGuildConfig(interaction.guildId, { economyTerminalChannelId: picked });
+  } else if (interaction.customId === NEURO_SELECT_ECONOMY_FEED) {
+    patchGuildConfig(interaction.guildId, { economyFeedChannelId: picked });
   }
 
   // Сразу выставляем/обновляем панели в новых каналах, без перезапуска бота.
   await ensureNeuroPanel(interaction.client);
   await ensureVoiceLadderPanel(interaction.client);
+  await ensureEconomyTerminalPanel(interaction.client);
+  await ensureEconomyFeedPanel(interaction.client);
 
   await interaction.update({
     embeds: [buildSettingsEmbed(interaction.guildId)],

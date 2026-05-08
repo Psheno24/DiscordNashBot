@@ -1,7 +1,10 @@
 import { ChannelType, Events, type Client, type Guild, type GuildMember } from "discord.js";
 import { loadVoiceLadder } from "./loadLadder.js";
 import type { VoiceLadderTier } from "./types.js";
-import { addVoiceSeconds, getVoiceSeconds } from "./timeStore.js";
+import { addVoiceSeconds } from "./timeStore.js";
+import { applyVoiceEarnings } from "../economy/voiceEarnings.js";
+import { ensureEconomyFeedPanel } from "../economy/panel.js";
+import { getEconomyUser } from "../economy/userStore.js";
 
 /** Ключ сессии: время входа в «считаемый» голосовой канал (не AFK). */
 const sessions = new Map<string, number>();
@@ -28,12 +31,12 @@ function resolveTierRoleIds(guild: Guild, ladder: VoiceLadderTier[]): Map<string
 }
 
 async function applyVoiceLadder(member: GuildMember, ladder: VoiceLadderTier[], nameToId: Map<string, string>) {
-  const totalSec = getVoiceSeconds(member.guild.id, member.id);
-  const totalMin = Math.floor(totalSec / 60);
+  // Лестница считается по PS (ProgressScore), а не по “сырым минутам”.
+  const totalPS = getEconomyUser(member.guild.id, member.id).psTotal;
 
   let targetTier: VoiceLadderTier = ladder[0]!;
   for (const t of ladder) {
-    if (totalMin >= t.voiceMinutesTotal) targetTier = t;
+    if (totalPS >= t.voiceMinutesTotal) targetTier = t;
   }
 
   const targetId = nameToId.get(targetTier.roleName);
@@ -110,6 +113,8 @@ export function registerVoiceLadder(client: Client) {
         const delta = Math.floor((Date.now() - start) / 1000);
         if (delta > 0) {
           addVoiceSeconds(guild.id, member.id, delta);
+          applyVoiceEarnings({ guildId: guild.id, userId: member.id, deltaSeconds: delta, actorMention: member.toString() });
+          await ensureEconomyFeedPanel(client);
           await syncVoiceLadderForMember(member);
         }
       }

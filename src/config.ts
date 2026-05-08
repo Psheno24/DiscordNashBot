@@ -26,3 +26,11 @@ export const neuroControlChannelId = (guildId?: string) =>
 /** ID текстового канала: общая панель голосовой лестницы (кнопка «Моя лестница»). Необязательно. */
 export const voiceLadderChannelId = (guildId?: string) =>
   (guildId ? getGuildConfig(guildId).voiceLadderChannelId : undefined) ?? opt("DISCORD_VOICE_LADDER_CHANNEL_ID");
+
+/** ID текстового канала: «Терминал страны» (экономика, управление собой). Необязательно. */
+export const economyTerminalChannelId = (guildId?: string) =>
+  (guildId ? getGuildConfig(guildId).economyTerminalChannelId : undefined) ?? opt("DISCORD_ECONOMY_TERMINAL_CHANNEL_ID");
+
+/** ID текстового канала: «Лента страны» (публичная активность + карточки событий). Необязательно. */
+export const economyFeedChannelId = (guildId?: string) =>
+  (guildId ? getGuildConfig(guildId).economyFeedChannelId : undefined) ?? opt("DISCORD_ECONOMY_FEED_CHANNEL_ID");

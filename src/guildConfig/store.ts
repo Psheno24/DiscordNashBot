@@ -5,6 +5,8 @@ export interface GuildConfig {
   welcomeChannelId?: string;
   neuroControlChannelId?: string;
   voiceLadderChannelId?: string;
+  economyTerminalChannelId?: string;
+  economyFeedChannelId?: string;
 }
 
 interface StoreShape {

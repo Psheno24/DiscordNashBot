@@ -13,6 +13,7 @@ import { voiceLadderChannelId } from "../config.js";
 import { loadVoiceLadder } from "./loadLadder.js";
 import type { VoiceLadderTier } from "./types.js";
 import { getVoiceSeconds } from "./timeStore.js";
+import { getEconomyUser } from "../economy/userStore.js";
 import { getVoiceLadderPanelMessageId, setVoiceLadderPanelMessageId } from "./panelStore.js";
 
 export const VOICE_LADDER_BUTTON_ME = "voiceLadder:me";
@@ -21,16 +22,16 @@ export const VOICE_LADDER_BUTTON_REFRESH = "voiceLadder:refresh";
 const PANEL_COLOR = 0x263238;
 const STATS_COLOR = 0x1b5e20;
 
-function fmtMinutes(n: number): string {
+function fmtPoints(n: number): string {
   if (!Number.isFinite(n)) return "—";
   if (n < 0) n = 0;
   return n.toLocaleString("ru-RU");
 }
 
-function computeCurrentTier(ladder: VoiceLadderTier[], totalMin: number): { current: VoiceLadderTier; next?: VoiceLadderTier } {
+function computeCurrentTier(ladder: VoiceLadderTier[], totalPS: number): { current: VoiceLadderTier; next?: VoiceLadderTier } {
   let current = ladder[0]!;
   for (const t of ladder) {
-    if (totalMin >= t.voiceMinutesTotal) current = t;
+    if (totalPS >= t.voiceMinutesTotal) current = t;
   }
   const idx = ladder.findIndex((t) => t.roleName === current.roleName && t.voiceMinutesTotal === current.voiceMinutesTotal);
   const next = idx >= 0 ? ladder[idx + 1] : undefined;
@@ -44,6 +45,7 @@ function buildPanelEmbed(guild: Guild): EmbedBuilder {
     .setDescription(
       [
         "Нажми кнопку ниже, чтобы получить **персональную** статистику и список ступеней.",
+        "Лестница считается по **PS** (ProgressScore), начисляемому за голос.",
         "Ответ придёт **только тебе** (ephemeral), хотя канал общий.",
       ].join("\n"),
     )
@@ -72,17 +74,20 @@ function buildPersonalComponents(ladder: VoiceLadderTier[]): ActionRowBuilder<Bu
   return [buildRefreshRow()];
 }
 
-function buildPersonalEmbed(member: GuildMember, ladder: VoiceLadderTier[], totalMin: number): EmbedBuilder {
-  const { current, next } = computeCurrentTier(ladder, totalMin);
-  const nextLine = next
-    ? `Следующая роль: **${next.roleName}** через **${fmtMinutes(next.voiceMinutesTotal - totalMin)}** мин.`
-    : "Ты уже на **последней ступени** этой лестницы.";
+function buildPersonalEmbed(member: GuildMember, ladder: VoiceLadderTier[], totalPS: number, rawMinutes: number): EmbedBuilder {
+  const { current, next } = computeCurrentTier(ladder, totalPS);
 
   const e = new EmbedBuilder()
     .setColor(STATS_COLOR)
     .setTitle("Твоя голосовая лестница")
     .setDescription(
-      [`Накоплено: **${fmtMinutes(totalMin)}** мин.`, `Текущая роль: **${current.roleName}**.`, nextLine].join("\n"),
+      [
+        `Накоплено PS: **${fmtPoints(totalPS)}**`,
+        `Текущая роль: **${current.roleName}**.`,
+        next ? `Следующая роль: **${next.roleName}** через **${fmtPoints(next.voiceMinutesTotal - totalPS)}** PS.` : "Ты уже на **последней ступени** этой лестницы.",
+        "",
+        `Сырые минуты голоса (история): **${fmtPoints(rawMinutes)}**`,
+      ].join("\n"),
     )
     .setFooter({ text: `Запросил: ${member.user.tag}` });
   return e;
@@ -168,11 +173,12 @@ export async function handleVoiceLadderButton(interaction: ButtonInteraction): P
     return true;
   }
 
-  const totalSec = getVoiceSeconds(interaction.guildId, member.id);
-  const totalMin = Math.floor(totalSec / 60);
+  const rawSec = getVoiceSeconds(interaction.guildId, member.id);
+  const rawMin = Math.floor(rawSec / 60);
+  const totalPS = getEconomyUser(interaction.guildId, member.id).psTotal;
 
   if (customId === VOICE_LADDER_BUTTON_ME || customId === VOICE_LADDER_BUTTON_REFRESH) {
-    const embeds = [buildPersonalEmbed(member, ladder, totalMin)];
+    const embeds = [buildPersonalEmbed(member, ladder, totalPS, rawMin)];
     const components = buildPersonalComponents(ladder);
 
     if (customId === VOICE_LADDER_BUTTON_REFRESH && interaction.message) {
