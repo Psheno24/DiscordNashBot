@@ -4,7 +4,6 @@ import { join } from "node:path";
 export interface GuildConfig {
   welcomeChannelId?: string;
   neuroControlChannelId?: string;
-  voiceLadderChannelId?: string;
   economyTerminalChannelId?: string;
   economyFeedChannelId?: string;
 }

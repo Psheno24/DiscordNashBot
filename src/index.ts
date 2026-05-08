@@ -7,7 +7,6 @@ import {
   handleNeuroSettingsButton,
   handleNeuroSettingsSelect,
 } from "./neurocontrol/panel.js";
-import { ensureVoiceLadderPanel, handleVoiceLadderButton } from "./voice/panel.js";
 import { registerVoiceLadder } from "./voice/voiceLadder.js";
 import { ensureEconomyFeedPanel, ensureEconomyTerminalPanel, handleEconomyButton, handleEconomyModal } from "./economy/panel.js";
 import { handleBetButton, handleBetModal, handleNeuroAdminBetFlow, handleNeuroAdminButton } from "./bets/bets.js";
@@ -24,7 +23,6 @@ const client = new Client({
 client.once(Events.ClientReady, async (c) => {
   console.log(`ИИ Управление на связи: ${c.user.tag}`);
   await ensureNeuroPanel(c);
-  await ensureVoiceLadderPanel(c);
   await ensureEconomyTerminalPanel(c);
   await ensureEconomyFeedPanel(c);
 });
@@ -38,7 +36,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
       const handled =
         (await handleNeuroButton(interaction)) ||
         (await handleNeuroSettingsButton(interaction)) ||
-        (await handleVoiceLadderButton(interaction)) ||
         (await handleEconomyButton(interaction)) ||
         (await handleNeuroAdminButton(interaction)) ||
         (await handleNeuroAdminBetFlow(interaction)) ||

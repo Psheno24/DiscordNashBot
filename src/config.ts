@@ -24,8 +24,7 @@ export const neuroControlChannelId = (guildId?: string) =>
   (guildId ? getGuildConfig(guildId).neuroControlChannelId : undefined) ?? opt("DISCORD_NEUROCONTROL_CHANNEL_ID");
 
 /** ID текстового канала: общая панель голосовой лестницы (кнопка «Моя лестница»). Необязательно. */
-export const voiceLadderChannelId = (guildId?: string) =>
-  (guildId ? getGuildConfig(guildId).voiceLadderChannelId : undefined) ?? opt("DISCORD_VOICE_LADDER_CHANNEL_ID");
+// Голосовая лестница теперь доступна внутри личного меню «Терминала страны».
 
 /** ID текстового канала: «Терминал страны» (экономика, управление собой). Необязательно. */
 export const economyTerminalChannelId = (guildId?: string) =>

@@ -33,6 +33,7 @@ export const ECON_BUTTON_FOCUS_MONEY = "econ:focus:money";
 export const ECON_BUTTON_PLAYERS = "econ:players";
 export const ECON_BUTTON_WORK = "econ:work";
 export const ECON_BUTTON_SKILLS = "econ:skills";
+export const ECON_BUTTON_LADDER = "econ:ladder";
 const ECON_WORK_BUTTON_STARTERS = "econ:work:starters";
 const ECON_WORK_BUTTON_JOB_PREFIX = "econ:work:job:";
 const ECON_WORK_BUTTON_TAKE_PREFIX = "econ:work:take:";
@@ -95,6 +96,9 @@ function buildTerminalPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
       new ButtonBuilder().setCustomId(ECON_BUTTON_FOCUS).setLabel("Фокус").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Работа").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_SKILLS).setLabel("Навыки").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_LADDER).setLabel("Лестница").setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_PLAYERS).setLabel("Игроки").setStyle(ButtonStyle.Secondary),
     ),
   ];
@@ -223,6 +227,47 @@ async function buildPlayerCardEmbed(viewer: GuildMember, targetUserId: string): 
     .setTitle("Карточка игрока")
     .setDescription(lines.join("\n"))
     .setFooter({ text: `Запросил: ${viewer.user.tag}` });
+}
+
+function buildLadderEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  let ladder: ReturnType<typeof loadVoiceLadder>["ladder"] | undefined;
+  try {
+    ladder = loadVoiceLadder().ladder;
+  } catch {
+    ladder = undefined;
+  }
+  if (!ladder || ladder.length === 0) {
+    return new EmbedBuilder()
+      .setColor(PANEL_COLOR)
+      .setTitle("Голосовая лестница")
+      .setDescription("Лестница недоступна (ошибка `config/voice-ladder.json`).")
+      .setFooter({ text: `Запросил: ${member.user.tag}` });
+  }
+
+  let current = ladder[0]!;
+  for (const t of ladder) {
+    if (u.psTotal >= t.voiceMinutesTotal) current = t;
+  }
+  const idx = ladder.findIndex((t) => t.roleName === current.roleName && t.voiceMinutesTotal === current.voiceMinutesTotal);
+  const next = idx >= 0 ? ladder[idx + 1] : undefined;
+
+  const lines: string[] = [];
+  lines.push(`${progressName()}: **${fmt(u.psTotal)}**`);
+  lines.push(`Текущая ступень: **${current.roleName}**`);
+  if (next) lines.push(`До следующей: **${fmt(Math.max(0, next.voiceMinutesTotal - u.psTotal))}** СР → **${next.roleName}**`);
+  else lines.push("Ты уже на **последней ступени**.");
+  lines.push("");
+  lines.push("Пороги:");
+  for (const t of ladder) {
+    lines.push(`- **${t.roleName}**: ${fmt(t.voiceMinutesTotal)} СР`);
+  }
+
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Голосовая лестница")
+    .setDescription(lines.join("\n"))
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
 function buildPlayersMenuEmbed(): EmbedBuilder {
@@ -823,6 +868,7 @@ function isEconomyButton(id: string): boolean {
       ECON_BUTTON_FOCUS_BALANCE,
       ECON_BUTTON_FOCUS_MONEY,
       ECON_BUTTON_WORK,
+      ECON_BUTTON_LADDER,
       ECON_WORK_BUTTON_STARTERS,
       ECON_WORK_BUTTON_TIER2,
       ECON_WORK_BUTTON_SHIFT,
@@ -880,6 +926,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_BUTTON_PROFILE) {
     await replyOrUpdate(interaction, { embeds: [buildProfileEmbed(member)], components: [buildMenuRow()] });
+    return true;
+  }
+
+  if (id === ECON_BUTTON_LADDER) {
+    await replyOrUpdate(interaction, { embeds: [buildLadderEmbed(member)], components: [buildMenuRow()] });
     return true;
   }
 

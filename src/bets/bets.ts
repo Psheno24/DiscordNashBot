@@ -146,21 +146,28 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("a")
-          .setLabel("Исход A (пример: Team A | 1.8)")
+          .setLabel("Победа 1 (пример: Team A | 1.8)")
           .setStyle(TextInputStyle.Short)
           .setRequired(true),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("b")
-          .setLabel("Исход B (пример: Team B | 2.1)")
+          .setLabel("Победа 2 (пример: Team B | 2.1)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("d")
+          .setLabel("Ничья (пример: Ничья | 3.2)")
           .setStyle(TextInputStyle.Short)
           .setRequired(true),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("closeAt")
-          .setLabel("Закрытие: +минуты или YYYY-MM-DD HH:MM")
+          .setLabel("Закрытие (МСК): DD-MM HH:MM")
           .setStyle(TextInputStyle.Short)
           .setRequired(true),
       ),
@@ -205,21 +212,35 @@ function parseOptionWithOdds(raw: string, fallbackId: string): { id: string; lab
 function parseCloseAt(raw: string, now = Date.now()): number | undefined {
   const t = raw.trim();
   if (!t) return undefined;
-  if (t.startsWith("+")) {
-    const min = Number.parseInt(t.slice(1), 10);
-    if (!Number.isFinite(min) || min <= 0) return undefined;
-    return now + min * 60_000;
-  }
-  // YYYY-MM-DD HH:MM (локальное время сервера)
-  const m = t.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/);
+  // DD-MM HH:MM (МСК, без года). Берём ближайшую будущую дату.
+  const m = t.match(/^(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
   if (!m) return undefined;
-  const y = Number(m[1]);
+  const dd = Number(m[1]);
   const mo = Number(m[2]);
-  const d = Number(m[3]);
-  const hh = Number(m[4]);
-  const mm = Number(m[5]);
-  const dt = new Date(y, mo - 1, d, hh, mm, 0, 0);
-  const ts = dt.getTime();
+  const hh = Number(m[3]);
+  const mm = Number(m[4]);
+  if (![dd, mo, hh, mm].every(Number.isFinite)) return undefined;
+  if (mo < 1 || mo > 12) return undefined;
+  if (dd < 1 || dd > 31) return undefined;
+  if (hh < 0 || hh > 23) return undefined;
+  if (mm < 0 || mm > 59) return undefined;
+
+  // МСК = UTC+3 (без DST). Преобразуем "стеночное" МСК-время в UTC timestamp.
+  const MSK_OFFSET_MS = 3 * 60 * 60 * 1000;
+  const nowMsk = new Date(now + MSK_OFFSET_MS);
+  const year = nowMsk.getUTCFullYear();
+
+  const makeTs = (y: number) => {
+    // Создаём дату как UTC, но это будет "MSK" без сдвига, затем вычитаем offset чтобы получить UTC.
+    const asUtc = Date.UTC(y, mo - 1, dd, hh, mm, 0, 0);
+    return asUtc - MSK_OFFSET_MS;
+  };
+
+  let ts = makeTs(year);
+  if (!Number.isFinite(ts)) return undefined;
+  if (ts <= now) {
+    ts = makeTs(year + 1);
+  }
   if (!Number.isFinite(ts) || ts <= now) return undefined;
   return ts;
 }
@@ -330,14 +351,16 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
     const title = interaction.fields.getTextInputValue("title").trim();
     const aRaw = interaction.fields.getTextInputValue("a").trim();
     const bRaw = interaction.fields.getTextInputValue("b").trim();
+    const dRaw = interaction.fields.getTextInputValue("d").trim();
     const closeAtRaw = interaction.fields.getTextInputValue("closeAt").trim();
     const optA = parseOptionWithOdds(aRaw, "A");
     const optB = parseOptionWithOdds(bRaw, "B");
+    const optD = parseOptionWithOdds(dRaw, "D");
     const closesAt = parseCloseAt(closeAtRaw, Date.now());
-    if (!title || !optA || !optB || !closesAt) {
+    if (!title || !optA || !optB || !optD || !closesAt) {
       await interaction.reply({
         content:
-          "Некорректные поля.\n- Исходы: `Название | 1.8`\n- Закрытие: `+120` или `2026-05-08 18:30`",
+          "Некорректные поля.\n- Исходы: `Название | 1.8`\n- Закрытие (МСК): `08-05 18:30`",
         flags: MessageFlags.Ephemeral,
       });
       return true;
@@ -363,7 +386,7 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       id: eventId,
       guildId,
       title,
-      options: [optA, optB],
+      options: [optA, optD, optB],
       createdByUserId: interaction.user.id,
       createdAt: Date.now(),
       closesAt,
@@ -525,17 +548,17 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
       .setTitle(`Ставка: ${ev.title}`)
       .setDescription("Выберите победителя (только для админов).");
 
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${ADMIN_BET_CHOOSE_PREFIX}${ev.id}:A`)
-        .setLabel(`Победитель: ${ev.options.find((o) => o.id === "A")?.label ?? "A"}`)
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(ev.status !== "open"),
-      new ButtonBuilder()
-        .setCustomId(`${ADMIN_BET_CHOOSE_PREFIX}${ev.id}:B`)
-        .setLabel(`Победитель: ${ev.options.find((o) => o.id === "B")?.label ?? "B"}`)
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(ev.status !== "open"),
+    const row = new ActionRowBuilder<ButtonBuilder>();
+    for (const opt of ev.options.slice(0, 3)) {
+      row.addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${ADMIN_BET_CHOOSE_PREFIX}${ev.id}:${opt.id}`)
+          .setLabel(`Победитель: ${opt.label}`)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(ev.status !== "open"),
+      );
+    }
+    row.addComponents(
       new ButtonBuilder()
         .setCustomId(`${ADMIN_BET_CANCEL_PREFIX}${ev.id}`)
         .setLabel("Отменить ставку")

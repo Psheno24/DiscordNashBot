@@ -17,7 +17,7 @@ function isCountableChannelId(guild: Guild, channelId: string | null): boolean {
   if (!channelId) return false;
   if (guild.afkChannelId === channelId) return false;
   const ch = guild.channels.cache.get(channelId);
-  return ch?.type === ChannelType.GuildVoice;
+  return ch?.type === ChannelType.GuildVoice || ch?.type === ChannelType.GuildStageVoice;
 }
 
 function isCountableState(state: VoiceState): boolean {
