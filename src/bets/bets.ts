@@ -38,6 +38,18 @@ const ADMIN_BET_CHOOSE_PREFIX = "neuroAdmin:betChoose:";
 const ADMIN_BET_CONFIRM_PREFIX = "neuroAdmin:betConfirm:";
 const ADMIN_BET_CANCEL_PREFIX = "neuroAdmin:betCancel:";
 
+async function replyOrUpdateEphemeral(
+  interaction: ButtonInteraction,
+  payload: { content?: string; embeds?: EmbedBuilder[]; components?: ActionRowBuilder<ButtonBuilder>[] },
+) {
+  const isEphemeralMessage = Boolean(interaction.message?.flags?.has(MessageFlags.Ephemeral));
+  if (interaction.message && isEphemeralMessage) {
+    await interaction.update(payload);
+    return;
+  }
+  await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+}
+
 function canAdmin(interaction: ButtonInteraction | ModalSubmitInteraction): boolean {
   return (
     interaction.inGuild() &&
@@ -81,16 +93,16 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
   }
 
   if (!interaction.inGuild() || !interaction.guildId) {
-    await interaction.reply({ content: "Админ-меню доступно только на сервере.", flags: MessageFlags.Ephemeral });
+    await replyOrUpdateEphemeral(interaction, { content: "Админ-меню доступно только на сервере." });
     return true;
   }
   if (!canAdmin(interaction)) {
-    await interaction.reply({ content: "Недостаточно прав (нужно Manage Server).", flags: MessageFlags.Ephemeral });
+    await replyOrUpdateEphemeral(interaction, { content: "Недостаточно прав (нужно Manage Server)." });
     return true;
   }
 
   if (id === NEURO_ADMIN_BUTTON_MENU) {
-    await interaction.reply({ embeds: [buildAdminMenuEmbed()], components: buildAdminMenuRows(), flags: MessageFlags.Ephemeral });
+    await replyOrUpdateEphemeral(interaction, { embeds: [buildAdminMenuEmbed()], components: buildAdminMenuRows() });
     return true;
   }
 
@@ -121,7 +133,7 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
       ),
     );
 
-    await interaction.reply({ embeds: [embed], components: rows, flags: MessageFlags.Ephemeral });
+    await replyOrUpdateEphemeral(interaction, { embeds: [embed], components: rows });
     return true;
   }
 
@@ -495,7 +507,7 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
   }
   if (!interaction.inGuild() || !interaction.guildId) return false;
   if (!canAdmin(interaction)) {
-    await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+    await replyOrUpdateEphemeral(interaction, { content: "Недостаточно прав." });
     return true;
   }
 
@@ -531,7 +543,7 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
         .setDisabled(ev.status !== "open"),
     );
 
-    await interaction.reply({
+    await replyOrUpdateEphemeral(interaction, {
       embeds: [embed],
       components: [
         row,
@@ -539,7 +551,6 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
           new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_BETS).setLabel("Назад").setStyle(ButtonStyle.Secondary),
         ),
       ],
-      flags: MessageFlags.Ephemeral,
     });
     return true;
   }
@@ -549,11 +560,11 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
     const [eventId, optionId] = rest.split(":");
     const ev = eventId ? getBetEvent(guildId, eventId) : undefined;
     if (!ev) {
-      await interaction.reply({ content: "Ставка не найдена.", flags: MessageFlags.Ephemeral });
+      await replyOrUpdateEphemeral(interaction, { content: "Ставка не найдена." });
       return true;
     }
     if (ev.status !== "open") {
-      await interaction.reply({ content: "Ставка уже закрыта.", flags: MessageFlags.Ephemeral });
+      await replyOrUpdateEphemeral(interaction, { content: "Ставка уже закрыта." });
       return true;
     }
     const label = ev.options.find((o) => o.id === optionId)?.label ?? optionId;
@@ -565,7 +576,7 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
       new ButtonBuilder().setCustomId(`${ADMIN_BET_CONFIRM_PREFIX}${ev.id}:${optionId}`).setLabel("Да, подтвердить").setStyle(ButtonStyle.Danger),
       new ButtonBuilder().setCustomId(`${ADMIN_BET_MANAGE_PREFIX}${ev.id}`).setLabel("Назад").setStyle(ButtonStyle.Secondary),
     );
-    await interaction.reply({ embeds: [embed], components: [row], flags: MessageFlags.Ephemeral });
+    await replyOrUpdateEphemeral(interaction, { embeds: [embed], components: [row] });
     return true;
   }
 
@@ -573,11 +584,11 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
     const eventId = id.slice(ADMIN_BET_CANCEL_PREFIX.length);
     const ev = eventId ? getBetEvent(guildId, eventId) : undefined;
     if (!ev) {
-      await interaction.reply({ content: "Ставка не найдена.", flags: MessageFlags.Ephemeral });
+      await replyOrUpdateEphemeral(interaction, { content: "Ставка не найдена." });
       return true;
     }
     if (ev.status !== "open") {
-      await interaction.reply({ content: "Ставка уже закрыта.", flags: MessageFlags.Ephemeral });
+      await replyOrUpdateEphemeral(interaction, { content: "Ставка уже закрыта." });
       return true;
     }
     for (const [userId, bet] of Object.entries(ev.bets)) {
@@ -595,7 +606,7 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
         if (msg) await msg.edit({ embeds: [buildBetEmbed(ev)], components: buildBetRows(ev) }).catch(() => null);
       }
     }
-    await interaction.reply({ content: "Ставка отменена.", flags: MessageFlags.Ephemeral });
+    await replyOrUpdateEphemeral(interaction, { content: "Ставка отменена." });
     return true;
   }
 
@@ -604,17 +615,17 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
     const [eventId, optionId] = rest.split(":");
     const ev = eventId ? getBetEvent(guildId, eventId) : undefined;
     if (!ev) {
-      await interaction.reply({ content: "Ставка не найдена.", flags: MessageFlags.Ephemeral });
+      await replyOrUpdateEphemeral(interaction, { content: "Ставка не найдена." });
       return true;
     }
     if (ev.status !== "open") {
-      await interaction.reply({ content: "Ставка уже закрыта.", flags: MessageFlags.Ephemeral });
+      await replyOrUpdateEphemeral(interaction, { content: "Ставка уже закрыта." });
       return true;
     }
     // fixed-odds payouts: payout = amount * odds
     const opt = ev.options.find((o) => o.id === optionId);
     if (!opt) {
-      await interaction.reply({ content: "Исход не найден.", flags: MessageFlags.Ephemeral });
+      await replyOrUpdateEphemeral(interaction, { content: "Исход не найден." });
       return true;
     }
     const winners = Object.entries(ev.bets).filter(([, b]) => b.optionId === optionId);
@@ -635,7 +646,7 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
         if (msg) await msg.edit({ embeds: [buildBetEmbed(ev)], components: buildBetRows(ev) }).catch(() => null);
       }
     }
-    await interaction.reply({ content: "Победитель зафиксирован, выплаты начислены.", flags: MessageFlags.Ephemeral });
+    await replyOrUpdateEphemeral(interaction, { content: "Победитель зафиксирован, выплаты начислены." });
     return true;
   }
 
