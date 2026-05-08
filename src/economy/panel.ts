@@ -625,8 +625,16 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   rows.push(shiftRow);
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_QUIT).setLabel("Уволиться").setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Сменить").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(ECON_WORK_BUTTON_QUIT)
+        .setLabel("Уволиться")
+        .setStyle(ButtonStyle.Danger)
+        .setDisabled(!state.ok),
+      new ButtonBuilder()
+        .setCustomId(ECON_WORK_BUTTON_STARTERS)
+        .setLabel("Сменить")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!state.ok),
       new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
     ),
   );
@@ -832,6 +840,14 @@ function isEconomyButton(id: string): boolean {
   );
 }
 
+function buildCooldownBlockedEmbed(member: GuildMember, msLeft: number): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Недоступно")
+    .setDescription(`Нельзя выполнить действие, пока идёт КД текущей смены.\nОсталось: **${formatCooldown(msLeft)}**.`)
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
 export async function handleEconomyButton(interaction: ButtonInteraction): Promise<boolean> {
   const cid = interaction.customId;
   const isKnown =
@@ -873,11 +889,29 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_WORK_BUTTON_STARTERS) {
+    // Пока откат после смены не прошёл — запрещаем смену работы.
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (u.jobId) {
+      const st = canWorkNow(u, u.jobId as any, Date.now());
+      if (!st.ok) {
+        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildCurrentJobRows(member) });
+        return true;
+      }
+    }
     await replyOrUpdate(interaction, { embeds: [buildStarterJobsEmbed()], components: buildStarterJobsRows() });
     return true;
   }
 
   if (id === ECON_WORK_BUTTON_TIER2) {
+    // Пока откат после смены не прошёл — запрещаем смену работы.
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (u.jobId) {
+      const st = canWorkNow(u, u.jobId as any, Date.now());
+      if (!st.ok) {
+        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildCurrentJobRows(member) });
+        return true;
+      }
+    }
     const embed = new EmbedBuilder()
       .setColor(PANEL_COLOR)
       .setTitle("Профессии (тир 2)")
@@ -915,6 +949,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     const cur = getEconomyUser(member.guild.id, member.id);
+    // Пока откат после смены не прошёл — запрещаем смену/взятие другой работы.
+    if (cur.jobId) {
+      const st = canWorkNow(cur, cur.jobId as any, Date.now());
+      if (!st.ok && cur.jobId !== (jobId as any)) {
+        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildCurrentJobRows(member) });
+        return true;
+      }
+    }
     const def = getAnyJobDef(jobId);
     const req = meetsJobReq(cur, def);
     if (!req.ok) {
@@ -932,6 +974,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
       return true;
     }
+    const st = canWorkNow(u, u.jobId as any, Date.now());
+    if (!st.ok) {
+      await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildCurrentJobRows(member) });
+      return true;
+    }
     const embed = new EmbedBuilder()
       .setColor(PANEL_COLOR)
       .setTitle("Увольнение")
@@ -945,6 +992,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_WORK_BUTTON_QUIT_CONFIRM) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (u.jobId) {
+      const st = canWorkNow(u, u.jobId as any, Date.now());
+      if (!st.ok) {
+        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildCurrentJobRows(member) });
+        return true;
+      }
+    }
     patchEconomyUser(member.guild.id, member.id, { jobId: undefined, jobChosenAt: undefined, lastWorkAt: undefined });
     await replyOrUpdate(interaction, { embeds: [buildWorkMenuEmbed(member)], components: buildWorkMenuRows() });
     return true;
