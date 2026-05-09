@@ -87,7 +87,7 @@ const SHOP_SIM_NEW_PRICE_RUB = 100;
 const SHOP_SIM_START_BALANCE_RUB = 50;
 const COURIER_LINE_24H_MS = 24 * 60 * 60 * 1000;
 const COURIER_LINE_OPEN_FEE_RUB = 20;
-const COURIER_SIM_AIRTIME_PER_SHIFT_RUB = 8;
+const COURIER_SIM_AIRTIME_PER_SHIFT_RUB = 20;
 const BIKE_1D_MS = 1 * 86400000;
 const BIKE_3D_MS = 3 * 86400000;
 const BIKE_7D_MS = 7 * 86400000;
@@ -593,26 +593,30 @@ function hasActiveBikeRental(u: ReturnType<typeof getEconomyUser>, now: number):
   return Number.isFinite(u.courierBikeUntilMs) && (u.courierBikeUntilMs ?? 0) > now;
 }
 
-/** Строки для курьера: вел, баланс сим (сколько смен хватит), линия 24 ч — только при текущей работе «курьер». */
+/** Строки для курьера: электровелосипед, тариф сим 24 ч, баланс сим — только при текущей работе «курьер». */
 function courierWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
   if (u.jobId !== "courier") return [];
+  const line = COURIER_LINE_OPEN_FEE_RUB;
+  const per = COURIER_SIM_AIRTIME_PER_SHIFT_RUB;
   const lines: string[] = [];
   if (hasActiveBikeRental(u, now)) {
     const t = Math.floor((u.courierBikeUntilMs ?? 0) / 1000);
-    lines.push(`Вел оплачен до <t:${t}:F> (<t:${t}:R>).`);
+    lines.push(`**Электровелосипед:** оплачен до <t:${t}:F> (<t:${t}:R>).`);
   } else {
-    lines.push("Вел: **аренда не активна**.");
+    lines.push("**Электровелосипед:** аренда **не активна**.");
   }
-  const bals = u.simBalanceRub ?? 0;
-  const per = COURIER_SIM_AIRTIME_PER_SHIFT_RUB;
-  const shiftsLeft = per > 0 ? Math.floor(bals / per) : 0;
-  lines.push(`Баланс сим: **${fmt(bals)}** ₽ — хватает примерно на **${shiftsLeft}** смен(ы) по **${per}** ₽/смену.`);
   if (u.courierPhonePaidUntilMs && now < u.courierPhonePaidUntilMs) {
     const lt = Math.floor(u.courierPhonePaidUntilMs / 1000);
-    lines.push(`Линия (24 ч) оплачена до <t:${lt}:F>.`);
+    lines.push(`**Сим-карта:** тариф на **24 ч** оплачен до <t:${lt}:F>.`);
   } else {
-    lines.push("Линия (24 ч): **нет активного окна** — при следующей смене спишется оплата, если нужно.");
+    lines.push(
+      `**Сим-карта:** тариф на **24 ч** **не оплачен** — при выходе на смену с **основного счёта** спишется **${line}** ₽ за новое окно.`,
+    );
   }
+  const bals = u.simBalanceRub ?? 0;
+  lines.push(
+    `**Баланс сим:** **${fmt(bals)}** ₽ — за связь за смену с баланса сим списывается **${per}** ₽; неоплаченный **тариф 24 ч** при выходе на смену оплачивается **с основного счёта** (**${line}** ₽).`,
+  );
   return lines;
 }
 
@@ -779,7 +783,6 @@ function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
   const cd = u.jobId === "courier" ? effectiveCourierCooldownMs(u, now) : def.baseCooldownMs;
   const lines = [
     `Текущая работа: **${def.title}**`,
-    `Баланс: **${fmt(u.rubles)} ₽**`,
     `Оплата за смену: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}** · КД: **${cdHoursLabel(cd)} ч**`,
     state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
   ];
@@ -975,23 +978,25 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
 
   if (u.jobId === jobId) {
     const state = canWorkNow(u, jobId, now);
-    const shiftRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(ECON_WORK_BUTTON_SHIFT)
-        .setLabel("Выйти на смену")
-        .setStyle(ButtonStyle.Success)
-        .setDisabled(!state.ok),
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ECON_WORK_BUTTON_SHIFT)
+          .setLabel("Выйти на смену")
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(!state.ok),
+      ),
     );
-    rows.push(shiftRow);
     if (jobId === "courier") {
       rows.push(buildCourierBikeRow(member));
     }
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_QUIT).setLabel("Уволиться").setStyle(ButtonStyle.Danger),
         new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
       ),
     );
-    rows.push(buildMenuRow());
     return rows;
   }
 
@@ -1033,7 +1038,6 @@ function buildCurrentJobEmbed(
   const lines = [
     `Текущая работа: **${def.title}**`,
     `Опыт смен на этой работе: **${exp}**`,
-    `Баланс: **${fmt(u.rubles)} ₽**`,
     jobPayoutEmbedLine(u.jobId, def.basePayoutRub),
     `КД смены: **${cdHoursLabel(cd)} ч**`,
     state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
@@ -1070,23 +1074,19 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   }
 
   const state = canWorkNow(u, u.jobId, now);
-  const shiftRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_SHIFT).setLabel("Выйти на смену").setStyle(ButtonStyle.Success).setDisabled(!state.ok),
-  );
-
-  rows.push(shiftRow);
+  const backId = isTier2JobId(u.jobId) ? ECON_WORK_BUTTON_TIER2 : ECON_WORK_BUTTON_STARTERS;
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(ECON_WORK_BUTTON_QUIT)
-        .setLabel("Уволиться")
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(!state.ok),
-      new ButtonBuilder()
-        .setCustomId(ECON_WORK_BUTTON_STARTERS)
-        .setLabel("Сменить")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!state.ok),
+      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_SHIFT).setLabel("Выйти на смену").setStyle(ButtonStyle.Success).setDisabled(!state.ok),
+    ),
+  );
+  if (u.jobId === "courier") {
+    rows.push(buildCourierBikeRow(member));
+  }
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_QUIT).setLabel("Уволиться").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
     ),
   );
