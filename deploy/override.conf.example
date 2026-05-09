@@ -1,0 +1,12 @@
+# Paste into: /etc/systemd/system/discord-nash-bot.service.d/override.conf
+# (or use: sudo systemctl edit discord-nash-bot)
+#
+# StartLimit* belongs in [Unit]. Restart* belongs in [Service].
+
+[Unit]
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Restart=on-failure
+RestartSec=60

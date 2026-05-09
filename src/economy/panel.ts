@@ -21,7 +21,15 @@ import {
   setEconomyFeedPanelMessageId,
   setEconomyTerminalPanelMessageId,
 } from "./panelStore.js";
-import { getEconomyUser, listEconomyUsers, patchEconomyUser, type FocusPreset, type JobId, type SkillId } from "./userStore.js";
+import {
+  ECONOMY_SKILL_MAX,
+  getEconomyUser,
+  listEconomyUsers,
+  patchEconomyUser,
+  type FocusPreset,
+  type JobId,
+  type SkillId,
+} from "./userStore.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 
 export const ECON_BUTTON_MENU = "econ:menu";
@@ -361,8 +369,10 @@ function jobTitle(id: JobId): string {
 
 function formatCooldown(msLeft: number): string {
   const sec = Math.max(0, Math.floor(msLeft / 1000));
-  const h = Math.floor(sec / 3600);
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
   const m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return `${d}д ${h}ч`;
   if (h > 0) return `${h}ч ${m}м`;
   return `${m}м`;
 }
@@ -432,6 +442,7 @@ function getJobDef(id: JobId): JobDef {
   return d;
 }
 
+// Тир-2: по 2 навыка на профессию. Тир-3 — комбо из трёх навыков.
 const JOBS_TIER2: JobDef[] = [
   {
     id: "dispatcher",
@@ -440,7 +451,7 @@ const JOBS_TIER2: JobDef[] = [
     // Тир-2: меньше кликов, стабильнее, чуть выгоднее за день без “разрыва”.
     basePayoutRub: 140,
     description: ["Самая стабильная работа тира 2. Без штрафов и без рандома."].join("\n"),
-    reqSkills: { communication: 2 },
+    reqSkills: { communication: 28, discipline: 20 },
   },
   {
     id: "assembler",
@@ -448,7 +459,7 @@ const JOBS_TIER2: JobDef[] = [
     baseCooldownMs: 12 * 60 * 60 * 1000,
     basePayoutRub: 260,
     description: ["Редкие штрафы. Премия за каждые 6 смен."].join("\n"),
-    reqSkills: { discipline: 2 },
+    reqSkills: { discipline: 28, logistics: 20 },
   },
   {
     id: "expediter",
@@ -456,7 +467,7 @@ const JOBS_TIER2: JobDef[] = [
     baseCooldownMs: 3 * 60 * 60 * 1000,
     basePayoutRub: 0,
     description: ["Нет фиксированной оплаты: доход зависит от потока заказов (рандом с уклоном к среднему)."].join("\n"),
-    reqSkills: { logistics: 3 },
+    reqSkills: { logistics: 28, communication: 20 },
   },
 ];
 
@@ -619,15 +630,20 @@ function buildJobInfoEmbed(member: GuildMember, jobId: AnyJobId): EmbedBuilder {
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
+function isTier2JobId(jobId: AnyJobId): boolean {
+  return JOBS_TIER2.some((j) => j.id === jobId);
+}
+
 function buildJobInfoRows(u: ReturnType<typeof getEconomyUser>, jobId: AnyJobId, canTake: boolean): ActionRowBuilder<ButtonBuilder>[] {
   const takeId = `${ECON_WORK_BUTTON_TAKE_PREFIX}${jobId}`;
+  const backId = isTier2JobId(jobId) ? ECON_WORK_BUTTON_TIER2 : ECON_WORK_BUTTON_STARTERS;
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(takeId)
       .setLabel(u.jobId === (jobId as any) ? "Уже выбрано" : "Взяться за работу")
       .setStyle(ButtonStyle.Primary)
       .setDisabled(u.jobId === (jobId as any) || !canTake),
-    new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
   );
   return [row, buildMenuRow()];
 }
@@ -740,14 +756,15 @@ const SKILLS: Array<{ id: SkillId; title: string }> = [
 ];
 
 const ECON_SKILL_BUTTON_PREFIX = "econ:skill:";
+// Общий КД на любую тренировку: ~2–3 раза в сутки при активной игре.
 const TRAIN_COOLDOWN_MS = 8 * 60 * 60 * 1000;
 
 function buildSkillsEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const now = Date.now();
   const left = u.lastTrainAt ? Math.max(0, u.lastTrainAt + TRAIN_COOLDOWN_MS - now) : 0;
-  const cdLine = left > 0 ? `Тренировка доступна через **${formatCooldown(left)}**.` : "Тренировка **доступна сейчас**.";
-  const lines = SKILLS.map((s) => `- **${s.title}**: ${getSkillLevel(u, s.id)}`);
+  const cdLine = left > 0 ? `Следующая тренировка (любой навык) через **${formatCooldown(left)}**.` : "Тренировка **доступна сейчас**.";
+  const lines = SKILLS.map((s) => `- **${s.title}**: ${getSkillLevel(u, s.id)} / ${ECONOMY_SKILL_MAX}`);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Навыки")
@@ -758,15 +775,16 @@ function buildSkillsEmbed(member: GuildMember): EmbedBuilder {
 function buildSkillsRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const now = Date.now();
-  const canTrain = !u.lastTrainAt || now >= u.lastTrainAt + TRAIN_COOLDOWN_MS;
+  const cooldownReady = !u.lastTrainAt || now >= u.lastTrainAt + TRAIN_COOLDOWN_MS;
   const row = new ActionRowBuilder<ButtonBuilder>();
   for (const s of SKILLS) {
+    const atMax = getSkillLevel(u, s.id) >= ECONOMY_SKILL_MAX;
     row.addComponents(
       new ButtonBuilder()
         .setCustomId(`${ECON_SKILL_BUTTON_PREFIX}${s.id}`)
         .setLabel(`Тренировать: ${s.title}`)
         .setStyle(ButtonStyle.Primary)
-        .setDisabled(!canTrain),
+        .setDisabled(!cooldownReady || atMax),
     );
   }
   return [row, buildMenuRow()];
@@ -1287,7 +1305,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     const curLvl = getSkillLevel(u, skillId);
-    const nextLvl = Math.min(10, curLvl + 1);
+    if (curLvl >= ECONOMY_SKILL_MAX) {
+      await replyOrUpdate(interaction, { embeds: [buildSkillsEmbed(member)], components: buildSkillsRows(member) });
+      return true;
+    }
+    const nextLvl = Math.min(ECONOMY_SKILL_MAX, curLvl + 1);
     patchEconomyUser(member.guild.id, member.id, {
       skills: { ...(u.skills ?? {}), [skillId]: nextLvl },
       lastTrainAt: now,

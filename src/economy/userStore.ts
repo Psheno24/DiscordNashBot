@@ -6,6 +6,9 @@ export type FocusPreset = "role" | "balance" | "money";
 export type JobId = "courier" | "waiter" | "watchman";
 export type SkillId = "communication" | "logistics" | "discipline";
 
+/** Потолок уровня навыка; тир-3 можно строить на комбо в духе 40+/60+/80+ при том же счётчике. */
+export const ECONOMY_SKILL_MAX = 99;
+
 export interface EconomyUser {
   psTotal: number;
   rubles: number;
@@ -25,7 +28,7 @@ export interface EconomyUser {
   /** Сколько смен курьера осталось с активным электровелом (снижение КД). */
   courierBikeShiftsLeft?: number;
 
-  /** Навыки: skillId → level (1..10). Отсутствует = 0. */
+  /** Навыки: skillId → уровень (1..ECONOMY_SKILL_MAX). Отсутствует = 0. */
   skills?: Partial<Record<SkillId, number>>;
   /** Последняя тренировка навыков (unix ms) */
   lastTrainAt?: number;
@@ -63,7 +66,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined): EconomyUser {
   const skills: Partial<Record<SkillId, number>> = {};
   for (const k of ["communication", "logistics", "discipline"] as const) {
     const v = (rawSkills as any)?.[k];
-    if (Number.isFinite(v) && v > 0) skills[k] = Math.min(10, Math.floor(v));
+    if (Number.isFinite(v) && v > 0) skills[k] = Math.min(ECONOMY_SKILL_MAX, Math.floor(v));
   }
 
   const rawJobExp = (u as any)?.jobExp ?? {};
