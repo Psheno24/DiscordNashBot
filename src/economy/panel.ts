@@ -31,6 +31,7 @@ import {
   type SkillId,
 } from "./userStore.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
+import { listBetEvents, type BetEvent } from "../bets/store.js";
 import { drawSimNumberFromPool, releaseSimNumberToPool } from "./simPoolStore.js";
 
 export const ECON_BUTTON_MENU = "econ:menu";
@@ -52,6 +53,7 @@ const ECON_COURIER_BIKE_7D = "econ:work:courierbike:7d";
 const ECON_PROFILE_BUTTON_INFO = "econ:profile:info";
 const ECON_PROFILE_BUTTON_FOCUS = "econ:profile:focus";
 const ECON_PROFILE_BUTTON_LADDER = "econ:profile:ladder";
+const ECON_PROFILE_BUTTON_BETS_HISTORY = "econ:profile:betsHistory";
 
 const ECON_BUTTON_FOCUS_ROLE = "econ:focus:role";
 const ECON_BUTTON_FOCUS_BALANCE = "econ:focus:balance";
@@ -60,6 +62,7 @@ const ECON_WORK_BUTTON_STARTERS = "econ:work:starters";
 const ECON_WORK_BUTTON_JOB_PREFIX = "econ:work:job:";
 const ECON_WORK_BUTTON_TAKE_PREFIX = "econ:work:take:";
 const ECON_WORK_BUTTON_SHIFT = "econ:work:shift";
+const ECON_WORK_BUTTON_MY_JOB = "econ:work:myJob";
 const ECON_WORK_BUTTON_QUIT = "econ:work:quit";
 const ECON_WORK_BUTTON_QUIT_CONFIRM = "econ:work:quit:confirm";
 /** Подтверждение: уволиться с текущей и взять `jobId` */
@@ -186,24 +189,87 @@ function buildProfileHubEmbed(member: GuildMember): EmbedBuilder {
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
-function buildProfileHubRows(active: "info" | "focus" | "ladder"): ActionRowBuilder<ButtonBuilder>[] {
+function buildProfileHubRows(active: "info" | "focus" | "ladder" | "bets"): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(ECON_PROFILE_BUTTON_INFO)
-        .setLabel(active === "info" ? "Инфо ✓" : "Инфо")
+        .setLabel("Инфо")
         .setStyle(active === "info" ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(ECON_PROFILE_BUTTON_FOCUS)
-        .setLabel(active === "focus" ? "Фокус ✓" : "Фокус")
+        .setLabel("Фокус")
         .setStyle(active === "focus" ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(ECON_PROFILE_BUTTON_LADDER)
-        .setLabel(active === "ladder" ? "Лестница ✓" : "Лестница")
+        .setLabel("Лестница")
         .setStyle(active === "ladder" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(ECON_PROFILE_BUTTON_BETS_HISTORY)
+        .setLabel("История ставок")
+        .setStyle(active === "bets" ? ButtonStyle.Primary : ButtonStyle.Secondary),
     ),
     buildMenuRow(),
   ];
+}
+
+/** Чистый результат по ₽ относительно баланса до ставки: выигрыш = выплата − тело, проиграли = −тело, отмена = 0. */
+function betNetRublesForUser(ev: BetEvent, userId: string): number | "pending" | "cancelled" {
+  const b = ev.bets[userId];
+  if (!b) return "pending";
+  if (ev.status === "cancelled") return "cancelled";
+  if (ev.status !== "resolved" || !ev.winningOptionId) return "pending";
+  const winOpt = ev.options.find((o) => o.id === ev.winningOptionId);
+  if (!winOpt) return "pending";
+  if (b.optionId === ev.winningOptionId) {
+    const payout = Math.floor(b.amount * winOpt.odds);
+    return payout - b.amount;
+  }
+  return -b.amount;
+}
+
+function buildProfileBetHistoryEmbed(member: GuildMember): EmbedBuilder {
+  const guildId = member.guild.id;
+  const userId = member.id;
+  const all = listBetEvents(guildId).sort((a, b) => b.createdAt - a.createdAt);
+  const mine = all.filter((e) => Boolean(e.bets[userId])).slice(0, 15);
+
+  if (mine.length === 0) {
+    return new EmbedBuilder()
+      .setColor(PROFILE_COLOR)
+      .setTitle("История ставок")
+      .setDescription("Пока нет ни одной ставки.")
+      .setFooter({ text: `Запросил: ${member.user.tag}` });
+  }
+
+  const blocks: string[] = [];
+  for (const e of mine) {
+    const b = e.bets[userId]!;
+    const opt = e.options.find((o) => o.id === b.optionId);
+    const label = opt?.label ?? b.optionId;
+    const net = betNetRublesForUser(e, userId);
+    let resultLine: string;
+    if (net === "pending") {
+      resultLine = "_Итог: ждёт решения админа._";
+    } else if (net === "cancelled") {
+      resultLine = "Итог: **возврат** ставки (событие отменено).";
+    } else if (net > 0) {
+      resultLine = `\`\`\`ansi\n\u001b[1;32m+${fmt(net)} ₽\u001b[0m\n\`\`\``;
+    } else if (net < 0) {
+      resultLine = `\`\`\`ansi\n\u001b[1;31m${formatDelta(net)}\u001b[0m\n\`\`\``;
+    } else {
+      resultLine = "**0 ₽** (без изменения баланса по итогу).";
+    }
+    blocks.push(
+      [`**${e.title}**`, `Ставка: **${fmt(b.amount)} ₽** на «${label}»`, resultLine].join("\n"),
+    );
+  }
+
+  return new EmbedBuilder()
+    .setColor(PROFILE_COLOR)
+    .setTitle("История ставок")
+    .setDescription(blocks.join("\n\n"))
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
 function buildFocusRows(cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
@@ -410,9 +476,9 @@ const JOBS_STARTER: JobDef[] = [
     basePayoutRub: 88,
     description:
       [
-        "**Самый короткий КД** тира (3 ч, с арендой вела — 2 ч): максимум ₽/ч при активности.",
-        "Нужны **телефон** и **симка**; за смену списываются оплата линии и баланс сим (при нажатии «смена»).",
-        "**Электровел** — аренда по дням (кнопки в карточке **Курьер**, пока это ваша текущая работа).",
+        "**Самый короткий КД** тира (3 ч, с арендой вела — 2 ч).",
+        `Нужны **телефон** и **симка**; при **выходе на смену** — **${COURIER_LINE_OPEN_FEE_RUB}** ₽ за **линию на 24 ч** (если окно вышло) и списание **${COURIER_SIM_AIRTIME_PER_SHIFT_RUB}** ₽ **с баланса сим** за связь.`,
+        "**Электровел** — посуточная аренда (кнопки в этой карточке).",
       ].join("\n"),
   },
   {
@@ -420,10 +486,7 @@ const JOBS_STARTER: JobDef[] = [
     title: "Официант",
     baseCooldownMs: 5 * 60 * 60 * 1000,
     basePayoutRub: 0,
-    description:
-      [
-        "**Средний КД** (5 ч). **Без фиксированного оклада**: смена может уйти в минус или дать больше курьера.",
-      ].join("\n"),
+    description: ["**Средний КД** (5 ч). **Без фиксированного оклада**: разброс выплаты за смену."].join("\n"),
   },
   {
     id: "watchman",
@@ -530,13 +593,39 @@ function hasActiveBikeRental(u: ReturnType<typeof getEconomyUser>, now: number):
   return Number.isFinite(u.courierBikeUntilMs) && (u.courierBikeUntilMs ?? 0) > now;
 }
 
+/** Строки для курьера: вел, баланс сим (сколько смен хватит), линия 24 ч — только при текущей работе «курьер». */
+function courierWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
+  if (u.jobId !== "courier") return [];
+  const lines: string[] = [];
+  if (hasActiveBikeRental(u, now)) {
+    const t = Math.floor((u.courierBikeUntilMs ?? 0) / 1000);
+    lines.push(`Вел оплачен до <t:${t}:F> (<t:${t}:R>).`);
+  } else {
+    lines.push("Вел: **аренда не активна**.");
+  }
+  const bals = u.simBalanceRub ?? 0;
+  const per = COURIER_SIM_AIRTIME_PER_SHIFT_RUB;
+  const shiftsLeft = per > 0 ? Math.floor(bals / per) : 0;
+  lines.push(`Баланс сим: **${fmt(bals)}** ₽ — хватает примерно на **${shiftsLeft}** смен(ы) по **${per}** ₽/смену.`);
+  if (u.courierPhonePaidUntilMs && now < u.courierPhonePaidUntilMs) {
+    const lt = Math.floor(u.courierPhonePaidUntilMs / 1000);
+    lines.push(`Линия (24 ч) оплачена до <t:${lt}:F>.`);
+  } else {
+    lines.push("Линия (24 ч): **нет активного окна** — при следующей смене спишется оплата, если нужно.");
+  }
+  return lines;
+}
+
 function jobUsesVariablePayout(jobId: JobId): boolean {
   return jobId === "waiter" || jobId === "expediter";
 }
 
 function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
-  if (jobUsesVariablePayout(jobId)) {
-    return "Оплата за смену: **без фикса** (рандом прибыли и убытка).";
+  if (jobId === "waiter") {
+    return "Оплата за смену: **без фикса** — разброс **примерно −55…+175 ₽** (частый коридор **+45…+95 ₽**).";
+  }
+  if (jobId === "expediter") {
+    return "Оплата за смену: **без фикса** — разброс **примерно −58…+185 ₽** (частый коридор **+50…+110 ₽**).";
   }
   return `Оплата за смену: **${baseRub} ₽**`;
 }
@@ -691,13 +780,13 @@ function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
   const lines = [
     `Текущая работа: **${def.title}**`,
     `Баланс: **${fmt(u.rubles)} ₽**`,
-    `Оплата за смену: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}** · КД: **${Math.round(cd / 60000)} мин**`,
+    `Оплата за смену: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}** · КД: **${cdHoursLabel(cd)} ч**`,
     state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
   ];
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Работа")
-    .setDescription([...lines, "", "Сверху — смена, ниже — каталог профессий."].join("\n"))
+    .setDescription([...lines, "", "Сверху — смена и «моя работа», ниже — каталог профессий."].join("\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -721,6 +810,11 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
       .setLabel("Выйти на смену")
       .setStyle(ButtonStyle.Success)
       .setDisabled(!state.ok),
+    new ButtonBuilder()
+      .setCustomId(ECON_WORK_BUTTON_MY_JOB)
+      .setLabel("Моя работа")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!u.jobId),
   );
   rows.push(shiftRow);
   rows.push(
@@ -731,11 +825,6 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
   );
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(ECON_WORK_BUTTON_QUIT)
-        .setLabel("Уволиться")
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(!state.ok),
       new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
     ),
   );
@@ -817,10 +906,13 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   const def = getAnyJobDef(jobId);
   const now = Date.now();
   const cd = jobId === "courier" ? effectiveCourierCooldownMs(u, now) : def.baseCooldownMs;
-  const cdH = Math.round(cd / 360000) / 10;
   const extra: string[] = [];
-  const exp = Math.max(0, Math.floor((u.jobExp as any)?.[jobId] ?? 0));
-  extra.push(`Опыт смен: **${exp}**`);
+  const exp = getJobExp(u, jobId);
+  extra.push(`Опыт смен на **этой** профессии: **${exp}**`);
+  if (jobId === "courier" && u.jobId === "courier") {
+    extra.push("");
+    extra.push(...courierWorkExtrasLines(u, now));
+  }
   const req = meetsJobReq(u, def);
   if ((def.reqSkills ?? {}) && Object.keys(def.reqSkills ?? {}).length > 0) {
     extra.push("");
@@ -835,7 +927,7 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
         def.description,
         "",
         jobPayoutEmbedLine(jobId, def.basePayoutRub),
-        `КД смены: **~${cdH} ч**`,
+        `КД смены: **${cdHoursLabel(cd)} ч**`,
         ...(extra.length ? ["", ...extra] : []),
         "",
         u.jobId === jobId ? "Статус: **это ваша текущая работа**." : "Статус: **не выбрана**.",
@@ -937,15 +1029,19 @@ function buildCurrentJobEmbed(
   const now = Date.now();
   const cd = u.jobId === "courier" ? effectiveCourierCooldownMs(u, now) : def.baseCooldownMs;
   const state = canWorkNow(u, u.jobId, now);
-  const exp = Math.max(0, Math.floor((u.jobExp as any)?.[u.jobId] ?? 0));
+  const exp = getJobExp(u, u.jobId);
   const lines = [
     `Текущая работа: **${def.title}**`,
-    `Опыт смен: **${exp}**`,
+    `Опыт смен на этой работе: **${exp}**`,
     `Баланс: **${fmt(u.rubles)} ₽**`,
-    `Оплата за смену: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}**`,
-    `КД смены: **${Math.round(cd / 60000)} мин**`,
+    jobPayoutEmbedLine(u.jobId, def.basePayoutRub),
+    `КД смены: **${cdHoursLabel(cd)} ч**`,
     state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
   ];
+  if (u.jobId === "courier") {
+    lines.push("");
+    lines.push(...courierWorkExtrasLines(u, now));
+  }
 
   if (opts?.lastShiftDeltaRub != null) {
     lines.push("");
@@ -1179,6 +1275,7 @@ function isEconomyButton(id: string): boolean {
       ECON_PROFILE_BUTTON_INFO,
       ECON_PROFILE_BUTTON_FOCUS,
       ECON_PROFILE_BUTTON_LADDER,
+      ECON_PROFILE_BUTTON_BETS_HISTORY,
       ECON_BUTTON_FOCUS_ROLE,
       ECON_BUTTON_FOCUS_BALANCE,
       ECON_BUTTON_FOCUS_MONEY,
@@ -1195,6 +1292,7 @@ function isEconomyButton(id: string): boolean {
       ECON_WORK_BUTTON_STARTERS,
       ECON_WORK_BUTTON_TIER2,
       ECON_WORK_BUTTON_SHIFT,
+      ECON_WORK_BUTTON_MY_JOB,
       ECON_WORK_BUTTON_QUIT,
       ECON_WORK_BUTTON_QUIT_CONFIRM,
       ECON_BUTTON_SKILLS,
@@ -1267,8 +1365,23 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_PROFILE_BUTTON_BETS_HISTORY) {
+    await replyOrUpdate(interaction, { embeds: [buildProfileBetHistoryEmbed(member)], components: buildProfileHubRows("bets") });
+    return true;
+  }
+
   if (id === ECON_BUTTON_WORK) {
     await replyOrUpdate(interaction, { embeds: [buildWorkMenuEmbed(member)], components: buildWorkMenuRows(member) });
+    return true;
+  }
+
+  if (id === ECON_WORK_BUTTON_MY_JOB) {
+    const uj = getEconomyUser(member.guild.id, member.id);
+    if (!uj.jobId) {
+      await interaction.reply({ content: "Сначала выберите работу в каталоге.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
     return true;
   }
 
@@ -1597,19 +1710,19 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       const r = Math.random();
       if (r < 0.1) {
         extra = -randInt(25, 55);
-        notes.push(`смена ${formatDelta(extra)}`);
+        notes.push(`Штраф **${formatDelta(extra)}** — инцидент (бойка посуды, жалоба, компенсация гостю).`);
       } else if (r < 0.28) {
         extra = randInt(-8, 28);
-        notes.push(`смена ${formatDelta(extra)}`);
+        notes.push(`Сдвиг **${formatDelta(extra)}** — обычная смена (чаевые и мелкие расходы).`);
       } else if (r < 0.6) {
         extra = randInt(42, 78);
-        notes.push(`выручка ${formatDelta(extra)}`);
+        notes.push(`Доп. заработок **${formatDelta(extra)}** — хорошие чаевые и допродажи.`);
       } else if (r < 0.88) {
         extra = randInt(72, 112);
-        notes.push(`выручка ${formatDelta(extra)}`);
+        notes.push(`Доп. заработок **${formatDelta(extra)}** — оживлённый зал, много заказов.`);
       } else {
         extra = randInt(105, 175);
-        notes.push(`выручка ${formatDelta(extra)}`);
+        notes.push(`Доп. заработок **${formatDelta(extra)}** — отличная смена (крупные чаевые, премия зала).`);
       }
     } else if (jobId === "watchman") {
       // только фикс
@@ -1631,19 +1744,19 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       const r = Math.random();
       if (r < 0.11) {
         extra = -randInt(22, 58);
-        notes.push(`убыток ${formatDelta(extra)}`);
+        notes.push(`Штраф / убыток **${formatDelta(extra)}** — поломка груза, штраф заказчика или срыв срока.`);
       } else if (r < 0.33) {
         extra = randInt(18, 42);
-        notes.push(`поток ${formatDelta(extra)}`);
+        notes.push(`Доп. к смене **${formatDelta(extra)}** — ровный маршрут без сюрпризов.`);
       } else if (r < 0.68) {
         extra = randInt(48, 82);
-        notes.push(`поток ${formatDelta(extra)}`);
+        notes.push(`Доп. к смене **${formatDelta(extra)}** — плотный график, много точек.`);
       } else if (r < 0.9) {
         extra = randInt(72, 118);
-        notes.push(`поток ${formatDelta(extra)}`);
+        notes.push(`Доп. к смене **${formatDelta(extra)}** — удачные рейсы, премия за скорость.`);
       } else {
         extra = randInt(108, 185);
-        notes.push(`поток ${formatDelta(extra)}`);
+        notes.push(`Доп. к смене **${formatDelta(extra)}** — «жирный» день: крупные заказы и бонусы.`);
       }
     } else if (jobId === "courier") {
       // фикс в base
@@ -1767,13 +1880,29 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_PLAYERS_BUTTON_TOP_PS) {
     const e = await buildTopEmbed(member, "ps");
-    await replyOrUpdate(interaction, { embeds: [e], components: [buildMenuRow()] });
+    await replyOrUpdate(interaction, {
+      embeds: [e],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(ECON_BUTTON_PLAYERS).setLabel("Назад к игрокам").setStyle(ButtonStyle.Secondary),
+        ),
+        buildMenuRow(),
+      ],
+    });
     return true;
   }
 
   if (id === ECON_PLAYERS_BUTTON_TOP_RUB) {
     const e = await buildTopEmbed(member, "rub");
-    await replyOrUpdate(interaction, { embeds: [e], components: [buildMenuRow()] });
+    await replyOrUpdate(interaction, {
+      embeds: [e],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(ECON_BUTTON_PLAYERS).setLabel("Назад к игрокам").setStyle(ButtonStyle.Secondary),
+        ),
+        buildMenuRow(),
+      ],
+    });
     return true;
   }
 

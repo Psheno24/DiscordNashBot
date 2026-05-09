@@ -21,11 +21,38 @@ import { getBetEvent, listBetEvents, upsertBetEvent, type BetEvent } from "./sto
 
 export const NEURO_ADMIN_BUTTON_MENU = "neuroAdmin:menu";
 export const NEURO_ADMIN_BUTTON_CREATE_BET = "neuroAdmin:createBet";
+/** После отправки шага 1 модалки — кнопка в ephemeral для открытия шага 2 */
+export const NEURO_ADMIN_BUTTON_CREATE_BET_STEP2 = "neuroAdmin:createBetStep2";
 export const NEURO_ADMIN_BUTTON_GRANT_RUB = "neuroAdmin:grantRub";
 export const NEURO_ADMIN_BUTTON_BETS = "neuroAdmin:bets";
 
-const MODAL_CREATE_BET = "modal:bet:create";
+/** Шаг 1: название + 2 исхода (имя + коэфф). Шаг 2: третий исход + время (лимит Discord — 5 полей в модалке). */
+const MODAL_CREATE_BET_P1 = "modal:bet:create:step1";
+const MODAL_CREATE_BET_P2 = "modal:bet:create:step2";
 const MODAL_GRANT_RUB = "modal:econ:grantRub";
+
+const BET_CREATE_DRAFT_TTL_MS = 15 * 60 * 1000;
+
+type BetCreateDraft = {
+  ts: number;
+  guildId: string;
+  title: string;
+  o1: { label: string; odds: number };
+  o2: { label: string; odds: number };
+};
+
+const betCreateDrafts = new Map<string, BetCreateDraft>();
+
+function betCreateDraftKey(guildId: string, userId: string): string {
+  return `${guildId}:${userId}`;
+}
+
+function pruneBetCreateDrafts(): void {
+  const now = Date.now();
+  for (const [k, v] of betCreateDrafts) {
+    if (now - v.ts > BET_CREATE_DRAFT_TTL_MS) betCreateDrafts.delete(k);
+  }
+}
 
 const BET_BUTTON_OPEN_PREFIX = "bet:open:";
 const BET_MENU_PICK_PREFIX = "bet:menuPick:";
@@ -95,6 +122,7 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
     ![
       NEURO_ADMIN_BUTTON_MENU,
       NEURO_ADMIN_BUTTON_CREATE_BET,
+      NEURO_ADMIN_BUTTON_CREATE_BET_STEP2,
       NEURO_ADMIN_BUTTON_GRANT_RUB,
       NEURO_ADMIN_BUTTON_BETS,
     ].includes(id) &&
@@ -154,38 +182,84 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
   }
 
   if (id === NEURO_ADMIN_BUTTON_CREATE_BET) {
-    const modal = new ModalBuilder().setCustomId(MODAL_CREATE_BET).setTitle("Создать ставку");
+    const modal = new ModalBuilder().setCustomId(MODAL_CREATE_BET_P1).setTitle("Ставка — шаг 1 из 2");
     modal.addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder().setCustomId("title").setLabel("Название события").setStyle(TextInputStyle.Short).setRequired(true),
+        new TextInputBuilder().setCustomId("title").setLabel("Название события").setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(100),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
-          .setCustomId("a")
-          .setLabel("Победа 1 (пример: Team A | 1.8)")
+          .setCustomId("o1_label")
+          .setLabel("Исход 1 — название (команда)")
           .setStyle(TextInputStyle.Short)
-          .setRequired(true),
+          .setRequired(true)
+          .setMaxLength(80),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
-          .setCustomId("b")
-          .setLabel("Победа 2 (пример: Team B | 2.1)")
+          .setCustomId("o1_odds")
+          .setLabel("Исход 1 — коэффициент")
           .setStyle(TextInputStyle.Short)
-          .setRequired(true),
+          .setRequired(true)
+          .setPlaceholder("1,85"),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
-          .setCustomId("d")
-          .setLabel("Ничья (пример: Ничья | 3.2)")
+          .setCustomId("o2_label")
+          .setLabel("Исход 2 — название (команда)")
           .setStyle(TextInputStyle.Short)
-          .setRequired(true),
+          .setRequired(true)
+          .setMaxLength(80),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("o2_odds")
+          .setLabel("Исход 2 — коэффициент")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder("2,1"),
+      ),
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (id === NEURO_ADMIN_BUTTON_CREATE_BET_STEP2) {
+    pruneBetCreateDrafts();
+    const guildId = interaction.guildId!;
+    const key = betCreateDraftKey(guildId, interaction.user.id);
+    if (!betCreateDrafts.has(key)) {
+      await interaction.reply({
+        content: "Черновик истёк или шаг 1 не выполнен. Откройте **Создать ставку** заново.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    const modal = new ModalBuilder().setCustomId(MODAL_CREATE_BET_P2).setTitle("Ставка — шаг 2 из 2");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("d_label")
+          .setLabel("Исход 3 — название (напр. Ничья)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(80),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("d_odds")
+          .setLabel("Исход 3 — коэффициент")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setPlaceholder("3,2"),
       ),
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("closeAt")
-          .setLabel("Закрытие (МСК): DD-MM HH:MM")
+          .setLabel("Закрытие приёма (МСК): DD-MM HH:MM")
           .setStyle(TextInputStyle.Short)
-          .setRequired(true),
+          .setRequired(true)
+          .setPlaceholder("09-05 18:30"),
       ),
     );
     await interaction.showModal(modal);
@@ -213,16 +287,14 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
   return false;
 }
 
-function parseOptionWithOdds(raw: string, fallbackId: string): { id: string; label: string; odds: number } | undefined {
-  const t = raw.trim();
-  if (!t) return undefined;
-  const parts = t.split("|").map((x) => x.trim()).filter(Boolean);
-  const label = (parts[0] ?? "").slice(0, 80);
-  if (!label) return undefined;
-  const oddsRaw = parts[1] ?? "2.0";
-  const odds = Number.parseFloat(oddsRaw.replace(",", "."));
+function parseOddsField(raw: string): number | undefined {
+  const odds = Number.parseFloat(raw.trim().replace(",", "."));
   if (!Number.isFinite(odds) || odds < 1.01 || odds > 100) return undefined;
-  return { id: fallbackId, label, odds };
+  return odds;
+}
+
+function betOption(id: string, label: string, odds: number): { id: string; label: string; odds: number } {
+  return { id, label: label.slice(0, 80), odds };
 }
 
 function parseCloseAt(raw: string, now = Date.now()): number | undefined {
@@ -633,7 +705,7 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
 export async function handleBetModal(interaction: ModalSubmitInteraction): Promise<boolean> {
   const id = interaction.customId;
 
-  if (id === MODAL_CREATE_BET) {
+  if (id === MODAL_CREATE_BET_P1) {
     if (!interaction.inGuild() || !interaction.guildId) {
       await interaction.reply({ content: "Нужно запускать на сервере.", flags: MessageFlags.Ephemeral });
       return true;
@@ -643,24 +715,103 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       return true;
     }
 
+    pruneBetCreateDrafts();
     const guildId = interaction.guildId;
     const title = interaction.fields.getTextInputValue("title").trim();
-    const aRaw = interaction.fields.getTextInputValue("a").trim();
-    const bRaw = interaction.fields.getTextInputValue("b").trim();
-    const dRaw = interaction.fields.getTextInputValue("d").trim();
-    const closeAtRaw = interaction.fields.getTextInputValue("closeAt").trim();
-    const optA = parseOptionWithOdds(aRaw, "A");
-    const optB = parseOptionWithOdds(bRaw, "B");
-    const optD = parseOptionWithOdds(dRaw, "D");
-    const closesAt = parseCloseAt(closeAtRaw, Date.now());
-    if (!title || !optA || !optB || !optD || !closesAt) {
+    const o1Label = interaction.fields.getTextInputValue("o1_label").trim();
+    const o1Odds = parseOddsField(interaction.fields.getTextInputValue("o1_odds"));
+    const o2Label = interaction.fields.getTextInputValue("o2_label").trim();
+    const o2Odds = parseOddsField(interaction.fields.getTextInputValue("o2_odds"));
+
+    if (!title || !o1Label || !o2Label || o1Odds == null || o2Odds == null) {
       await interaction.reply({
         content:
-          "Некорректные поля.\n- Исходы: `Название | 1.8`\n- Закрытие (МСК): `08-05 18:30`",
+          "Проверьте поля: название и оба исхода с **коэффициентами** от **1,01** до **100** (можно с запятой).",
         flags: MessageFlags.Ephemeral,
       });
       return true;
     }
+
+    const key = betCreateDraftKey(guildId, interaction.user.id);
+    betCreateDrafts.set(key, {
+      ts: Date.now(),
+      guildId,
+      title,
+      o1: { label: o1Label, odds: o1Odds },
+      o2: { label: o2Label, odds: o2Odds },
+    });
+
+    const preview = new EmbedBuilder()
+      .setColor(0x0d47a1)
+      .setTitle("Черновик ставки — шаг 1 готов")
+      .setDescription(
+        [
+          `**${title}**`,
+          "",
+          `• **${o1Label}** — x${o1Odds.toLocaleString("ru-RU")}`,
+          `• **${o2Label}** — x${o2Odds.toLocaleString("ru-RU")}`,
+          "",
+          "Нажмите кнопку и во **2-й модалке** укажите **третий исход** (например ничья), его **коэффициент** и **время закрытия**.",
+          "",
+          "_В модалках Discord нет календаря — дату и время вводите текстом: **DD-MM HH:MM** по МСК._",
+        ].join("\n"),
+      );
+
+    await interaction.reply({
+      flags: MessageFlags.Ephemeral,
+      embeds: [preview],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(NEURO_ADMIN_BUTTON_CREATE_BET_STEP2)
+            .setLabel("Шаг 2: третий исход и закрытие")
+            .setStyle(ButtonStyle.Primary),
+        ),
+      ],
+    });
+    return true;
+  }
+
+  if (id === MODAL_CREATE_BET_P2) {
+    if (!interaction.inGuild() || !interaction.guildId) {
+      await interaction.reply({ content: "Нужно запускать на сервере.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (!canAdmin(interaction)) {
+      await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    pruneBetCreateDrafts();
+    const guildId = interaction.guildId;
+    const key = betCreateDraftKey(guildId, interaction.user.id);
+    const draft = betCreateDrafts.get(key);
+    if (!draft || draft.guildId !== guildId) {
+      await interaction.reply({
+        content: "Черновик не найден или истёк. Начните с **Создать ставку** (шаг 1).",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    const dLabelRaw = interaction.fields.getTextInputValue("d_label").trim();
+    const dLabel = dLabelRaw || "Ничья";
+    const dOdds = parseOddsField(interaction.fields.getTextInputValue("d_odds"));
+    const closeAtRaw = interaction.fields.getTextInputValue("closeAt").trim();
+    const closesAt = parseCloseAt(closeAtRaw, Date.now());
+
+    if (dOdds == null || !closesAt) {
+      await interaction.reply({
+        content:
+          "Проверьте **коэффициент** третьего исхода (1,01–100) и **закрытие** в формате **DD-MM HH:MM** по МСК (например `09-05 18:30`).",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    const optA = betOption("A", draft.o1.label, draft.o1.odds);
+    const optD = betOption("D", dLabel, dOdds);
+    const optB = betOption("B", draft.o2.label, draft.o2.odds);
 
     const chId = economyFeedChannelId(guildId);
     if (!chId) {
@@ -678,6 +829,7 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
     }
 
     const eventId = randomUUID().slice(0, 8);
+    const title = draft.title;
     const ev: BetEvent = {
       id: eventId,
       guildId,
@@ -697,6 +849,7 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
     ev.channelId = sent.channelId;
     ev.messageId = sent.id;
     upsertBetEvent(ev);
+    betCreateDrafts.delete(key);
 
     appendFeedEvent({ ts: Date.now(), guildId, type: "bet:created", actorUserId: interaction.user.id, text: `Создана ставка: **${title}**.` });
     await ensureEconomyFeedPanel(interaction.client);
