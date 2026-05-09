@@ -38,10 +38,16 @@ export interface EconomyUser {
   /** Последний выход на смену (unix ms) */
   lastWorkAt?: number;
 
-  /** День, когда была оплачена симка курьера (UTC YYYY-MM-DD) */
-  courierSimShiftsLeft?: number;
-  /** Сколько смен курьера осталось с активным электровелом (снижение КД). */
-  courierBikeShiftsLeft?: number;
+  /** Куплен телефон в магазине (нужен курьеру). */
+  hasPhone?: boolean;
+  /** 5-значный номер симки (после покупки новой — старый уходит в пул магазина). */
+  courierSimNumber?: string;
+  /** «Баланс» симки (пополнение в магазине); часть уходит на связь за смену. */
+  simBalanceRub?: number;
+  /** До какого момента оплачена линия после последней оплаты при старте смены курьера (+24 ч). */
+  courierPhonePaidUntilMs?: number;
+  /** До какого момента активна аренда электровела (снижение КД смены). */
+  courierBikeUntilMs?: number;
 
   /** Навыки: skillId → уровень (1..ECONOMY_SKILL_MAX). Отсутствует = 0. */
   skills?: Partial<Record<SkillId, number>>;
@@ -76,7 +82,14 @@ function writeStore(s: StoreShape) {
   writeFileSync(storePath(), JSON.stringify(s, null, 2), "utf-8");
 }
 
-function normalizeUser(u: Partial<EconomyUser> | undefined): EconomyUser {
+function stableLegacySimDigits(userId: string): string {
+  let h = 0;
+  for (let i = 0; i < userId.length; i++) h = (h << 5) - h + userId.charCodeAt(i);
+  const n = 10000 + (Math.abs(h | 0) % 90000);
+  return String(n);
+}
+
+function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?: string): EconomyUser {
   const rawSkills = u?.skills ?? {};
   const skills: Partial<Record<SkillId, number>> = {};
   for (const k of ["communication", "logistics", "discipline"] as const) {
@@ -92,6 +105,31 @@ function normalizeUser(u: Partial<EconomyUser> | undefined): EconomyUser {
     jobExp[k] = Math.floor(v as number);
   }
 
+  const legacySimShifts = Number.isFinite((u as any)?.courierSimShiftsLeft) ? Math.max(0, Math.floor((u as any).courierSimShiftsLeft)) : 0;
+  const legacyBikeShifts = Number.isFinite((u as any)?.courierBikeShiftsLeft) ? Math.max(0, Math.floor((u as any).courierBikeShiftsLeft)) : 0;
+
+  let hasPhone = (u as any)?.hasPhone === true ? true : undefined;
+  let courierSimNumber =
+    typeof (u as any)?.courierSimNumber === "string" && /^\d{5}$/.test((u as any).courierSimNumber)
+      ? (u as any).courierSimNumber
+      : undefined;
+  let simBalanceRub = Number.isFinite((u as any)?.simBalanceRub) ? Math.max(0, Math.floor((u as any).simBalanceRub)) : undefined;
+  let courierPhonePaidUntilMs = Number.isFinite((u as any)?.courierPhonePaidUntilMs)
+    ? Math.max(0, Math.floor((u as any).courierPhonePaidUntilMs))
+    : undefined;
+  let courierBikeUntilMs = Number.isFinite((u as any)?.courierBikeUntilMs)
+    ? Math.max(0, Math.floor((u as any).courierBikeUntilMs))
+    : undefined;
+
+  // Одноразовая логика поверх старых полей «смен сим/вела» (без записи в JSON до следующего patch).
+  if (!hasPhone && (legacySimShifts > 0 || legacyBikeShifts > 0)) hasPhone = true;
+  if (!courierSimNumber && legacySimShifts > 0) {
+    courierSimNumber = stableLegacySimDigits(userIdForMigration ?? "legacy");
+  }
+  if (simBalanceRub == null && legacySimShifts > 0) simBalanceRub = Math.min(120, legacySimShifts * 12);
+  if (!courierPhonePaidUntilMs && legacySimShifts > 0) courierPhonePaidUntilMs = Date.now() + 24 * 60 * 60 * 1000;
+  if (!courierBikeUntilMs && legacyBikeShifts > 0) courierBikeUntilMs = Date.now() + legacyBikeShifts * 3 * 60 * 60 * 1000;
+
   return {
     psTotal: Math.max(0, Math.floor(u?.psTotal ?? 0)),
     rubles: Math.max(0, Math.floor(u?.rubles ?? 0)),
@@ -104,8 +142,11 @@ function normalizeUser(u: Partial<EconomyUser> | undefined): EconomyUser {
         : undefined,
     jobChosenAt: Number.isFinite(u?.jobChosenAt) ? Math.max(0, Math.floor(u!.jobChosenAt!)) : undefined,
     lastWorkAt: Number.isFinite(u?.lastWorkAt) ? Math.max(0, Math.floor(u!.lastWorkAt!)) : undefined,
-    courierSimShiftsLeft: Number.isFinite(u?.courierSimShiftsLeft) ? Math.max(0, Math.floor(u!.courierSimShiftsLeft!)) : undefined,
-    courierBikeShiftsLeft: Number.isFinite(u?.courierBikeShiftsLeft) ? Math.max(0, Math.floor(u!.courierBikeShiftsLeft!)) : undefined,
+    hasPhone,
+    courierSimNumber,
+    simBalanceRub,
+    courierPhonePaidUntilMs,
+    courierBikeUntilMs,
     skills,
     lastTrainAt: Number.isFinite(u?.lastTrainAt) ? Math.max(0, Math.floor(u!.lastTrainAt!)) : undefined,
     jobExp,
@@ -115,19 +156,19 @@ function normalizeUser(u: Partial<EconomyUser> | undefined): EconomyUser {
 export function getEconomyUser(guildId: string, userId: string): EconomyUser {
   const s = readStore();
   const raw = s.guilds[guildId]?.[userId];
-  return normalizeUser(raw);
+  return normalizeUser(raw, userId);
 }
 
 export function listEconomyUsers(guildId: string): Array<{ userId: string; user: EconomyUser }> {
   const s = readStore();
   const g = s.guilds[guildId] ?? {};
-  return Object.entries(g).map(([userId, u]) => ({ userId, user: normalizeUser(u) }));
+  return Object.entries(g).map(([userId, u]) => ({ userId, user: normalizeUser(u, userId) }));
 }
 
 export function setEconomyUser(guildId: string, userId: string, next: EconomyUser): EconomyUser {
   const s = readStore();
   if (!s.guilds[guildId]) s.guilds[guildId] = {};
-  const norm = normalizeUser(next);
+  const norm = normalizeUser(next, userId);
   s.guilds[guildId]![userId] = norm;
   writeStore(s);
   return norm;

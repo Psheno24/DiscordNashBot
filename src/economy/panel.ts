@@ -31,12 +31,24 @@ import {
   type SkillId,
 } from "./userStore.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
+import { drawSimNumberFromPool, releaseSimNumberToPool } from "./simPoolStore.js";
 
 export const ECON_BUTTON_MENU = "econ:menu";
 export const ECON_BUTTON_PROFILE = "econ:profile";
 export const ECON_BUTTON_PLAYERS = "econ:players";
 export const ECON_BUTTON_WORK = "econ:work";
 export const ECON_BUTTON_SKILLS = "econ:skills";
+export const ECON_BUTTON_SHOP = "econ:shop";
+const ECON_SHOP_HUB = "econ:shop:hub";
+const ECON_SHOP_PHONE = "econ:shop:phone";
+const ECON_SHOP_SIM = "econ:shop:sim";
+const ECON_SHOP_SIM_NEW = "econ:shop:sim:new";
+const ECON_SHOP_SIM_TOPUP_OPEN = "econ:shop:sim:topupOpen";
+
+const ECON_COURIER_BIKE_1D = "econ:work:courierbike:1d";
+const ECON_COURIER_BIKE_3D = "econ:work:courierbike:3d";
+const ECON_COURIER_BIKE_7D = "econ:work:courierbike:7d";
+
 const ECON_PROFILE_BUTTON_INFO = "econ:profile:info";
 const ECON_PROFILE_BUTTON_FOCUS = "econ:profile:focus";
 const ECON_PROFILE_BUTTON_LADDER = "econ:profile:ladder";
@@ -48,8 +60,6 @@ const ECON_WORK_BUTTON_STARTERS = "econ:work:starters";
 const ECON_WORK_BUTTON_JOB_PREFIX = "econ:work:job:";
 const ECON_WORK_BUTTON_TAKE_PREFIX = "econ:work:take:";
 const ECON_WORK_BUTTON_SHIFT = "econ:work:shift";
-const ECON_WORK_BUTTON_PAY_SIM = "econ:work:courier:paySim";
-const ECON_WORK_BUTTON_RENT_BIKE = "econ:work:courier:rentBike";
 const ECON_WORK_BUTTON_QUIT = "econ:work:quit";
 const ECON_WORK_BUTTON_QUIT_CONFIRM = "econ:work:quit:confirm";
 /** Подтверждение: уволиться с текущей и взять `jobId` */
@@ -61,6 +71,7 @@ const ECON_PLAYERS_BUTTON_TOP_PS = "econ:players:topPs";
 const ECON_PLAYERS_BUTTON_TOP_RUB = "econ:players:topRub";
 
 const ECON_MODAL_PLAYER_SEARCH = "modal:econ:playerSearch";
+const ECON_MODAL_SIM_TOPUP = "modal:econ:simTopup";
 
 export const ECON_FEED_BUTTON_ARCHIVE = "econFeed:archive";
 const ECON_FEED_BUTTON_PAGE_PREFIX = "econFeed:page:";
@@ -68,6 +79,20 @@ const ECON_FEED_BUTTON_PAGE_PREFIX = "econFeed:page:";
 const PANEL_COLOR = 0x263238;
 const PROFILE_COLOR = 0x1b5e20;
 const FEED_COLOR = 0x0d47a1;
+
+/** Магазин: телефон и симка (вел — в экране работы курьера) */
+const SHOP_PHONE_PRICE_RUB = 1000;
+const SHOP_SIM_NEW_PRICE_RUB = 100;
+const SHOP_SIM_START_BALANCE_RUB = 50;
+const COURIER_LINE_24H_MS = 24 * 60 * 60 * 1000;
+const COURIER_LINE_OPEN_FEE_RUB = 20;
+const COURIER_SIM_AIRTIME_PER_SHIFT_RUB = 8;
+const BIKE_1D_MS = 1 * 86400000;
+const BIKE_3D_MS = 3 * 86400000;
+const BIKE_7D_MS = 7 * 86400000;
+const COURIER_BIKE_1D_RUB = 95;
+const COURIER_BIKE_3D_RUB = 250;
+const COURIER_BIKE_7D_RUB = 520;
 
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return "—";
@@ -95,6 +120,7 @@ function buildTerminalPanelEmbed(guildName: string): EmbedBuilder {
     .setDescription(
       [
         "Управление экономикой и прогрессом — через кнопки ниже.",
+        "Телефон и симку для курьера — в **Магазине**; аренда вела — в **работе курьера**.",
         "Большинство экранов **личные** (ephemeral), спама в канале не будет.",
       ].join("\n"),
     )
@@ -106,6 +132,7 @@ function buildTerminalPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_PROFILE).setLabel("Профиль").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Работа").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_SHOP).setLabel("Магазин").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_SKILLS).setLabel("Навыки").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_PLAYERS).setLabel("Игроки").setStyle(ButtonStyle.Secondary),
     ),
@@ -198,6 +225,13 @@ function buildFocusRows(cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
 function buildProfileEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const jobName = u.jobId ? jobTitle(u.jobId) : "не выбрана";
+  const kit: string[] = [];
+  kit.push(u.hasPhone ? "Телефон: **есть**" : "Телефон: **нет**");
+  if (u.courierSimNumber) {
+    kit.push(`Номер сим: **${u.courierSimNumber}** · баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**`);
+  } else {
+    kit.push("Симка: **не оформлена**");
+  }
 
   return new EmbedBuilder()
     .setColor(PROFILE_COLOR)
@@ -208,6 +242,9 @@ function buildProfileEmbed(member: GuildMember): EmbedBuilder {
         `Баланс ₽: **${fmt(u.rubles)}**`,
         `Фокус: **${focusLabel(u.focus)}**`,
         `Работа: **${jobName}**`,
+        "",
+        "**Связь:**",
+        ...kit.map((s) => `- ${s}`),
       ].join("\n"),
     )
     .setFooter({ text: `Запросил: ${member.user.tag}` });
@@ -395,50 +432,38 @@ type JobDef = {
   reqSkills?: Partial<Record<SkillId, number>>;
 };
 
+// Чем выше потолок при активной игре — тем короче КД. Стабильный фикс — реже смены.
 const JOBS_STARTER: JobDef[] = [
   {
     id: "courier",
     title: "Курьер",
     baseCooldownMs: 3 * 60 * 60 * 1000,
-    // Тир-1: кликабельная прибыль, но с обязательными расходами.
-    basePayoutRub: 80,
+    basePayoutRub: 88,
     description:
       [
-        "Активная работа: чем чаще выходишь на смену — тем больше заработок.",
-        "",
-        "Особенности:",
-        "- нужен **телефон**",
-        "- **симка** покупается пакетом на несколько смен",
-        "- можно арендовать **электровел** пакетом смен, чтобы сократить КД",
+        "**Самый короткий КД** тира (3 ч, с велом — 2 ч): максимум ₽/ч при активности.",
+        "Нужны **телефон** и **симка** из **магазина**; за смену списывается оплата линии и баланс сим (только при нажатии «смена»).",
+        "Электровел — **аренда по дням** в магазине.",
       ].join("\n"),
   },
   {
     id: "waiter",
     title: "Официант",
-    baseCooldownMs: 6 * 60 * 60 * 1000,
-    basePayoutRub: 60,
+    baseCooldownMs: 5 * 60 * 60 * 1000,
+    basePayoutRub: 0,
     description:
       [
-        "Работа со случайными чаевыми и редкими штрафами.",
-        "",
-        "Особенности:",
-        "- шанс **чаевых**",
-        "- небольшой шанс **штрафа**",
-        "- чаевые очень медленно улучшаются от опыта смен",
+        "**Средний КД** (5 ч). **Без фиксированного оклада**: смена может уйти в минус или дать больше курьера.",
       ].join("\n"),
   },
   {
     id: "watchman",
     title: "Ночной сторож",
-    baseCooldownMs: 12 * 60 * 60 * 1000,
-    basePayoutRub: 140,
+    baseCooldownMs: 16 * 60 * 60 * 1000,
+    basePayoutRub: 128,
     description:
       [
-        "Самая редкая смена: удобно тем, кто заходит нечасто.",
-        "",
-        "Особенности:",
-        "- без требований",
-        "- максимальная стабильность (без штрафов/чаевых)",
+        "**Самый длинный КД** (16 ч): редко нажимать, низкий стабильный фикс, без сюрпризов.",
       ].join("\n"),
   },
 ];
@@ -451,31 +476,30 @@ function getJobDef(id: StarterJobId): JobDef {
   return d;
 }
 
-// Тир-2: по 2 навыка на профессию. Тир-3 — комбо из трёх навыков.
+// Тир-2: та же логика КД; тир-3 — комбо из трёх навыков.
 const JOBS_TIER2: JobDef[] = [
   {
     id: "dispatcher",
     title: "Диспетчер",
-    baseCooldownMs: 6 * 60 * 60 * 1000,
-    // Тир-2: меньше кликов, стабильнее, чуть выгоднее за день без “разрыва”.
-    basePayoutRub: 140,
-    description: ["Самая стабильная работа тира 2. Без штрафов и без рандома."].join("\n"),
+    baseCooldownMs: 12 * 60 * 60 * 1000,
+    basePayoutRub: 132,
+    description: ["**Длинный КД** (12 ч), стабильный фикс, мало кликов.", "Ниже потолок ₽/ч, чем у активных профессий тира."].join("\n"),
     reqSkills: { communication: 28, discipline: 20 },
   },
   {
     id: "assembler",
     title: "Сборщик",
-    baseCooldownMs: 12 * 60 * 60 * 1000,
-    basePayoutRub: 260,
-    description: ["Редкие штрафы. Премия за каждые 6 смен."].join("\n"),
+    baseCooldownMs: 7 * 60 * 60 * 1000,
+    basePayoutRub: 248,
+    description: ["**Средний КД** (7 ч): высокий оклад, премии за серию, редкие штрафы."].join("\n"),
     reqSkills: { discipline: 28, logistics: 20 },
   },
   {
     id: "expediter",
     title: "Экспедитор",
-    baseCooldownMs: 3 * 60 * 60 * 1000,
+    baseCooldownMs: 2.5 * 60 * 60 * 1000,
     basePayoutRub: 0,
-    description: ["Нет фиксированной оплаты: доход зависит от потока заказов (рандом с уклоном к среднему)."].join("\n"),
+    description: ["**Самый короткий КД** тира (2,5 ч): без фикса, сильный разброс, возможен убыток."].join("\n"),
     reqSkills: { logistics: 28, communication: 20 },
   },
 ];
@@ -508,22 +532,6 @@ function meetsJobReq(u: ReturnType<typeof getEconomyUser>, def: JobDef): { ok: b
   return { ok: missing.length === 0, missing };
 }
 
-function courierSimFeeRub(): number {
-  return 60;
-}
-
-function courierBikeRentRub(): number {
-  return 70;
-}
-
-function courierSimPackShifts(): number {
-  return 6;
-}
-
-function courierBikePackShifts(): number {
-  return 6;
-}
-
 function randInt(min: number, max: number): number {
   const a = Math.ceil(min);
   const b = Math.floor(max);
@@ -541,20 +549,142 @@ function formatDelta(n: number): string {
   return `${sign}${Math.abs(n).toLocaleString("ru-RU")} ₽`;
 }
 
+function rollNewSimDigits(): string {
+  if (Math.random() < 0.28) {
+    const fromPool = drawSimNumberFromPool();
+    if (fromPool) return fromPool;
+  }
+  return String(randInt(10000, 99999));
+}
+
+function hasActiveBikeRental(u: ReturnType<typeof getEconomyUser>, now: number): boolean {
+  return Number.isFinite(u.courierBikeUntilMs) && (u.courierBikeUntilMs ?? 0) > now;
+}
+
+function jobUsesVariablePayout(jobId: JobId): boolean {
+  return jobId === "waiter" || jobId === "expediter";
+}
+
+function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
+  if (jobUsesVariablePayout(jobId)) {
+    return "Оплата за смену: **без фикса** (рандом прибыли и убытка).";
+  }
+  return `Оплата за смену: **${baseRub} ₽**`;
+}
+
+function jobPayoutShortForMenu(jobId: JobId, baseRub: number): string {
+  if (jobUsesVariablePayout(jobId)) return "без фикса (рандом)";
+  return `${baseRub} ₽`;
+}
+
+function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const lines = [
+    "Здесь **телефон** и **симка** (номер и пополнение). Аренда **электровела** — в разделе **работы курьера**.",
+    "",
+    `Баланс: **${fmt(u.rubles)} ₽**`,
+    u.hasPhone ? "Телефон: **есть**" : `Телефон: **нет** (${SHOP_PHONE_PRICE_RUB} ₽)`,
+    u.courierSimNumber ? `Номер сим: **${u.courierSimNumber}** · баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**` : "Симка: **не куплена** (нужен телефон)",
+  ];
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_PHONE).setLabel("Телефон").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_SIM)
+        .setLabel("Симка")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!u.hasPhone),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+function buildShopSimEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const lines = [
+    "**Новая симка** — случайный 5-значный номер (часть номеров из «возвратов» других игроков). Старая симка пропадает и может снова попасть в продажу.",
+    "",
+    u.hasPhone ? "" : "**Сначала купите телефон** — без него симку оформить нельзя.",
+    "",
+    `Новая симка: **${SHOP_SIM_NEW_PRICE_RUB} ₽** (+ **${SHOP_SIM_START_BALANCE_RUB} ₽** на баланс симки)`,
+    "Пополнить сим: введите сумму в ₽ — **столько же** зачислится на баланс симки (списание с основного счёта).",
+    "",
+    u.courierSimNumber ? `Текущий номер: **${u.courierSimNumber}** · баланс: **${fmt(u.simBalanceRub ?? 0)} ₽**` : "Симки ещё **нет**.",
+  ].filter(Boolean);
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Симка").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const canNew = u.hasPhone && u.rubles >= SHOP_SIM_NEW_PRICE_RUB;
+  const canTop = u.hasPhone && Boolean(u.courierSimNumber);
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_SIM_NEW)
+        .setLabel("Купить новую симку")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(!canNew),
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_SIM_TOPUP_OPEN)
+        .setLabel("Пополнить сим…")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!canTop),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_HUB).setLabel("Назад в магазин").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+function buildCourierBikeRow(member: GuildMember): ActionRowBuilder<ButtonBuilder> {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const r = u.rubles;
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(ECON_COURIER_BIKE_1D)
+      .setLabel(`Вел 1д (${COURIER_BIKE_1D_RUB} ₽)`)
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(r < COURIER_BIKE_1D_RUB),
+    new ButtonBuilder()
+      .setCustomId(ECON_COURIER_BIKE_3D)
+      .setLabel(`Вел 3д (${COURIER_BIKE_3D_RUB} ₽)`)
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(r < COURIER_BIKE_3D_RUB),
+    new ButtonBuilder()
+      .setCustomId(ECON_COURIER_BIKE_7D)
+      .setLabel(`Вел 7д (${COURIER_BIKE_7D_RUB} ₽)`)
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(r < COURIER_BIKE_7D_RUB),
+  );
+}
+
+function extendBikeRentalMs(curUntil: number | undefined, now: number, addMs: number): number {
+  const base = curUntil && curUntil > now ? curUntil : now;
+  return base + addMs;
+}
+
 function getJobExp(u: ReturnType<typeof getEconomyUser>, jobId: JobId): number {
   return Math.max(0, Math.floor((u.jobExp as any)?.[jobId] ?? 0));
 }
 
-function effectiveCourierCooldownMs(u: ReturnType<typeof getEconomyUser>): number {
+function effectiveCourierCooldownMs(u: ReturnType<typeof getEconomyUser>, now: number = Date.now()): number {
   const def = getJobDef("courier");
-  const hasBike = (u.courierBikeShiftsLeft ?? 0) > 0;
-  if (hasBike) return 2 * 60 * 60 * 1000; // 2 часа вместо 3
+  if (hasActiveBikeRental(u, now)) return 2 * 60 * 60 * 1000;
   return def.baseCooldownMs;
 }
 
 function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): { ok: boolean; msLeft: number } {
   const def = getAnyJobDef(jobId);
-  const cd = jobId === "courier" ? effectiveCourierCooldownMs(u) : def.baseCooldownMs;
+  const cd = jobId === "courier" ? effectiveCourierCooldownMs(u, now) : def.baseCooldownMs;
   const last = u.lastWorkAt ?? 0;
   const next = last + cd;
   if (now >= next) return { ok: true, msLeft: 0 };
@@ -573,17 +703,21 @@ function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
   const def = getAnyJobDef(u.jobId);
   const now = Date.now();
   const state = canWorkNow(u, u.jobId, now);
-  const cd = u.jobId === "courier" ? effectiveCourierCooldownMs(u) : def.baseCooldownMs;
+  const cd = u.jobId === "courier" ? effectiveCourierCooldownMs(u, now) : def.baseCooldownMs;
   const lines = [
     `Текущая работа: **${def.title}**`,
     `Баланс: **${fmt(u.rubles)} ₽**`,
-    `Оплата за смену: **${def.basePayoutRub} ₽** · КД: **${Math.round(cd / 60000)} мин**`,
+    `Оплата за смену: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}** · КД: **${Math.round(cd / 60000)} мин**`,
     state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
   ];
   if (u.jobId === "courier") {
     lines.push("");
     lines.push(
-      `Симка: **${u.courierSimShiftsLeft ?? 0}** смен · Электровел: **${u.courierBikeShiftsLeft ?? 0}** смен`,
+      u.hasPhone ? "Телефон: **есть**" : "Телефон: **купите в магазине**",
+      u.courierSimNumber ? `Сим **${u.courierSimNumber}**, баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**` : "Симка: **купите в магазине**",
+      hasActiveBikeRental(u, now)
+        ? `Вел до <t:${Math.floor((u.courierBikeUntilMs ?? 0) / 1000)}:R>`
+        : "Вел: **нет аренды**",
     );
   }
   return new EmbedBuilder()
@@ -615,17 +749,14 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
       .setDisabled(!state.ok),
   );
   if (u.jobId === "courier") {
-    const simOk = (u.courierSimShiftsLeft ?? 0) > 0;
     shiftRow.addComponents(
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_PAY_SIM).setLabel("Купить симку").setStyle(ButtonStyle.Secondary).setDisabled(simOk),
-      new ButtonBuilder()
-        .setCustomId(ECON_WORK_BUTTON_RENT_BIKE)
-        .setLabel("Аренда электровела")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled((u.courierBikeShiftsLeft ?? 0) > 0),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_SHOP).setLabel("Магазин").setStyle(ButtonStyle.Secondary),
     );
   }
   rows.push(shiftRow);
+  if (u.jobId === "courier") {
+    rows.push(buildCourierBikeRow(member));
+  }
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Без навыка (начальные)").setStyle(ButtonStyle.Primary),
@@ -645,11 +776,60 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
   return rows;
 }
 
-function buildStarterJobsEmbed(): EmbedBuilder {
+function cdHoursLabel(ms: number): string {
+  const h = ms / (60 * 60 * 1000);
+  if (Math.abs(h - Math.round(h)) < 1e-9) return String(Math.round(h));
+  return h.toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+}
+
+function formatJobTierReqLine(def: JobDef): string {
+  const r = def.reqSkills;
+  if (!r || Object.keys(r).length === 0) return "Навыки не требуются.";
+  const parts: string[] = [];
+  for (const k of ["communication", "logistics", "discipline"] as const) {
+    const need = r[k];
+    if (need && need > 0) {
+      const nm = k === "communication" ? "Коммуникация" : k === "logistics" ? "Логистика" : "Дисциплина";
+      parts.push(`${nm} **${need}+**`);
+    }
+  }
+  return parts.join(", ");
+}
+
+function buildStarterJobsEmbed(member: GuildMember): EmbedBuilder {
+  const lines: string[] = [];
+  for (const d of JOBS_STARTER) {
+    const cdh = cdHoursLabel(d.baseCooldownMs);
+    const pay = jobPayoutShortForMenu(d.id, d.basePayoutRub);
+    let s = `**${d.title}** — ${pay}, КД **${cdh} ч**.`;
+    if (d.id === "courier") {
+      s += ` Телефон **${SHOP_PHONE_PRICE_RUB}** ₽ и сим **${SHOP_SIM_NEW_PRICE_RUB}** ₽ (+**${SHOP_SIM_START_BALANCE_RUB}** ₽ на баланс сим) — в **магазине**; **вел** — в **работе** курьера. За смену: линия **${COURIER_LINE_OPEN_FEE_RUB}** ₽ на 24 ч (если срок вышел) + **${COURIER_SIM_AIRTIME_PER_SHIFT_RUB}** ₽ с баланса сим.`;
+    } else if (d.id === "waiter") {
+      s += " Оклад **без фикса** (рандом прибыли/убытка).";
+    } else {
+      s += " Стабильный **фикс**.";
+    }
+    lines.push(s);
+  }
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Начальные профессии (без навыка)")
-    .setDescription(["Выбери профессию, чтобы посмотреть условия и взять работу."].join("\n"));
+    .setTitle("Начальные профессии (тир 1)")
+    .setDescription(["Сводка по всем работам тира; **подробно** — в карточке профессии.", "", ...lines].join("\n\n"))
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildTier2JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
+  const lines: string[] = [];
+  for (const d of JOBS_TIER2) {
+    const cdh = cdHoursLabel(d.baseCooldownMs);
+    const pay = jobPayoutShortForMenu(d.id, d.basePayoutRub);
+    lines.push(`**${d.title}** — ${pay}, КД **${cdh} ч**. Требования: ${formatJobTierReqLine(d)}`);
+  }
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Профессии (тир 2)")
+    .setDescription(["Сводка по всем работам тира; **подробно** — в карточке профессии.", "", ...lines].join("\n\n"))
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
 function buildStarterJobsRows(): ActionRowBuilder<ButtonBuilder>[] {
@@ -670,17 +850,23 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const def = getAnyJobDef(jobId);
   const now = Date.now();
-  const cd = jobId === "courier" ? effectiveCourierCooldownMs(u) : def.baseCooldownMs;
+  const cd = jobId === "courier" ? effectiveCourierCooldownMs(u, now) : def.baseCooldownMs;
   const cdH = Math.round(cd / 360000) / 10;
-  const payout = def.basePayoutRub;
   const extra: string[] = [];
   const exp = Math.max(0, Math.floor((u.jobExp as any)?.[jobId] ?? 0));
   extra.push(`Опыт смен: **${exp}**`);
   if (jobId === "courier") {
-    const simLeft = u.courierSimShiftsLeft ?? 0;
-    const bikeLeft = u.courierBikeShiftsLeft ?? 0;
-    extra.push(`Симка: осталось смен **${simLeft}** (пакет: ${courierSimPackShifts()} смен за ${courierSimFeeRub()} ₽).`);
-    extra.push(`Электровел: осталось смен **${bikeLeft}** (пакет: ${courierBikePackShifts()} смен за ${courierBikeRentRub()} ₽).`);
+    extra.push("");
+    extra.push(
+      u.hasPhone ? "Телефон: **есть**" : `Телефон: купить в **магазине** (${SHOP_PHONE_PRICE_RUB} ₽).`,
+      u.courierSimNumber
+        ? `Сим: **${u.courierSimNumber}**, баланс сим **${fmt(u.simBalanceRub ?? 0)} ₽**`
+        : `Симка: купить в **магазине** (новая ${SHOP_SIM_NEW_PRICE_RUB} ₽).`,
+      `За смену: **${COURIER_LINE_OPEN_FEE_RUB} ₽** на линию на 24 ч (если окно вышло) + **${COURIER_SIM_AIRTIME_PER_SHIFT_RUB} ₽** с баланса сим.`,
+      hasActiveBikeRental(u, now)
+        ? `Вел активен до <t:${Math.floor((u.courierBikeUntilMs ?? 0) / 1000)}:F>`
+        : `Вел: аренда **1 / 3 / 7** дней — кнопки в **работе** курьера.`,
+    );
   }
   const req = meetsJobReq(u, def);
   if ((def.reqSkills ?? {}) && Object.keys(def.reqSkills ?? {}).length > 0) {
@@ -695,7 +881,7 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
       [
         def.description,
         "",
-        `Оплата за смену: **${payout} ₽**`,
+        jobPayoutEmbedLine(jobId, def.basePayoutRub),
         `КД смены: **~${cdH} ч**`,
         ...(extra.length ? ["", ...extra] : []),
         "",
@@ -736,7 +922,8 @@ function buildSwitchJobConfirmRows(newJobId: JobId): ActionRowBuilder<ButtonBuil
   ];
 }
 
-function buildJobInfoRows(u: ReturnType<typeof getEconomyUser>, jobId: JobId, canTakeSkills: boolean): ActionRowBuilder<ButtonBuilder>[] {
+function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: boolean): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
   const backId = isTier2JobId(jobId) ? ECON_WORK_BUTTON_TIER2 : ECON_WORK_BUTTON_STARTERS;
   const now = Date.now();
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
@@ -751,17 +938,12 @@ function buildJobInfoRows(u: ReturnType<typeof getEconomyUser>, jobId: JobId, ca
         .setDisabled(!state.ok),
     );
     if (jobId === "courier") {
-      const simOk = (u.courierSimShiftsLeft ?? 0) > 0;
-      shiftRow.addComponents(
-        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_PAY_SIM).setLabel("Купить симку").setStyle(ButtonStyle.Secondary).setDisabled(simOk),
-        new ButtonBuilder()
-          .setCustomId(ECON_WORK_BUTTON_RENT_BIKE)
-          .setLabel("Аренда электровела")
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled((u.courierBikeShiftsLeft ?? 0) > 0),
-      );
+      shiftRow.addComponents(new ButtonBuilder().setCustomId(ECON_BUTTON_SHOP).setLabel("Магазин").setStyle(ButtonStyle.Secondary));
     }
     rows.push(shiftRow);
+    if (jobId === "courier") {
+      rows.push(buildCourierBikeRow(member));
+    }
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
@@ -803,14 +985,14 @@ function buildCurrentJobEmbed(
   }
   const def = getAnyJobDef(u.jobId);
   const now = Date.now();
-  const cd = u.jobId === "courier" ? effectiveCourierCooldownMs(u) : def.baseCooldownMs;
+  const cd = u.jobId === "courier" ? effectiveCourierCooldownMs(u, now) : def.baseCooldownMs;
   const state = canWorkNow(u, u.jobId, now);
   const exp = Math.max(0, Math.floor((u.jobExp as any)?.[u.jobId] ?? 0));
   const lines = [
     `Текущая работа: **${def.title}**`,
     `Опыт смен: **${exp}**`,
     `Баланс: **${fmt(u.rubles)} ₽**`,
-    `Оплата за смену: **${def.basePayoutRub} ₽**`,
+    `Оплата за смену: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}**`,
     `КД смены: **${Math.round(cd / 60000)} мин**`,
     state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
   ];
@@ -823,11 +1005,17 @@ function buildCurrentJobEmbed(
     }
   }
   if (u.jobId === "courier") {
-    const simLeft = u.courierSimShiftsLeft ?? 0;
-    const bikeLeft = u.courierBikeShiftsLeft ?? 0;
     lines.push("");
-    lines.push(`Симка: смен осталось **${simLeft}** (пакет: ${courierSimPackShifts()} за ${courierSimFeeRub()} ₽).`);
-    lines.push(`Электровел: смен осталось **${bikeLeft}** (пакет: ${courierBikePackShifts()} за ${courierBikeRentRub()} ₽).`);
+    lines.push(
+      u.hasPhone ? "Телефон: **есть**" : "Телефон: **нет** — магазин",
+      u.courierSimNumber ? `Сим **${u.courierSimNumber}** · баланс **${fmt(u.simBalanceRub ?? 0)} ₽**` : "Симка: **нет** — магазин",
+      u.courierPhonePaidUntilMs && now < u.courierPhonePaidUntilMs
+        ? `Линия оплачена до: <t:${Math.floor(u.courierPhonePaidUntilMs / 1000)}:R>`
+        : "Линия: оплата при **следующей** смене",
+      hasActiveBikeRental(u, now)
+        ? `Вел до <t:${Math.floor((u.courierBikeUntilMs ?? 0) / 1000)}:R>`
+        : "Вел: нет",
+    );
   }
 
   return new EmbedBuilder().setColor(PROFILE_COLOR).setTitle("Моя работа").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
@@ -854,18 +1042,13 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   );
 
   if (u.jobId === "courier") {
-    const simOk = (u.courierSimShiftsLeft ?? 0) > 0;
-    shiftRow.addComponents(
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_PAY_SIM).setLabel("Купить симку").setStyle(ButtonStyle.Secondary).setDisabled(simOk),
-      new ButtonBuilder()
-        .setCustomId(ECON_WORK_BUTTON_RENT_BIKE)
-        .setLabel("Аренда электровела")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled((u.courierBikeShiftsLeft ?? 0) > 0),
-    );
+    shiftRow.addComponents(new ButtonBuilder().setCustomId(ECON_BUTTON_SHOP).setLabel("Магазин").setStyle(ButtonStyle.Secondary));
   }
 
   rows.push(shiftRow);
+  if (u.jobId === "courier") {
+    rows.push(buildCourierBikeRow(member));
+  }
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
@@ -1070,11 +1253,18 @@ function isEconomyButton(id: string): boolean {
       ECON_BUTTON_FOCUS_BALANCE,
       ECON_BUTTON_FOCUS_MONEY,
       ECON_BUTTON_WORK,
+      ECON_BUTTON_SHOP,
+      ECON_SHOP_HUB,
+      ECON_SHOP_PHONE,
+      ECON_SHOP_SIM,
+      ECON_SHOP_SIM_NEW,
+      ECON_SHOP_SIM_TOPUP_OPEN,
+      ECON_COURIER_BIKE_1D,
+      ECON_COURIER_BIKE_3D,
+      ECON_COURIER_BIKE_7D,
       ECON_WORK_BUTTON_STARTERS,
       ECON_WORK_BUTTON_TIER2,
       ECON_WORK_BUTTON_SHIFT,
-      ECON_WORK_BUTTON_PAY_SIM,
-      ECON_WORK_BUTTON_RENT_BIKE,
       ECON_WORK_BUTTON_QUIT,
       ECON_WORK_BUTTON_QUIT_CONFIRM,
       ECON_BUTTON_SKILLS,
@@ -1103,6 +1293,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     cid.startsWith(ECON_WORK_BUTTON_JOB_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_TAKE_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX) ||
+    cid.startsWith("econ:shop") ||
     cid.startsWith(ECON_SKILL_BUTTON_PREFIX);
   if (!isKnown) return false;
   if (!interaction.inGuild() || !interaction.guildId || !interaction.member) {
@@ -1152,6 +1343,108 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_BUTTON_SHOP) {
+    await replyOrUpdate(interaction, { embeds: [buildShopHubEmbed(member)], components: buildShopHubRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_HUB) {
+    await replyOrUpdate(interaction, { embeds: [buildShopHubEmbed(member)], components: buildShopHubRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_PHONE) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (u.hasPhone) {
+      await interaction.reply({ content: "У вас уже есть телефон.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (u.rubles < SHOP_PHONE_PRICE_RUB) {
+      await interaction.reply({ content: `Нужно **${SHOP_PHONE_PRICE_RUB} ₽** для телефона.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    patchEconomyUser(member.guild.id, member.id, { rubles: u.rubles - SHOP_PHONE_PRICE_RUB, hasPhone: true });
+    await replyOrUpdate(interaction, { embeds: [buildShopHubEmbed(member)], components: buildShopHubRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_SIM) {
+    const su = getEconomyUser(member.guild.id, member.id);
+    if (!su.hasPhone) {
+      await interaction.reply({ content: "Без **телефона** симку оформить нельзя — сначала купите телефон в магазине.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [buildShopSimEmbed(member)], components: buildShopSimRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_SIM_NEW) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (!u.hasPhone) {
+      await interaction.reply({ content: "Без **телефона** симку купить нельзя.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (u.rubles < SHOP_SIM_NEW_PRICE_RUB) {
+      await interaction.reply({ content: `Нужно **${SHOP_SIM_NEW_PRICE_RUB} ₽**.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const old = u.courierSimNumber;
+    if (old) releaseSimNumberToPool(old);
+    const next = rollNewSimDigits();
+    patchEconomyUser(member.guild.id, member.id, {
+      rubles: u.rubles - SHOP_SIM_NEW_PRICE_RUB,
+      courierSimNumber: next,
+      simBalanceRub: SHOP_SIM_START_BALANCE_RUB,
+    });
+    await replyOrUpdate(interaction, { embeds: [buildShopSimEmbed(member)], components: buildShopSimRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_SIM_TOPUP_OPEN) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (!u.hasPhone) {
+      await interaction.reply({ content: "Нужен **телефон**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (!u.courierSimNumber) {
+      await interaction.reply({ content: "Сначала купите симку.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const modal = new ModalBuilder().setCustomId(ECON_MODAL_SIM_TOPUP).setTitle("Пополнить симку");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("amount")
+          .setLabel("Сумма в ₽ (со счёта → на баланс сим)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMinLength(1)
+          .setMaxLength(12),
+      ),
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (id === ECON_COURIER_BIKE_1D || id === ECON_COURIER_BIKE_3D || id === ECON_COURIER_BIKE_7D) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (u.jobId !== "courier") {
+      await interaction.reply({ content: "Аренда вела доступна только на **работе курьера**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const now = Date.now();
+    const ms = id === ECON_COURIER_BIKE_1D ? BIKE_1D_MS : id === ECON_COURIER_BIKE_3D ? BIKE_3D_MS : BIKE_7D_MS;
+    const price = id === ECON_COURIER_BIKE_1D ? COURIER_BIKE_1D_RUB : id === ECON_COURIER_BIKE_3D ? COURIER_BIKE_3D_RUB : COURIER_BIKE_7D_RUB;
+    if (u.rubles < price) {
+      await interaction.reply({ content: `Нужно **${price} ₽**.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const nextUntil = extendBikeRentalMs(u.courierBikeUntilMs, now, ms);
+    patchEconomyUser(member.guild.id, member.id, { rubles: u.rubles - price, courierBikeUntilMs: nextUntil });
+    await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+    return true;
+  }
+
   if (id === ECON_WORK_BUTTON_STARTERS) {
     // Пока откат после смены не прошёл — запрещаем смену работы.
     const u = getEconomyUser(member.guild.id, member.id);
@@ -1162,7 +1455,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         return true;
       }
     }
-    await replyOrUpdate(interaction, { embeds: [buildStarterJobsEmbed()], components: buildStarterJobsRows() });
+    await replyOrUpdate(interaction, { embeds: [buildStarterJobsEmbed(member)], components: buildStarterJobsRows() });
     return true;
   }
 
@@ -1176,10 +1469,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         return true;
       }
     }
-    const embed = new EmbedBuilder()
-      .setColor(PANEL_COLOR)
-      .setTitle("Профессии (тир 2)")
-      .setDescription("Требуют навыки. Пассивного дохода пока нет — только смены.");
+    const embed = buildTier2JobsOverviewEmbed(member);
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}dispatcher`).setLabel("Диспетчер").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}assembler`).setLabel("Сборщик").setStyle(ButtonStyle.Secondary),
@@ -1203,7 +1493,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const u = getEconomyUser(member.guild.id, member.id);
     const def = getAnyJobDef(jobId);
     const req = meetsJobReq(u, def);
-    await replyOrUpdate(interaction, { embeds: [buildJobInfoEmbed(member, jobId)], components: buildJobInfoRows(u, jobId, req.ok) });
+    await replyOrUpdate(interaction, { embeds: [buildJobInfoEmbed(member, jobId)], components: buildJobInfoRows(member, jobId, req.ok) });
     return true;
   }
 
@@ -1317,46 +1607,6 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
-  if (id === ECON_WORK_BUTTON_PAY_SIM) {
-    const u = getEconomyUser(member.guild.id, member.id);
-    if (u.jobId !== "courier") {
-      await interaction.reply({ content: "Эта кнопка доступна только курьеру.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    if ((u.courierSimShiftsLeft ?? 0) > 0) {
-      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
-      return true;
-    }
-    const fee = courierSimFeeRub();
-    if (u.rubles < fee) {
-      await interaction.reply({ content: `Недостаточно ₽ для симки (нужно ${fee} ₽).`, flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    patchEconomyUser(member.guild.id, member.id, { rubles: u.rubles - fee, courierSimShiftsLeft: courierSimPackShifts() });
-    await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
-    return true;
-  }
-
-  if (id === ECON_WORK_BUTTON_RENT_BIKE) {
-    const u = getEconomyUser(member.guild.id, member.id);
-    if (u.jobId !== "courier") {
-      await interaction.reply({ content: "Эта кнопка доступна только курьеру.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    if ((u.courierBikeShiftsLeft ?? 0) > 0) {
-      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
-      return true;
-    }
-    const fee = courierBikeRentRub();
-    if (u.rubles < fee) {
-      await interaction.reply({ content: `Недостаточно ₽ для аренды (нужно ${fee} ₽).`, flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    patchEconomyUser(member.guild.id, member.id, { rubles: u.rubles - fee, courierBikeShiftsLeft: courierBikePackShifts() });
-    await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
-    return true;
-  }
-
   if (id === ECON_WORK_BUTTON_SHIFT) {
     const guildId = member.guild.id;
     const u = getEconomyUser(guildId, member.id);
@@ -1372,10 +1622,29 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
 
-    // требования курьера: симка оплачена сегодня
     if (jobId === "courier") {
-      if ((u.courierSimShiftsLeft ?? 0) <= 0) {
-        await interaction.reply({ content: `Перед сменой купите симку (пакет ${courierSimPackShifts()} смен за ${courierSimFeeRub()} ₽).`, flags: MessageFlags.Ephemeral });
+      if (!u.hasPhone) {
+        await interaction.reply({ content: "Купите **телефон** в магазине терминала.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if (!u.courierSimNumber) {
+        await interaction.reply({ content: "Оформите **симку** в магазине.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      if ((u.simBalanceRub ?? 0) < COURIER_SIM_AIRTIME_PER_SHIFT_RUB) {
+        await interaction.reply({
+          content: `На балансе сим недостаточно (**${COURIER_SIM_AIRTIME_PER_SHIFT_RUB} ₽** за смену). Пополните в магазине.`,
+          flags: MessageFlags.Ephemeral,
+        });
+        return true;
+      }
+      const lineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
+      const lineFee = lineDue ? COURIER_LINE_OPEN_FEE_RUB : 0;
+      if (u.rubles < lineFee) {
+        await interaction.reply({
+          content: `Нужно **${lineFee} ₽** на счёт для оплаты линии на 24 ч (списывается только при старте смены).`,
+          flags: MessageFlags.Ephemeral,
+        });
         return true;
       }
     }
@@ -1389,87 +1658,105 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const notes: string[] = [];
 
     if (jobId === "waiter") {
-      // чаевые и штрафы. Очень медленный рост от опыта.
-      const tipChance = Math.min(0.55, 0.35 + expBefore / 4000); // +0.01 за ~40 смен
-      const fineChance = Math.max(0.015, 0.04 - expBefore / 6000); // медленно падает
-
-      if (chance(fineChance)) {
-        const fine = randInt(10, 30);
-        extra -= fine;
-        notes.push(`штраф ${formatDelta(-fine)}`);
-      }
-
-      if (chance(tipChance)) {
-        // распределение: часто мелкие, редко крупные. С опытом чуть повышаем шанс среднего сегмента.
-        const roll = Math.random();
-        const boost = Math.min(0.08, expBefore / 8000); // очень медленно
-        let tip = 0;
-        if (roll < 0.72 - boost) tip = randInt(5, 18);
-        else if (roll < 0.97) tip = randInt(19, 45);
-        else tip = randInt(46, 110);
-        extra += tip;
-        notes.push(`чаевые ${formatDelta(tip)}`);
+      base = 0;
+      const r = Math.random();
+      if (r < 0.1) {
+        extra = -randInt(25, 55);
+        notes.push(`смена ${formatDelta(extra)}`);
+      } else if (r < 0.28) {
+        extra = randInt(-8, 28);
+        notes.push(`смена ${formatDelta(extra)}`);
+      } else if (r < 0.6) {
+        extra = randInt(42, 78);
+        notes.push(`выручка ${formatDelta(extra)}`);
+      } else if (r < 0.88) {
+        extra = randInt(72, 112);
+        notes.push(`выручка ${formatDelta(extra)}`);
+      } else {
+        extra = randInt(105, 175);
+        notes.push(`выручка ${formatDelta(extra)}`);
       }
     } else if (jobId === "watchman") {
-      // максимально стабильно: только фикс
+      // только фикс
     } else if (jobId === "dispatcher") {
-      // самая стабильная работа: только фикс
+      // только фикс
     } else if (jobId === "assembler") {
-      // редкий штраф + премия каждые 6 смен
-      if (chance(0.008)) {
-        const fine = randInt(25, 75);
+      if (chance(0.025)) {
+        const fine = randInt(35, 95);
         extra -= fine;
         notes.push(`штраф ${formatDelta(-fine)}`);
       }
       if (expAfter % 6 === 0) {
-        const bonus = 180;
+        const bonus = 200;
         extra += bonus;
         notes.push(`премия ${formatDelta(bonus)} (6 смен)`);
       }
     } else if (jobId === "expediter") {
-      // нет фикса: зависит от “сколько людей пришло”, чаще около среднего
       base = 0;
-      // треугольное распределение 0..10 (пик около 5) — чаще средняк, редко крайности
-      const people = Math.round((Math.random() + Math.random()) * 5);
-      // Выплата: чаще 55–95, редко ниже/выше
-      const payout =
-        people <= 1
-          ? randInt(20, 45)
-          : people <= 3
-            ? randInt(46, 70)
-            : people <= 7
-              ? randInt(71, 110)
-              : randInt(111, 150);
-      extra += payout;
-      notes.push(`поток: ${people} → ${formatDelta(payout)}`);
+      const r = Math.random();
+      if (r < 0.11) {
+        extra = -randInt(22, 58);
+        notes.push(`убыток ${formatDelta(extra)}`);
+      } else if (r < 0.33) {
+        extra = randInt(18, 42);
+        notes.push(`поток ${formatDelta(extra)}`);
+      } else if (r < 0.68) {
+        extra = randInt(48, 82);
+        notes.push(`поток ${formatDelta(extra)}`);
+      } else if (r < 0.9) {
+        extra = randInt(72, 118);
+        notes.push(`поток ${formatDelta(extra)}`);
+      } else {
+        extra = randInt(108, 185);
+        notes.push(`поток ${formatDelta(extra)}`);
+      }
     } else if (jobId === "courier") {
-      // курьер: фикс, плюс пакеты сим/вел списываем ниже
+      // фикс в base
     }
 
-    const total = Math.max(0, base + extra);
+    let jobTotal = base + extra;
+    const variablePayout = jobUsesVariablePayout(jobId);
+    if (!variablePayout) jobTotal = Math.max(0, jobTotal);
+
+    let rublesNext = u.rubles;
+    let simBalNext = u.simBalanceRub ?? 0;
+    let phoneUntilNext = u.courierPhonePaidUntilMs;
+
+    if (jobId === "courier") {
+      const lineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
+      const lineFee = lineDue ? COURIER_LINE_OPEN_FEE_RUB : 0;
+      rublesNext -= lineFee;
+      if (lineDue) {
+        phoneUntilNext = now + COURIER_LINE_24H_MS;
+        notes.push(`линия 24ч ${formatDelta(-lineFee)}`);
+      }
+      simBalNext -= COURIER_SIM_AIRTIME_PER_SHIFT_RUB;
+      notes.push(`баланс сим ${formatDelta(-COURIER_SIM_AIRTIME_PER_SHIFT_RUB)}`);
+    }
+
+    rublesNext += jobTotal;
+    rublesNext = Math.max(0, rublesNext);
+
     const patch: any = {
-      rubles: u.rubles + total,
+      rubles: rublesNext,
+      simBalanceRub: simBalNext,
+      courierPhonePaidUntilMs: phoneUntilNext,
       lastWorkAt: now,
       jobExp: { ...(u.jobExp ?? {}), [jobId]: expAfter },
     };
-    if (u.jobId === "courier") {
-      patch.courierSimShiftsLeft = Math.max(0, (u.courierSimShiftsLeft ?? 0) - 1);
-      if ((u.courierBikeShiftsLeft ?? 0) > 0) {
-        patch.courierBikeShiftsLeft = Math.max(0, (u.courierBikeShiftsLeft ?? 0) - 1);
-      }
-    }
     patchEconomyUser(guildId, member.id, patch);
+    const walletDeltaRub = rublesNext - u.rubles;
     appendFeedEvent({
       ts: now,
       guildId,
       type: "job:shift",
       actorUserId: member.id,
-      text: `${member.toString()} вышел на смену: **${def.title}** (${formatDelta(total)}).${notes.length ? ` (${notes.join(", ")})` : ""}`,
+      text: `${member.toString()} вышел на смену: **${def.title}** (${formatDelta(walletDeltaRub)}).${notes.length ? ` (${notes.join(", ")})` : ""}`,
     });
     await ensureEconomyFeedPanel(interaction.client);
     // Показать игроку в его же окне: сколько получил и текущий баланс.
     const after = getEconomyUser(guildId, member.id);
-    const embed = buildCurrentJobEmbed(member, { lastShiftDeltaRub: total, lastShiftNotes: notes });
+    const embed = buildCurrentJobEmbed(member, { lastShiftDeltaRub: walletDeltaRub, lastShiftNotes: notes });
     // В embed баланс/эксп считаются через store; убедимся, что берем уже обновлённый rubles.
     // (buildCurrentJobEmbed сам читает store, который уже обновили)
     void after;
@@ -1574,7 +1861,46 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 }
 
 export async function handleEconomyModal(interaction: ModalSubmitInteraction): Promise<boolean> {
-  if (interaction.customId !== ECON_MODAL_PLAYER_SEARCH) return false;
+  const modalId = interaction.customId;
+
+  if (modalId === ECON_MODAL_SIM_TOPUP) {
+    if (!interaction.inGuild() || !interaction.guildId || !interaction.member) {
+      await interaction.reply({ content: "Эта форма работает только на сервере.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const mem = interaction.member as GuildMember;
+    if (mem.user.bot) {
+      await interaction.reply({ content: "Ботам экономика не положена.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const rawIn = interaction.fields.getTextInputValue("amount").trim().replace(/\s/g, "").replace(",", ".");
+    const amount = Math.floor(Number(rawIn));
+    if (!Number.isFinite(amount) || amount < 1) {
+      await interaction.reply({ content: "Введите целое число **от 1 ₽**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const u = getEconomyUser(mem.guild.id, mem.id);
+    if (!u.hasPhone || !u.courierSimNumber) {
+      await interaction.reply({ content: "Нужны телефон и активная симка.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (u.rubles < amount) {
+      await interaction.reply({ content: `На счёте только **${fmt(u.rubles)} ₽**.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    patchEconomyUser(mem.guild.id, mem.id, {
+      rubles: u.rubles - amount,
+      simBalanceRub: (u.simBalanceRub ?? 0) + amount,
+    });
+    await interaction.reply({
+      embeds: [buildShopSimEmbed(mem)],
+      components: buildShopSimRows(mem),
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  if (modalId !== ECON_MODAL_PLAYER_SEARCH) return false;
   if (!interaction.inGuild() || !interaction.guildId) {
     await interaction.reply({ content: "Эта форма работает только на сервере.", flags: MessageFlags.Ephemeral });
     return true;
