@@ -609,15 +609,23 @@ function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[
 
 function buildShopSimEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const lines = [
-    "**Новая симка** — случайный 5-значный номер (часть номеров из «возвратов» других игроков). Старая симка пропадает и может снова попасть в продажу.",
+  const hasSim = Boolean(u.courierSimNumber);
+  const lines: string[] = [
+    hasSim
+      ? "**Замена номера** — новый случайный 5-значный номер (**" +
+        SHOP_SIM_NEW_PRICE_RUB +
+        " ₽**). Текущий баланс симки **не меняется**. Старый номер может снова попасть в продажу."
+      : "**Первая симка** — случайный 5-значный номер (**" +
+        SHOP_SIM_NEW_PRICE_RUB +
+        " ₽**), на баланс симки **+" +
+        SHOP_SIM_START_BALANCE_RUB +
+        " ₽**.",
     "",
     u.hasPhone ? "" : "**Сначала купите телефон** — без него симку оформить нельзя.",
     "",
-    `Новая симка: **${SHOP_SIM_NEW_PRICE_RUB} ₽** (+ **${SHOP_SIM_START_BALANCE_RUB} ₽** на баланс симки)`,
     "Пополнить сим: введите сумму в ₽ — **столько же** зачислится на баланс симки (списание с основного счёта).",
     "",
-    u.courierSimNumber ? `Текущий номер: **${u.courierSimNumber}** · баланс: **${fmt(u.simBalanceRub ?? 0)} ₽**` : "Симки ещё **нет**.",
+    hasSim ? `Текущий номер: **${u.courierSimNumber}** · баланс: **${fmt(u.simBalanceRub ?? 0)} ₽**` : "Симки ещё **нет**.",
   ].filter(Boolean);
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Симка").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
 }
@@ -630,7 +638,7 @@ function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(ECON_SHOP_SIM_NEW)
-        .setLabel("Купить новую симку")
+        .setLabel(u.courierSimNumber ? "Заменить сим" : "Купить симку")
         .setStyle(ButtonStyle.Primary)
         .setDisabled(!canNew),
       new ButtonBuilder()
@@ -1338,10 +1346,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const old = u.courierSimNumber;
     if (old) releaseSimNumberToPool(old);
     const next = rollNewSimDigits();
+    const replacing = Boolean(old);
     patchEconomyUser(member.guild.id, member.id, {
       rubles: u.rubles - SHOP_SIM_NEW_PRICE_RUB,
       courierSimNumber: next,
-      simBalanceRub: SHOP_SIM_START_BALANCE_RUB,
+      simBalanceRub: replacing ? (u.simBalanceRub ?? 0) : SHOP_SIM_START_BALANCE_RUB,
     });
     await replyOrUpdate(interaction, { embeds: [buildShopSimEmbed(member)], components: buildShopSimRows(member) });
     return true;
