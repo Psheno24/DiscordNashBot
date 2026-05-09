@@ -52,6 +52,8 @@ const ECON_WORK_BUTTON_PAY_SIM = "econ:work:courier:paySim";
 const ECON_WORK_BUTTON_RENT_BIKE = "econ:work:courier:rentBike";
 const ECON_WORK_BUTTON_QUIT = "econ:work:quit";
 const ECON_WORK_BUTTON_QUIT_CONFIRM = "econ:work:quit:confirm";
+/** Подтверждение: уволиться с текущей и взять `jobId` */
+const ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX = "econ:work:switchOk:";
 
 const ECON_WORK_BUTTON_TIER2 = "econ:work:tier2";
 const ECON_PLAYERS_BUTTON_SEARCH = "econ:players:search";
@@ -361,10 +363,17 @@ async function buildTopEmbed(viewer: GuildMember, kind: "ps" | "rub"): Promise<E
     .setFooter({ text: `Запросил: ${viewer.user.tag}` });
 }
 
-function jobTitle(id: JobId): string {
-  if (id === "courier") return "Курьер";
-  if (id === "waiter") return "Официант";
-  return "Ночной сторож";
+const WORK_JOB_IDS = [
+  "courier",
+  "waiter",
+  "watchman",
+  "dispatcher",
+  "assembler",
+  "expediter",
+] as const satisfies readonly JobId[];
+
+function isWorkJobId(s: string): s is JobId {
+  return (WORK_JOB_IDS as readonly string[]).includes(s);
 }
 
 function formatCooldown(msLeft: number): string {
@@ -377,10 +386,8 @@ function formatCooldown(msLeft: number): string {
   return `${m}м`;
 }
 
-type AnyJobId = JobId | "dispatcher" | "assembler" | "expediter";
-
 type JobDef = {
-  id: AnyJobId;
+  id: JobId;
   title: string;
   baseCooldownMs: number;
   basePayoutRub: number;
@@ -436,7 +443,9 @@ const JOBS_STARTER: JobDef[] = [
   },
 ];
 
-function getJobDef(id: JobId): JobDef {
+type StarterJobId = (typeof JOBS_STARTER)[number]["id"];
+
+function getJobDef(id: StarterJobId): JobDef {
   const d = JOBS_STARTER.find((j) => j.id === id);
   if (!d) throw new Error(`unknown job: ${id}`);
   return d;
@@ -471,12 +480,16 @@ const JOBS_TIER2: JobDef[] = [
   },
 ];
 
-function getAnyJobDef(id: AnyJobId): JobDef {
+function getAnyJobDef(id: JobId): JobDef {
   const s = JOBS_STARTER.find((j) => j.id === id);
   if (s) return s;
   const t2 = JOBS_TIER2.find((j) => j.id === id);
   if (t2) return t2;
   throw new Error(`unknown job: ${id}`);
+}
+
+function jobTitle(id: JobId): string {
+  return getAnyJobDef(id).title;
 }
 
 function getSkillLevel(u: ReturnType<typeof getEconomyUser>, skill: SkillId): number {
@@ -528,22 +541,20 @@ function formatDelta(n: number): string {
   return `${sign}${Math.abs(n).toLocaleString("ru-RU")} ₽`;
 }
 
-function getJobExp(u: ReturnType<typeof getEconomyUser>, jobId: AnyJobId): number {
+function getJobExp(u: ReturnType<typeof getEconomyUser>, jobId: JobId): number {
   return Math.max(0, Math.floor((u.jobExp as any)?.[jobId] ?? 0));
 }
 
-function effectiveCooldownMs(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): number {
-  const def = getJobDef(jobId);
-  if (jobId === "courier") {
-    const hasBike = (u.courierBikeShiftsLeft ?? 0) > 0;
-    if (hasBike) return 2 * 60 * 60 * 1000; // 2 часа вместо 3
-  }
+function effectiveCourierCooldownMs(u: ReturnType<typeof getEconomyUser>): number {
+  const def = getJobDef("courier");
+  const hasBike = (u.courierBikeShiftsLeft ?? 0) > 0;
+  if (hasBike) return 2 * 60 * 60 * 1000; // 2 часа вместо 3
   return def.baseCooldownMs;
 }
 
-function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: AnyJobId, now: number): { ok: boolean; msLeft: number } {
+function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): { ok: boolean; msLeft: number } {
   const def = getAnyJobDef(jobId);
-  const cd = jobId === "courier" ? effectiveCooldownMs(u, "courier", now) : def.baseCooldownMs;
+  const cd = jobId === "courier" ? effectiveCourierCooldownMs(u) : def.baseCooldownMs;
   const last = u.lastWorkAt ?? 0;
   const next = last + cd;
   if (now >= next) return { ok: true, msLeft: 0 };
@@ -552,22 +563,86 @@ function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: AnyJobId, now: 
 
 function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = u.jobId ? `Текущая работа: **${jobTitle(u.jobId)}**` : "Текущая работа: **не выбрана**";
+  if (!u.jobId) {
+    return new EmbedBuilder()
+      .setColor(PANEL_COLOR)
+      .setTitle("Работа")
+      .setDescription(["Текущая работа: **не выбрана**", "", "Выберите раздел ниже."].join("\n"))
+      .setFooter({ text: `Запросил: ${member.user.tag}` });
+  }
+  const def = getAnyJobDef(u.jobId);
+  const now = Date.now();
+  const state = canWorkNow(u, u.jobId, now);
+  const cd = u.jobId === "courier" ? effectiveCourierCooldownMs(u) : def.baseCooldownMs;
+  const lines = [
+    `Текущая работа: **${def.title}**`,
+    `Баланс: **${fmt(u.rubles)} ₽**`,
+    `Оплата за смену: **${def.basePayoutRub} ₽** · КД: **${Math.round(cd / 60000)} мин**`,
+    state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
+  ];
+  if (u.jobId === "courier") {
+    lines.push("");
+    lines.push(
+      `Симка: **${u.courierSimShiftsLeft ?? 0}** смен · Электровел: **${u.courierBikeShiftsLeft ?? 0}** смен`,
+    );
+  }
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Работа")
-    .setDescription([cur, "", "Выберите раздел ниже."].join("\n"))
+    .setDescription([...lines, "", "Сверху — смена, ниже — каталог профессий."].join("\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
-function buildWorkMenuRows(): ActionRowBuilder<ButtonBuilder>[] {
-  return [
+function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  if (!u.jobId) {
+    return [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Без навыка (начальные)").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком (тир 2)").setStyle(ButtonStyle.Secondary),
+      ),
+      buildMenuRow(),
+    ];
+  }
+  const now = Date.now();
+  const state = canWorkNow(u, u.jobId, now);
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  const shiftRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(ECON_WORK_BUTTON_SHIFT)
+      .setLabel("Выйти на смену")
+      .setStyle(ButtonStyle.Success)
+      .setDisabled(!state.ok),
+  );
+  if (u.jobId === "courier") {
+    const simOk = (u.courierSimShiftsLeft ?? 0) > 0;
+    shiftRow.addComponents(
+      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_PAY_SIM).setLabel("Купить симку").setStyle(ButtonStyle.Secondary).setDisabled(simOk),
+      new ButtonBuilder()
+        .setCustomId(ECON_WORK_BUTTON_RENT_BIKE)
+        .setLabel("Аренда электровела")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled((u.courierBikeShiftsLeft ?? 0) > 0),
+    );
+  }
+  rows.push(shiftRow);
+  rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Без навыка (начальные)").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком (тир 2)").setStyle(ButtonStyle.Secondary),
     ),
-    buildMenuRow(),
-  ];
+  );
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(ECON_WORK_BUTTON_QUIT)
+        .setLabel("Уволиться")
+        .setStyle(ButtonStyle.Danger)
+        .setDisabled(!state.ok),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return rows;
 }
 
 function buildStarterJobsEmbed(): EmbedBuilder {
@@ -591,11 +666,11 @@ function buildStarterJobsRows(): ActionRowBuilder<ButtonBuilder>[] {
   ];
 }
 
-function buildJobInfoEmbed(member: GuildMember, jobId: AnyJobId): EmbedBuilder {
+function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const def = getAnyJobDef(jobId);
   const now = Date.now();
-  const cd = jobId === "courier" ? effectiveCooldownMs(u, "courier", now) : def.baseCooldownMs;
+  const cd = jobId === "courier" ? effectiveCourierCooldownMs(u) : def.baseCooldownMs;
   const cdH = Math.round(cd / 360000) / 10;
   const payout = def.basePayoutRub;
   const extra: string[] = [];
@@ -624,28 +699,94 @@ function buildJobInfoEmbed(member: GuildMember, jobId: AnyJobId): EmbedBuilder {
         `КД смены: **~${cdH} ч**`,
         ...(extra.length ? ["", ...extra] : []),
         "",
-        u.jobId === (jobId as any) ? "Статус: **это ваша текущая работа**." : "Статус: **не выбрана**.",
+        u.jobId === jobId ? "Статус: **это ваша текущая работа**." : "Статус: **не выбрана**.",
       ].join("\n"),
     )
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
-function isTier2JobId(jobId: AnyJobId): boolean {
+function isTier2JobId(jobId: JobId): boolean {
   return JOBS_TIER2.some((j) => j.id === jobId);
 }
 
-function buildJobInfoRows(u: ReturnType<typeof getEconomyUser>, jobId: AnyJobId, canTake: boolean): ActionRowBuilder<ButtonBuilder>[] {
-  const takeId = `${ECON_WORK_BUTTON_TAKE_PREFIX}${jobId}`;
+function buildSwitchJobConfirmEmbed(member: GuildMember, newJobId: JobId): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const oldTitle = u.jobId ? jobTitle(u.jobId) : "—";
+  const nextTitle = getAnyJobDef(newJobId).title;
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Смена работы")
+    .setDescription(`Уволиться с **${oldTitle}** и устроиться **${nextTitle}**?`)
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildSwitchJobConfirmRows(newJobId: JobId): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX}${newJobId}`)
+        .setLabel("Да, устроиться сюда")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}${newJobId}`)
+        .setLabel("Назад")
+        .setStyle(ButtonStyle.Secondary),
+    ),
+    buildMenuRow(),
+  ];
+}
+
+function buildJobInfoRows(u: ReturnType<typeof getEconomyUser>, jobId: JobId, canTakeSkills: boolean): ActionRowBuilder<ButtonBuilder>[] {
   const backId = isTier2JobId(jobId) ? ECON_WORK_BUTTON_TIER2 : ECON_WORK_BUTTON_STARTERS;
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(takeId)
-      .setLabel(u.jobId === (jobId as any) ? "Уже выбрано" : "Взяться за работу")
-      .setStyle(ButtonStyle.Primary)
-      .setDisabled(u.jobId === (jobId as any) || !canTake),
-    new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+  const now = Date.now();
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+
+  if (u.jobId === jobId) {
+    const state = canWorkNow(u, jobId, now);
+    const shiftRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(ECON_WORK_BUTTON_SHIFT)
+        .setLabel("Выйти на смену")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(!state.ok),
+    );
+    if (jobId === "courier") {
+      const simOk = (u.courierSimShiftsLeft ?? 0) > 0;
+      shiftRow.addComponents(
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_PAY_SIM).setLabel("Купить симку").setStyle(ButtonStyle.Secondary).setDisabled(simOk),
+        new ButtonBuilder()
+          .setCustomId(ECON_WORK_BUTTON_RENT_BIKE)
+          .setLabel("Аренда электровела")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled((u.courierBikeShiftsLeft ?? 0) > 0),
+      );
+    }
+    rows.push(shiftRow);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      ),
+    );
+    rows.push(buildMenuRow());
+    return rows;
+  }
+
+  const takeId = `${ECON_WORK_BUTTON_TAKE_PREFIX}${jobId}`;
+  const switchOk = !u.jobId || canWorkNow(u, u.jobId, now).ok;
+  const selectDisabled = !canTakeSkills || !switchOk;
+
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(takeId)
+        .setLabel("Выбрать")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(selectDisabled),
+      new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+    ),
   );
-  return [row, buildMenuRow()];
+  rows.push(buildMenuRow());
+  return rows;
 }
 
 function buildCurrentJobEmbed(
@@ -660,10 +801,10 @@ function buildCurrentJobEmbed(
       .setDescription("Работа не выбрана. Перейдите в «Без навыка (начальные)» и выберите профессию.")
       .setFooter({ text: `Запросил: ${member.user.tag}` });
   }
-  const def = getAnyJobDef(u.jobId as any);
+  const def = getAnyJobDef(u.jobId);
   const now = Date.now();
-  const cd = u.jobId === "courier" ? effectiveCooldownMs(u, "courier", now) : def.baseCooldownMs;
-  const state = canWorkNow(u, u.jobId as any, now);
+  const cd = u.jobId === "courier" ? effectiveCourierCooldownMs(u) : def.baseCooldownMs;
+  const state = canWorkNow(u, u.jobId, now);
   const exp = Math.max(0, Math.floor((u.jobExp as any)?.[u.jobId] ?? 0));
   const lines = [
     `Текущая работа: **${def.title}**`,
@@ -707,9 +848,9 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
     return rows;
   }
 
-  const state = canWorkNow(u, u.jobId as any, now);
+  const state = canWorkNow(u, u.jobId, now);
   const shiftRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_SHIFT).setLabel("Выйти на смену").setStyle(ButtonStyle.Primary).setDisabled(!state.ok),
+    new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_SHIFT).setLabel("Выйти на смену").setStyle(ButtonStyle.Success).setDisabled(!state.ok),
   );
 
   if (u.jobId === "courier") {
@@ -961,6 +1102,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     cid.startsWith(ECON_FEED_BUTTON_PAGE_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_JOB_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_TAKE_PREFIX) ||
+    cid.startsWith(ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX) ||
     cid.startsWith(ECON_SKILL_BUTTON_PREFIX);
   if (!isKnown) return false;
   if (!interaction.inGuild() || !interaction.guildId || !interaction.member) {
@@ -1006,7 +1148,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_BUTTON_WORK) {
-    await replyOrUpdate(interaction, { embeds: [buildWorkMenuEmbed(member)], components: buildWorkMenuRows() });
+    await replyOrUpdate(interaction, { embeds: [buildWorkMenuEmbed(member)], components: buildWorkMenuRows(member) });
     return true;
   }
 
@@ -1014,9 +1156,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     // Пока откат после смены не прошёл — запрещаем смену работы.
     const u = getEconomyUser(member.guild.id, member.id);
     if (u.jobId) {
-      const st = canWorkNow(u, u.jobId as any, Date.now());
+      const st = canWorkNow(u, u.jobId, Date.now());
       if (!st.ok) {
-        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildCurrentJobRows(member) });
+        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildWorkMenuRows(member) });
         return true;
       }
     }
@@ -1028,9 +1170,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     // Пока откат после смены не прошёл — запрещаем смену работы.
     const u = getEconomyUser(member.guild.id, member.id);
     if (u.jobId) {
-      const st = canWorkNow(u, u.jobId as any, Date.now());
+      const st = canWorkNow(u, u.jobId, Date.now());
       if (!st.ok) {
-        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildCurrentJobRows(member) });
+        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildWorkMenuRows(member) });
         return true;
       }
     }
@@ -1052,11 +1194,12 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id.startsWith(ECON_WORK_BUTTON_JOB_PREFIX)) {
-    const jobId = id.slice(ECON_WORK_BUTTON_JOB_PREFIX.length) as AnyJobId;
-    if (!["courier", "waiter", "watchman", "dispatcher", "assembler", "expediter"].includes(jobId)) {
+    const raw = id.slice(ECON_WORK_BUTTON_JOB_PREFIX.length);
+    if (!isWorkJobId(raw)) {
       await interaction.reply({ content: "Неизвестная профессия.", flags: MessageFlags.Ephemeral });
       return true;
     }
+    const jobId = raw;
     const u = getEconomyUser(member.guild.id, member.id);
     const def = getAnyJobDef(jobId);
     const req = meetsJobReq(u, def);
@@ -1065,27 +1208,74 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id.startsWith(ECON_WORK_BUTTON_TAKE_PREFIX)) {
-    const jobId = id.slice(ECON_WORK_BUTTON_TAKE_PREFIX.length) as AnyJobId;
-    if (!["courier", "waiter", "watchman", "dispatcher", "assembler", "expediter"].includes(jobId)) {
+    const raw = id.slice(ECON_WORK_BUTTON_TAKE_PREFIX.length);
+    if (!isWorkJobId(raw)) {
       await interaction.reply({ content: "Неизвестная профессия.", flags: MessageFlags.Ephemeral });
       return true;
     }
+    const jobId = raw;
     const cur = getEconomyUser(member.guild.id, member.id);
-    // Пока откат после смены не прошёл — запрещаем смену/взятие другой работы.
-    if (cur.jobId) {
-      const st = canWorkNow(cur, cur.jobId as any, Date.now());
-      if (!st.ok && cur.jobId !== (jobId as any)) {
-        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildCurrentJobRows(member) });
-        return true;
-      }
-    }
     const def = getAnyJobDef(jobId);
     const req = meetsJobReq(cur, def);
     if (!req.ok) {
       await interaction.reply({ content: `Не хватает навыков:\n- ${req.missing.join("\n- ")}`, flags: MessageFlags.Ephemeral });
       return true;
     }
-    patchEconomyUser(member.guild.id, member.id, { jobId: jobId as any, jobChosenAt: Date.now() });
+
+    if (cur.jobId) {
+      const st = canWorkNow(cur, cur.jobId, Date.now());
+      if (!st.ok) {
+        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildWorkMenuRows(member) });
+        return true;
+      }
+      if (cur.jobId !== jobId) {
+        await replyOrUpdate(interaction, {
+          embeds: [buildSwitchJobConfirmEmbed(member, jobId)],
+          components: buildSwitchJobConfirmRows(jobId),
+        });
+        return true;
+      }
+      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+      return true;
+    }
+
+    patchEconomyUser(member.guild.id, member.id, { jobId, jobChosenAt: Date.now() });
+    await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+    return true;
+  }
+
+  if (id.startsWith(ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX)) {
+    const raw = id.slice(ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX.length);
+    if (!isWorkJobId(raw)) {
+      await interaction.reply({ content: "Неизвестная профессия.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const jobId = raw;
+    const cur = getEconomyUser(member.guild.id, member.id);
+    const def = getAnyJobDef(jobId);
+    const req = meetsJobReq(cur, def);
+    if (!req.ok) {
+      await interaction.reply({ content: `Не хватает навыков:\n- ${req.missing.join("\n- ")}`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    if (!cur.jobId) {
+      patchEconomyUser(member.guild.id, member.id, { jobId, jobChosenAt: Date.now() });
+      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+      return true;
+    }
+
+    const st = canWorkNow(cur, cur.jobId, Date.now());
+    if (!st.ok) {
+      await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildWorkMenuRows(member) });
+      return true;
+    }
+    if (cur.jobId === jobId) {
+      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+      return true;
+    }
+
+    patchEconomyUser(member.guild.id, member.id, { jobId, jobChosenAt: Date.now() });
     await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
     return true;
   }
@@ -1096,9 +1286,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
       return true;
     }
-    const st = canWorkNow(u, u.jobId as any, Date.now());
+    const st = canWorkNow(u, u.jobId, Date.now());
     if (!st.ok) {
-      await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildCurrentJobRows(member) });
+      await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildWorkMenuRows(member) });
       return true;
     }
     const embed = new EmbedBuilder()
@@ -1116,14 +1306,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_WORK_BUTTON_QUIT_CONFIRM) {
     const u = getEconomyUser(member.guild.id, member.id);
     if (u.jobId) {
-      const st = canWorkNow(u, u.jobId as any, Date.now());
+      const st = canWorkNow(u, u.jobId, Date.now());
       if (!st.ok) {
-        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildCurrentJobRows(member) });
+        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildWorkMenuRows(member) });
         return true;
       }
     }
     patchEconomyUser(member.guild.id, member.id, { jobId: undefined, jobChosenAt: undefined, lastWorkAt: undefined });
-    await replyOrUpdate(interaction, { embeds: [buildWorkMenuEmbed(member)], components: buildWorkMenuRows() });
+    await replyOrUpdate(interaction, { embeds: [buildWorkMenuEmbed(member)], components: buildWorkMenuRows(member) });
     return true;
   }
 
@@ -1170,27 +1360,27 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_WORK_BUTTON_SHIFT) {
     const guildId = member.guild.id;
     const u = getEconomyUser(guildId, member.id);
-    if (!u.jobId) {
+    const jobId = u.jobId;
+    if (!jobId) {
       await interaction.reply({ content: "Сначала выбери работу.", flags: MessageFlags.Ephemeral });
       return true;
     }
     const now = Date.now();
-    const st = canWorkNow(u, u.jobId as any, now);
+    const st = canWorkNow(u, jobId, now);
     if (!st.ok) {
       await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
       return true;
     }
 
     // требования курьера: симка оплачена сегодня
-    if (u.jobId === "courier") {
+    if (jobId === "courier") {
       if ((u.courierSimShiftsLeft ?? 0) <= 0) {
         await interaction.reply({ content: `Перед сменой купите симку (пакет ${courierSimPackShifts()} смен за ${courierSimFeeRub()} ₽).`, flags: MessageFlags.Ephemeral });
         return true;
       }
     }
 
-    const def = getAnyJobDef(u.jobId as any);
-    const jobId = u.jobId as AnyJobId;
+    const def = getAnyJobDef(jobId);
     const expBefore = getJobExp(u, jobId);
     const expAfter = expBefore + 1;
 

@@ -3,7 +3,22 @@ import { join } from "node:path";
 
 export type FocusPreset = "role" | "balance" | "money";
 
-export type JobId = "courier" | "waiter" | "watchman";
+export type JobId =
+  | "courier"
+  | "waiter"
+  | "watchman"
+  | "dispatcher"
+  | "assembler"
+  | "expediter";
+
+const PERSISTED_JOB_IDS: readonly JobId[] = [
+  "courier",
+  "waiter",
+  "watchman",
+  "dispatcher",
+  "assembler",
+  "expediter",
+] as const;
 export type SkillId = "communication" | "logistics" | "discipline";
 
 /** Потолок уровня навыка; тир-3 можно строить на комбо в духе 40+/60+/80+ при том же счётчике. */
@@ -83,9 +98,10 @@ function normalizeUser(u: Partial<EconomyUser> | undefined): EconomyUser {
     focus: (u?.focus ?? "balance") as FocusPreset,
     voiceDay: typeof u?.voiceDay === "string" ? u.voiceDay : undefined,
     voiceMinutesToday: Number.isFinite(u?.voiceMinutesToday) ? Math.max(0, Math.floor(u!.voiceMinutesToday!)) : undefined,
-    jobId: (u?.jobId === "courier" || u?.jobId === "waiter" || u?.jobId === "watchman" ? u.jobId : undefined) as
-      | JobId
-      | undefined,
+    jobId:
+      typeof u?.jobId === "string" && (PERSISTED_JOB_IDS as readonly string[]).includes(u.jobId)
+        ? (u.jobId as JobId)
+        : undefined,
     jobChosenAt: Number.isFinite(u?.jobChosenAt) ? Math.max(0, Math.floor(u!.jobChosenAt!)) : undefined,
     lastWorkAt: Number.isFinite(u?.lastWorkAt) ? Math.max(0, Math.floor(u!.lastWorkAt!)) : undefined,
     courierSimShiftsLeft: Number.isFinite(u?.courierSimShiftsLeft) ? Math.max(0, Math.floor(u!.courierSimShiftsLeft!)) : undefined,
