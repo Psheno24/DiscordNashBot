@@ -85,9 +85,10 @@ const FEED_COLOR = 0x0d47a1;
 const SHOP_PHONE_PRICE_RUB = 1000;
 const SHOP_SIM_NEW_PRICE_RUB = 100;
 const SHOP_SIM_START_BALANCE_RUB = 50;
-const COURIER_LINE_24H_MS = 24 * 60 * 60 * 1000;
-const COURIER_LINE_OPEN_FEE_RUB = 20;
-const COURIER_SIM_AIRTIME_PER_SHIFT_RUB = 20;
+/** Окно «онлайн» курьера после оплаты с баланса сим. */
+const COURIER_ONLINE_24H_MS = 24 * 60 * 60 * 1000;
+/** Один раз с баланса сим при первой смене после истечения окна; внутри 24 ч доп. списаний с сим нет. */
+const COURIER_SIM_24H_FEE_RUB = 20;
 const BIKE_1D_MS = 1 * 86400000;
 const BIKE_3D_MS = 3 * 86400000;
 const BIKE_7D_MS = 7 * 86400000;
@@ -477,7 +478,7 @@ const JOBS_STARTER: JobDef[] = [
     description:
       [
         "**Самый короткий КД** тира (3 ч, с арендой вела — 2 ч).",
-        `Нужны **телефон** и **симка**; при **выходе на смену** — **${COURIER_LINE_OPEN_FEE_RUB}** ₽ за **линию на 24 ч** (если окно вышло) и списание **${COURIER_SIM_AIRTIME_PER_SHIFT_RUB}** ₽ **с баланса сим** за связь.`,
+        `Нужны **телефон** и **симка**. Раз в **24 ч** (при первой смене после перерыва) с **баланса сим** — **${COURIER_SIM_24H_FEE_RUB}** ₽ за окно онлайн; внутри суток смены **без** доп. списаний с сим. **Основной счёт не трогается.**`,
         "**Электровел** — посуточная аренда (кнопки в этой карточке).",
       ].join("\n"),
   },
@@ -486,7 +487,9 @@ const JOBS_STARTER: JobDef[] = [
     title: "Официант",
     baseCooldownMs: 5 * 60 * 60 * 1000,
     basePayoutRub: 0,
-    description: ["**Средний КД** (5 ч). **Без фиксированного оклада**: разброс выплаты за смену."].join("\n"),
+    description: [
+      "**Средний КД** (5 ч). **Без фиксированного оклада**: широкий разброс выплаты — возможен убыток, зато и редкие очень удачные смены.",
+    ].join("\n"),
   },
   {
     id: "watchman",
@@ -593,11 +596,10 @@ function hasActiveBikeRental(u: ReturnType<typeof getEconomyUser>, now: number):
   return Number.isFinite(u.courierBikeUntilMs) && (u.courierBikeUntilMs ?? 0) > now;
 }
 
-/** Строки для курьера: электровелосипед, тариф сим 24 ч, баланс сим — только при текущей работе «курьер». */
+/** Строки для курьера: электровелосипед, окно онлайн 24 ч, баланс сим — только при текущей работе «курьер». */
 function courierWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
   if (u.jobId !== "courier") return [];
-  const line = COURIER_LINE_OPEN_FEE_RUB;
-  const per = COURIER_SIM_AIRTIME_PER_SHIFT_RUB;
+  const fee = COURIER_SIM_24H_FEE_RUB;
   const lines: string[] = [];
   if (hasActiveBikeRental(u, now)) {
     const t = Math.floor((u.courierBikeUntilMs ?? 0) / 1000);
@@ -607,15 +609,15 @@ function courierWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: numbe
   }
   if (u.courierPhonePaidUntilMs && now < u.courierPhonePaidUntilMs) {
     const lt = Math.floor(u.courierPhonePaidUntilMs / 1000);
-    lines.push(`**Сим-карта:** тариф на **24 ч** оплачен до <t:${lt}:F>.`);
+    lines.push(`**Сим-карта:** окно **24 ч** оплачено до <t:${lt}:F> — смены в этот период **без** доп. списаний с баланса сим.`);
   } else {
     lines.push(
-      `**Сим-карта:** тариф на **24 ч** **не оплачен** — при выходе на смену с **основного счёта** спишется **${line}** ₽ за новое окно.`,
+      `**Сим-карта:** окно **24 ч** **не оплачено** — при следующем выходе на смену с баланса сим спишется **${fee}** ₽ и откроется сутки онлайн.`,
     );
   }
   const bals = u.simBalanceRub ?? 0;
   lines.push(
-    `**Баланс сим:** **${fmt(bals)}** ₽ — за связь за смену с баланса сим списывается **${per}** ₽; неоплаченный **тариф 24 ч** при выходе на смену оплачивается **с основного счёта** (**${line}** ₽).`,
+    `**Баланс сим:** **${fmt(bals)}** ₽ — пополнение в магазине; **${fee}** ₽ с сим за окно **24 ч** (основной счёт **не** используется).`,
   );
   return lines;
 }
@@ -626,7 +628,7 @@ function jobUsesVariablePayout(jobId: JobId): boolean {
 
 function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
   if (jobId === "waiter") {
-    return "Оплата за смену: **без фикса** — разброс **примерно −55…+175 ₽** (частый коридор **+45…+95 ₽**).";
+    return "Оплата за смену: **без фикса** — разброс **примерно −95…+380 ₽** (типичный зал **+55…+175 ₽**; редко — крупный куш или тяжёлый минус).";
   }
   if (jobId === "expediter") {
     return "Оплата за смену: **без фикса** — разброс **примерно −58…+185 ₽** (частый коридор **+50…+110 ₽**).";
@@ -861,7 +863,7 @@ function buildStarterJobsEmbed(member: GuildMember): EmbedBuilder {
     const pay = jobPayoutShortForMenu(d.id, d.basePayoutRub);
     let s = `**${d.title}** — ${pay}, КД **${cdh} ч**.`;
     if (d.id === "courier") {
-      s += ` За смену: линия **${COURIER_LINE_OPEN_FEE_RUB}** ₽ на 24 ч (если срок вышел) + **${COURIER_SIM_AIRTIME_PER_SHIFT_RUB}** ₽ с баланса сим.`;
+      s += ` С баланса сим: **${COURIER_SIM_24H_FEE_RUB}** ₽ на **24 ч** онлайн при необходимости; внутри окна без доп. списаний с сим.`;
     } else if (d.id === "waiter") {
       s += " Оклад **без фикса** (рандом прибыли/убытка).";
     } else {
@@ -1679,18 +1681,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         await interaction.reply({ content: "Оформите **симку** в магазине.", flags: MessageFlags.Ephemeral });
         return true;
       }
-      if ((u.simBalanceRub ?? 0) < COURIER_SIM_AIRTIME_PER_SHIFT_RUB) {
+      const onlineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
+      if (onlineDue && (u.simBalanceRub ?? 0) < COURIER_SIM_24H_FEE_RUB) {
         await interaction.reply({
-          content: `На балансе сим недостаточно (**${COURIER_SIM_AIRTIME_PER_SHIFT_RUB} ₽** за смену). Пополните в магазине.`,
-          flags: MessageFlags.Ephemeral,
-        });
-        return true;
-      }
-      const lineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
-      const lineFee = lineDue ? COURIER_LINE_OPEN_FEE_RUB : 0;
-      if (u.rubles < lineFee) {
-        await interaction.reply({
-          content: `Нужно **${lineFee} ₽** на счёт для оплаты линии на 24 ч (списывается только при старте смены).`,
+          content: `На балансе сим нужно **${COURIER_SIM_24H_FEE_RUB}** ₽ за окно **24 ч** онлайн (пополните в магазине).`,
           flags: MessageFlags.Ephemeral,
         });
         return true;
@@ -1707,22 +1701,26 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
     if (jobId === "waiter") {
       base = 0;
+      // Широкий разброс: редкий тяжёлый минус и редкий «крупный куш», основная масса — плюс с разумным EV vs фикс курьера за тот же «тип» смены.
       const r = Math.random();
-      if (r < 0.1) {
-        extra = -randInt(25, 55);
-        notes.push(`Штраф **${formatDelta(extra)}** — инцидент (бойка посуды, жалоба, компенсация гостю).`);
-      } else if (r < 0.28) {
-        extra = randInt(-8, 28);
-        notes.push(`Сдвиг **${formatDelta(extra)}** — обычная смена (чаевые и мелкие расходы).`);
-      } else if (r < 0.6) {
-        extra = randInt(42, 78);
-        notes.push(`Доп. заработок **${formatDelta(extra)}** — хорошие чаевые и допродажи.`);
-      } else if (r < 0.88) {
-        extra = randInt(72, 112);
-        notes.push(`Доп. заработок **${formatDelta(extra)}** — оживлённый зал, много заказов.`);
+      if (r < 0.06) {
+        extra = -randInt(45, 95);
+        notes.push(`Убыток **${formatDelta(extra)}** — серьёзный инцидент (порча, жалоба, компенсация, штраф).`);
+      } else if (r < 0.2) {
+        extra = randInt(-12, 38);
+        notes.push(`Сдвиг **${formatDelta(extra)}** — слабый зал или мелкие минусы на чаевых.`);
+      } else if (r < 0.52) {
+        extra = randInt(52, 118);
+        notes.push(`Доп. **${formatDelta(extra)}** — нормальный вечер, чаевые и допродажи в плюс.`);
+      } else if (r < 0.8) {
+        extra = randInt(98, 178);
+        notes.push(`Доп. **${formatDelta(extra)}** — оживлённый зал, хороший оборот столов.`);
+      } else if (r < 0.94) {
+        extra = randInt(155, 268);
+        notes.push(`Доп. **${formatDelta(extra)}** — отличная смена (крупные чаевые, премия, VIP-стол).`);
       } else {
-        extra = randInt(105, 175);
-        notes.push(`Доп. заработок **${formatDelta(extra)}** — отличная смена (крупные чаевые, премия зала).`);
+        extra = randInt(235, 380);
+        notes.push(`Доп. **${formatDelta(extra)}** — «золотой» вечер: корпоратив, крупные чаевые, бонус заведения.`);
       }
     } else if (jobId === "watchman") {
       // только фикс
@@ -1771,15 +1769,12 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     let phoneUntilNext = u.courierPhonePaidUntilMs;
 
     if (jobId === "courier") {
-      const lineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
-      const lineFee = lineDue ? COURIER_LINE_OPEN_FEE_RUB : 0;
-      rublesNext -= lineFee;
-      if (lineDue) {
-        phoneUntilNext = now + COURIER_LINE_24H_MS;
-        notes.push(`линия 24ч ${formatDelta(-lineFee)}`);
+      const onlineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
+      if (onlineDue) {
+        simBalNext -= COURIER_SIM_24H_FEE_RUB;
+        phoneUntilNext = now + COURIER_ONLINE_24H_MS;
+        notes.push(`онлайн 24ч ${formatDelta(-COURIER_SIM_24H_FEE_RUB)} (баланс сим)`);
       }
-      simBalNext -= COURIER_SIM_AIRTIME_PER_SHIFT_RUB;
-      notes.push(`баланс сим ${formatDelta(-COURIER_SIM_AIRTIME_PER_SHIFT_RUB)}`);
     }
 
     rublesNext += jobTotal;
