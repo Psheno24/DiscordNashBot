@@ -160,6 +160,16 @@ function buildMenuRow(): ActionRowBuilder<ButtonBuilder> {
   );
 }
 
+function buildProfileHubPropertyLine(u: ReturnType<typeof getEconomyUser>): string {
+  if (!u.hasPhone) {
+    return `Телефон (**нет**)`;
+  }
+  if (!u.courierSimNumber) {
+    return `Телефон (**есть**, сим **нет**)`;
+  }
+  return `Телефон (**есть**, сим **${u.courierSimNumber}**) — баланс сим **${fmt(u.simBalanceRub ?? 0)}** ₽`;
+}
+
 function buildProfileHubEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   return new EmbedBuilder()
@@ -167,7 +177,10 @@ function buildProfileHubEmbed(member: GuildMember): EmbedBuilder {
     .setTitle("Профиль")
     .setDescription(
       [
-        `${progressName()}: **${fmt(u.psTotal)}** · ₽: **${fmt(u.rubles)}**`,
+        `${progressName()}: **${fmt(u.psTotal)}**`,
+        `Баланс: **${fmt(u.rubles)}** ₽`,
+        "",
+        buildProfileHubPropertyLine(u),
         "",
         "Выбери вкладку ниже.",
       ].join("\n"),
@@ -582,10 +595,15 @@ function jobPayoutShortForMenu(jobId: JobId, baseRub: number): string {
 
 function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
+  const simLine = u.hasPhone
+    ? `• Симка${u.courierSimNumber ? " **(куплено)**" : ""} — первая **${SHOP_SIM_NEW_PRICE_RUB}** ₽ (+**${SHOP_SIM_START_BALANCE_RUB}** ₽ на баланс), замена **${SHOP_SIM_NEW_PRICE_RUB}** ₽`
+    : `• Симка — сначала **телефон**`;
   const lines = [
-    `Баланс: **${fmt(u.rubles)} ₽**`,
-    u.hasPhone ? "Телефон: **есть**" : `Телефон: **нет** (${SHOP_PHONE_PRICE_RUB} ₽)`,
-    u.courierSimNumber ? `Номер сим: **${u.courierSimNumber}** · баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**` : "Симка: **не куплена** (нужен телефон)",
+    `Баланс: **${fmt(u.rubles)}** ₽`,
+    "",
+    "**Список товаров:**",
+    `• Телефон — **${SHOP_PHONE_PRICE_RUB}** ₽${u.hasPhone ? " **(куплено)**" : ""}`,
+    simLine,
   ];
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
 }
@@ -594,7 +612,11 @@ function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[
   const u = getEconomyUser(member.guild.id, member.id);
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_PHONE).setLabel("Телефон").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_PHONE)
+        .setLabel(u.hasPhone ? "Телефон (куплено)" : "Телефон")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(u.hasPhone),
       new ButtonBuilder()
         .setCustomId(ECON_SHOP_SIM)
         .setLabel("Симка")
