@@ -66,11 +66,9 @@ const ECON_WORK_BUTTON_QUIT_CONFIRM = "econ:work:quit:confirm";
 const ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX = "econ:work:switchOk:";
 
 const ECON_WORK_BUTTON_TIER2 = "econ:work:tier2";
-const ECON_PLAYERS_BUTTON_SEARCH = "econ:players:search";
 const ECON_PLAYERS_BUTTON_TOP_PS = "econ:players:topPs";
 const ECON_PLAYERS_BUTTON_TOP_RUB = "econ:players:topRub";
 
-const ECON_MODAL_PLAYER_SEARCH = "modal:econ:playerSearch";
 const ECON_MODAL_SIM_TOPUP = "modal:econ:simTopup";
 
 export const ECON_FEED_BUTTON_ARCHIVE = "econFeed:archive";
@@ -287,50 +285,6 @@ function buildFocusEmbed(member: GuildMember): EmbedBuilder {
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
-function parseUserId(raw: string): string | undefined {
-  const m = raw.trim().match(/^<@!?(\d+)>$/);
-  if (m) return m[1];
-  if (/^\d{5,25}$/.test(raw.trim())) return raw.trim();
-  return undefined;
-}
-
-function computeTierNameByPS(psTotal: number): string | undefined {
-  try {
-    const ladder = loadVoiceLadder().ladder;
-    let cur = ladder[0]?.roleName;
-    for (const t of ladder) {
-      if (psTotal >= t.voiceMinutesTotal) cur = t.roleName;
-    }
-    return cur;
-  } catch {
-    return undefined;
-  }
-}
-
-async function buildPlayerCardEmbed(viewer: GuildMember, targetUserId: string): Promise<EmbedBuilder> {
-  const guildId = viewer.guild.id;
-  const u = getEconomyUser(guildId, targetUserId);
-  const tier = computeTierNameByPS(u.psTotal);
-
-  const member = await viewer.guild.members.fetch(targetUserId).catch(() => null);
-  const name = member ? (member.user.globalName ?? member.user.username) : `ID ${targetUserId}`;
-
-  const lines = [
-    `Игрок: ${member ? member.toString() : `\`${targetUserId}\``}`,
-    `Имя: **${name}**`,
-    "",
-    `${progressName()} (прогресс роли): **${fmt(u.psTotal)}**${tier ? ` · ступень: **${tier}**` : ""}`,
-    `Баланс ₽: **${fmt(u.rubles)}**`,
-    `Фокус: **${focusLabel(u.focus)}**`,
-  ];
-
-  return new EmbedBuilder()
-    .setColor(PROFILE_COLOR)
-    .setTitle("Карточка игрока")
-    .setDescription(lines.join("\n"))
-    .setFooter({ text: `Запросил: ${viewer.user.tag}` });
-}
-
 function buildLadderEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   let ladder: ReturnType<typeof loadVoiceLadder>["ladder"] | undefined;
@@ -378,15 +332,14 @@ function buildPlayersMenuEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Игроки")
-    .setDescription(["Посмотри карточку игрока или топы по СР/₽."].join("\n"));
+    .setDescription("Топы по социальному рейтингу и по балансу ₽.");
 }
 
 function buildPlayersMenuRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_PLAYERS_BUTTON_SEARCH).setLabel("Поиск").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(ECON_PLAYERS_BUTTON_TOP_PS).setLabel("Топ СР").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_PLAYERS_BUTTON_TOP_RUB).setLabel("Топ ₽").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_PLAYERS_BUTTON_TOP_PS).setLabel("Топ СР").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(ECON_PLAYERS_BUTTON_TOP_RUB).setLabel("Топ ₽").setStyle(ButtonStyle.Primary),
     ),
     buildMenuRow(),
   ];
@@ -1246,7 +1199,6 @@ function isEconomyButton(id: string): boolean {
       ECON_WORK_BUTTON_QUIT_CONFIRM,
       ECON_BUTTON_SKILLS,
       ECON_BUTTON_PLAYERS,
-      ECON_PLAYERS_BUTTON_SEARCH,
       ECON_PLAYERS_BUTTON_TOP_PS,
       ECON_PLAYERS_BUTTON_TOP_RUB,
       ECON_FEED_BUTTON_ARCHIVE,
@@ -1813,21 +1765,6 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
-  if (id === ECON_PLAYERS_BUTTON_SEARCH) {
-    const modal = new ModalBuilder().setCustomId(ECON_MODAL_PLAYER_SEARCH).setTitle("Найти игрока");
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder()
-          .setCustomId("user")
-          .setLabel("Пользователь (mention или ID)")
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true),
-      ),
-    );
-    await interaction.showModal(modal);
-    return true;
-  }
-
   if (id === ECON_PLAYERS_BUTTON_TOP_PS) {
     const e = await buildTopEmbed(member, "ps");
     await replyOrUpdate(interaction, { embeds: [e], components: [buildMenuRow()] });
@@ -1883,27 +1820,6 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
     return true;
   }
 
-  if (modalId !== ECON_MODAL_PLAYER_SEARCH) return false;
-  if (!interaction.inGuild() || !interaction.guildId) {
-    await interaction.reply({ content: "Эта форма работает только на сервере.", flags: MessageFlags.Ephemeral });
-    return true;
-  }
-
-  const raw = interaction.fields.getTextInputValue("user");
-  const userId = parseUserId(raw);
-  if (!userId) {
-    await interaction.reply({ content: "Не понял пользователя. Введите mention или ID.", flags: MessageFlags.Ephemeral });
-    return true;
-  }
-
-  const viewer = (await interaction.guild!.members.fetch(interaction.user.id).catch(() => null)) as GuildMember | null;
-  if (!viewer) {
-    await interaction.reply({ content: "Не удалось получить ваш профиль участника.", flags: MessageFlags.Ephemeral });
-    return true;
-  }
-
-  const embed = await buildPlayerCardEmbed(viewer, userId);
-  await interaction.reply({ embeds: [embed], components: [buildMenuRow()], flags: MessageFlags.Ephemeral });
-  return true;
+  return false;
 }
 
