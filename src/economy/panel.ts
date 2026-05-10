@@ -56,11 +56,19 @@ import {
   getCarDef,
   getPhoneDef,
   APARTMENT_SELL_REFUND_RATE,
-  HOUSING_RENT_MONTHLY_RUB,
-  HOUSING_RENT_PERIOD_MS,
+  HOUSING_CALENDAR_MONTH_MS,
+  HOUSING_RENT_DAY_PKG_RUB,
+  HOUSING_RENT_DAILY_MONTH_EQUIV_RUB,
+  HOUSING_RENT_MONTH_PKG_RUB,
   HOUSING_RENT_PRESTIGE_ONE_TIME,
+  HOUSING_RENT_WEEK_PKG_RUB,
+  housingRentPlanPeriodMs,
+  housingRentPlanPriceRub,
   PHONE_MODELS,
+  type HousingRentPlan,
 } from "./economyCatalog.js";
+import { economyUserClearTier2PlusJobPatch } from "./economyHousing.js";
+import { tier3RankTitle } from "./tier3RankTitles.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
 import { drawSimNumberFromPool, releaseSimNumberToPool } from "./simPoolStore.js";
@@ -78,7 +86,9 @@ const ECON_SHOP_PHONE_BUY_PREFIX = "econ:shop:phoneBuy:";
 const ECON_SHOP_CAR = "econ:shop:car";
 const ECON_SHOP_CAR_BUY_PREFIX = "econ:shop:carBuy:";
 const ECON_SHOP_HOUSE = "econ:shop:house";
-const ECON_SHOP_HOUSE_RENT = "econ:shop:house:rent";
+const ECON_SHOP_HOUSE_RENT_1D = "econ:shop:house:rent:1d";
+const ECON_SHOP_HOUSE_RENT_7D = "econ:shop:house:rent:7d";
+const ECON_SHOP_HOUSE_RENT_30D = "econ:shop:house:rent:30d";
 const ECON_SHOP_HOUSE_LEAVE = "econ:shop:house:leave";
 const ECON_SHOP_APT_BUY_PREFIX = "econ:shop:aptBuy:";
 const ECON_SHOP_APT_SELL = "econ:shop:apt:sell";
@@ -872,6 +882,12 @@ function jobPayoutShortForMenu(jobId: JobId, baseRub: number): string {
   return `${baseRub} ₽`;
 }
 
+function hasTier2PlusHousing(u: EconomyUser, now: number): boolean {
+  if ((u.housingKind ?? "none") === "owned" && u.ownedApartmentId) return true;
+  if (u.housingKind === "rent" && u.housingRentNextDueMs != null && now < u.housingRentNextDueMs) return true;
+  return false;
+}
+
 function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const simLine = u.hasPhone
@@ -884,7 +900,7 @@ function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
   const hk = u.housingKind ?? "none";
   const houseLine =
     hk === "rent"
-      ? "• Жильё — **аренда** (70 000 ₽ / 30 дн.)"
+      ? `• Жильё — **аренда** (от **${fmt(HOUSING_RENT_DAY_PKG_RUB)}** ₽/сут. до **${fmt(HOUSING_RENT_MONTH_PKG_RUB)}** ₽/30 сут.)`
       : hk === "owned"
         ? `• Жильё — **своя квартира** (${getApartmentDef(u.ownedApartmentId)?.label ?? "—"})`
         : "• Жильё — **нет**";
@@ -1014,18 +1030,30 @@ function buildShopCarRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[
 function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const hk = u.housingKind ?? "none";
+  const rentHint =
+    hk === "rent" && u.housingRentNextDueMs
+      ? `\nОплачено до <t:${Math.floor(u.housingRentNextDueMs / 1000)}:F> · пакет продления: **${u.housingRentPlan === "day" ? "сутки" : u.housingRentPlan === "week" ? "неделя" : "30 суток"}**.`
+      : "";
   const lines: string[] = [
     `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`,
     "",
+    "**Требование для работ тир 2+:** нужна **аренда с запасом срока** или **своя квартира** — сначала жильё, потом устройство.",
+    "",
+    "**Аренда** (кнопки ниже):",
+    `• **30 суток** — **${fmt(HOUSING_RENT_MONTH_PKG_RUB)}** ₽ (**выгоднее** посуточного эквивалента).`,
+    `• **7 суток** — **${fmt(HOUSING_RENT_WEEK_PKG_RUB)}** ₽ (промежуточная ставка).`,
+    `• **1 сутки** — **${fmt(HOUSING_RENT_DAY_PKG_RUB)}** ₽ (как **${fmt(HOUSING_RENT_DAILY_MONTH_EQUIV_RUB)}** ₽ за **30** таких оплат).`,
+    `В полночь МСК при наступлении срока списывается **тот же пакет**, что был выбран последним. Одноразово при первом заселении в аренду: **+${HOUSING_RENT_PRESTIGE_ONE_TIME}** престижа (снимается при съезде).${rentHint}`,
+    "",
     hk === "rent"
-      ? "Вы **снимаете** жильё. Раз в **30 дней** (полночь МСК) списывается **70 000** ₽. Одноразово за эту аренду: **+1000** престижа при заселении (снимается при съезде при отмене бонуса)."
+      ? "Вы **снимаете** жильё (можно **продлить** тем же пакетом до истечения срока)."
       : hk === "owned"
         ? `Своя квартира: **${getApartmentDef(u.ownedApartmentId)?.label ?? "—"}**. Коммуналка раз в **30 дней** (МСК). Продажа: **${Math.round(APARTMENT_SELL_REFUND_RATE * 100)}%** цены на руки, престиж от квартиры **снимается**.`
-        : `**Аренда:** первый взнос **${fmt(HOUSING_RENT_MONTHLY_RUB)}** ₽, далее **${fmt(HOUSING_RENT_MONTHLY_RUB)}** ₽ / 30 дн. (+**${HOUSING_RENT_PRESTIGE_ONE_TIME}** престижа один раз).`,
+        : "",
     "",
-    "**Купить квартиру** (если нет своей):",
+    "**Купить квартиру** (если нет своей; на аренде сначала съедьте):",
     ...APARTMENT_MODELS.map((a) => `• **${a.label}** — **${fmt(a.priceRub)}** ₽ · коммуналка **${fmt(a.monthlyUtilityRub)}** / мес · +**${fmt(a.prestigeDelta)}** пр.`),
-  ];
+  ].filter(Boolean);
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Жильё").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -1039,14 +1067,43 @@ function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder
         new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE_LEAVE).setLabel("Съехать с аренды").setStyle(ButtonStyle.Danger),
       ),
     );
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ECON_SHOP_HOUSE_RENT_1D)
+          .setLabel(`+1 сут. (${fmt(HOUSING_RENT_DAY_PKG_RUB)} ₽)`)
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(u.rubles < HOUSING_RENT_DAY_PKG_RUB),
+        new ButtonBuilder()
+          .setCustomId(ECON_SHOP_HOUSE_RENT_7D)
+          .setLabel(`+7 сут. (${fmt(HOUSING_RENT_WEEK_PKG_RUB)} ₽)`)
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(u.rubles < HOUSING_RENT_WEEK_PKG_RUB),
+        new ButtonBuilder()
+          .setCustomId(ECON_SHOP_HOUSE_RENT_30D)
+          .setLabel(`+30 сут. (${fmt(HOUSING_RENT_MONTH_PKG_RUB)} ₽)`)
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(u.rubles < HOUSING_RENT_MONTH_PKG_RUB),
+      ),
+    );
   } else if (hk !== "owned") {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
-          .setCustomId(ECON_SHOP_HOUSE_RENT)
-          .setLabel(`Снять (${fmt(HOUSING_RENT_MONTHLY_RUB)} ₽)`)
+          .setCustomId(ECON_SHOP_HOUSE_RENT_1D)
+          .setLabel(`Снять 1 сут. (${fmt(HOUSING_RENT_DAY_PKG_RUB)} ₽)`)
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(u.rubles < HOUSING_RENT_DAY_PKG_RUB),
+        new ButtonBuilder()
+          .setCustomId(ECON_SHOP_HOUSE_RENT_7D)
+          .setLabel(`Снять 7 сут. (${fmt(HOUSING_RENT_WEEK_PKG_RUB)} ₽)`)
           .setStyle(ButtonStyle.Primary)
-          .setDisabled(u.rubles < HOUSING_RENT_MONTHLY_RUB),
+          .setDisabled(u.rubles < HOUSING_RENT_WEEK_PKG_RUB),
+        new ButtonBuilder()
+          .setCustomId(ECON_SHOP_HOUSE_RENT_30D)
+          .setLabel(`Снять 30 сут. (${fmt(HOUSING_RENT_MONTH_PKG_RUB)} ₽)`)
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(u.rubles < HOUSING_RENT_MONTH_PKG_RUB),
       ),
     );
   }
@@ -1309,7 +1366,15 @@ function buildTier2JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Профессии (тир 2)")
-    .setDescription(["Сводка по всем работам тира; **подробно** — в карточке профессии.", "", ...lines].join("\n\n"))
+    .setDescription(
+      [
+        "**Жильё обязательно:** аренда с запасом срока или своя квартира — **до** устройства на тир 2+.",
+        "",
+        "Сводка по всем работам тира; **подробно** — в карточке профессии.",
+        "",
+        ...lines,
+      ].join("\n\n"),
+    )
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -1349,6 +1414,15 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
     extra.push("");
     extra.push(req.ok ? "Требования: **выполнены**." : `Требования: **не выполнены**.\n- ${req.missing.join("\n- ")}`);
   }
+  const needsHousing = isTier2JobId(jobId) || isTier3PanelJob(jobId);
+  if (needsHousing) {
+    extra.push("");
+    extra.push(
+      hasTier2PlusHousing(u, now)
+        ? "Жильё: **есть** — требование для **тир 2+** выполнено."
+        : "Жильё: **нет** — для устройства на **тир 2+** сначала **аренда** или **своя квартира** в магазине терминала.",
+    );
+  }
 
   const shiftLine =
     jobId === "soleProp" ? "Смены **нет** — только пассив ночью и кнопки бизнеса." : `КД смены: **${cdHoursLabel(cd)} ч**`;
@@ -1383,12 +1457,40 @@ function workCatalogBackButtonId(jobId: JobId): string {
   return ECON_WORK_BUTTON_STARTERS;
 }
 
+/** Ориентир ночного пассива ИП при разных вложениях (риск 0 — без рандом-джиттера). */
+function solePropPassiveExampleLines(u: ReturnType<typeof getEconomyUser>): string[] {
+  const sdef = getTier3JobDef("soleProp");
+  const streak = u.jobMskDayStreak ?? 0;
+  const caps = [0, 100_000, 250_000, 500_000, 1_000_000, 2_000_000, 5_000_000];
+  const out: string[] = [
+    "**Ориентир пассива при разном балансе бизнеса** (ночь МСК, ползунок риска **0** — без случайного джиттера):",
+  ];
+  for (const cap of caps) {
+    const night = computeTier3PassiveRub({
+      jobId: "soleProp",
+      def: sdef,
+      streakDays: streak,
+      solePropCapitalRub: cap,
+      solePropRiskDial: 0,
+      prestigePoints: u.prestigePoints ?? 0,
+      solePropPassiveEffMult: u.solePropPassiveEffMult ?? 1,
+      solePropPassiveTempMult: u.solePropPassiveTempMult ?? 1,
+    });
+    out.push(`• **${fmt(cap)}** ₽ → **~${fmt(night)}**/ночь · **~${fmt(night * 30)}**/30 сут`);
+  }
+  out.push(
+    `Считано с вашими **престижем**, множителями и **рангом ${tier3PromotionRank(streak)}**; строка «оценка пассива» выше — с **вашим** текущим риском.`,
+  );
+  return out;
+}
+
 function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): string[] {
   if (!isTier3PanelJob(jobId)) return [];
   const def = getTier3JobDef(jobId as Tier3JobId);
   const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
   const lines: string[] = [];
-  lines.push(`**Должность (ранг):** **${rank}** · стрик МСК: **${u.jobMskDayStreak ?? 0}** дн.`);
+  const rankTitle = tier3RankTitle(jobId as Tier3JobId, rank);
+  lines.push(`**Должность:** **${rankTitle}** (ранг **${rank}**) · стрик МСК: **${u.jobMskDayStreak ?? 0}** дн.`);
   if (def.archetype === "legal") {
     lines.push(`Пассив в полночь МСК — **основной** доход; смены — дополнение.`);
     const ref = tier3ReferencePassiveRubFromStreak(u.jobMskDayStreak ?? 0);
@@ -1421,6 +1523,8 @@ function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, no
     lines.push(adL > 0 ? `Реклама: через **${formatCooldown(adL)}**.` : `Реклама: **доступна**.`);
     lines.push(stL > 0 ? `Персонал: через **${formatCooldown(stL)}**.` : `Персонал: **доступен**.`);
     lines.push(ctL > 0 ? `Контроль: через **${formatCooldown(ctL)}**.` : `Контроль: **доступен**.`);
+    lines.push("");
+    lines.push(...solePropPassiveExampleLines(u));
     return lines;
   }
   const sideLeft = (u.tier3SideGigReadyAt ?? 0) - now;
@@ -1447,6 +1551,7 @@ function buildTier3JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
         "**Легал** — основной доход **пассивом** в полночь МСК; **связь** и **совещание** (КД **24 ч**) дают **10–30%** от ориентира пассива.",
         "**Нелегал** — короткий КД смены и рандом; **связь** + **куратор** (КД **24 ч**) — мелкий ₽ и шанс ускорить стаж к повышению.",
         "**ИП** — **только пассив** ночью от баланса бизнеса; **реклама**, **персонал** (7 дн.), **контроль** (сутки), пополнение/вывод.",
+        "**Жильё обязательно** для любой работы тир 3 (как и тир 2).",
         "",
         ...lines,
       ].join("\n\n"),
@@ -1585,7 +1690,9 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
 
   const takeId = `${ECON_WORK_BUTTON_TAKE_PREFIX}${jobId}`;
   const switchOk = !u.jobId || canWorkNow(u, u.jobId, now).ok;
-  const selectDisabled = !canTakeSkills || !switchOk;
+  const needsHousing = isTier2JobId(jobId) || isTier3PanelJob(jobId);
+  const housingOk = !needsHousing || hasTier2PlusHousing(u, now);
+  const selectDisabled = !canTakeSkills || !switchOk || !housingOk;
 
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -2151,27 +2258,29 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
-  if (id === ECON_SHOP_HOUSE_RENT) {
+  if (id === ECON_SHOP_HOUSE_RENT_1D || id === ECON_SHOP_HOUSE_RENT_7D || id === ECON_SHOP_HOUSE_RENT_30D) {
     const u = getEconomyUser(member.guild.id, member.id);
     const hk = u.housingKind ?? "none";
-    if (hk === "rent") {
-      await interaction.reply({ content: "Вы уже **снимаете** жильё.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
     if (hk === "owned") {
       await interaction.reply({ content: "У вас **своя квартира** — аренда недоступна.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (u.rubles < HOUSING_RENT_MONTHLY_RUB) {
-      await interaction.reply({ content: `Нужно **${fmt(HOUSING_RENT_MONTHLY_RUB)}** ₽ за первый период.`, flags: MessageFlags.Ephemeral });
+    const plan: HousingRentPlan = id === ECON_SHOP_HOUSE_RENT_1D ? "day" : id === ECON_SHOP_HOUSE_RENT_7D ? "week" : "month";
+    const price = housingRentPlanPriceRub(plan);
+    const periodMs = housingRentPlanPeriodMs(plan);
+    if (u.rubles < price) {
+      await interaction.reply({ content: `Нужно **${fmt(price)}** ₽.`, flags: MessageFlags.Ephemeral });
       return true;
     }
     const now = Date.now();
+    const baseEnd = hk === "rent" && u.housingRentNextDueMs && u.housingRentNextDueMs > now ? u.housingRentNextDueMs : now;
+    const nextDue = baseEnd + periodMs;
     const prestigeGain = u.housingRentPrestigeGranted ? 0 : HOUSING_RENT_PRESTIGE_ONE_TIME;
     patchEconomyUser(member.guild.id, member.id, {
-      rubles: u.rubles - HOUSING_RENT_MONTHLY_RUB,
+      rubles: u.rubles - price,
       housingKind: "rent",
-      housingRentNextDueMs: now + HOUSING_RENT_PERIOD_MS,
+      housingRentNextDueMs: nextDue,
+      housingRentPlan: plan,
       housingRentPrestigeGranted: true,
       prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeGain),
     });
@@ -2186,11 +2295,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     const lost = u.housingRentPrestigeGranted ? HOUSING_RENT_PRESTIGE_ONE_TIME : 0;
+    const quitJob = economyUserClearTier2PlusJobPatch(u);
     patchEconomyUser(member.guild.id, member.id, {
       housingKind: "none",
       housingRentNextDueMs: undefined,
+      housingRentPlan: undefined,
       housingRentPrestigeGranted: false,
       prestigePoints: Math.max(0, (u.prestigePoints ?? 0) - lost),
+      ...quitJob,
     });
     await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
     return true;
@@ -2229,7 +2341,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       rubles: u.rubles - cost,
       housingKind: "owned",
       ownedApartmentId: defA.id,
-      housingUtilityNextDueMs: now + HOUSING_RENT_PERIOD_MS,
+      housingUtilityNextDueMs: now + HOUSING_CALENDAR_MONTH_MS,
       housingRentNextDueMs: undefined,
       housingRentPrestigeGranted: false,
       prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeDelta),
@@ -2251,12 +2363,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     const refund = Math.floor(curA.priceRub * APARTMENT_SELL_REFUND_RATE);
     const nextPrestige = Math.max(0, (u.prestigePoints ?? 0) - curA.prestigeDelta);
+    const quitJob = economyUserClearTier2PlusJobPatch(u);
     patchEconomyUser(member.guild.id, member.id, {
       rubles: u.rubles + refund,
       housingKind: "none",
       ownedApartmentId: undefined,
       housingUtilityNextDueMs: undefined,
       prestigePoints: nextPrestige,
+      ...quitJob,
     });
     appendFeedEvent({
       ts: Date.now(),
@@ -2619,6 +2733,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await interaction.reply({ content: `Не хватает навыков:\n- ${req.missing.join("\n- ")}`, flags: MessageFlags.Ephemeral });
       return true;
     }
+    const nowTake = Date.now();
+    if ((isTier2JobId(jobId) || isTier3PanelJob(jobId)) && !hasTier2PlusHousing(cur, nowTake)) {
+      await interaction.reply({
+        content: "Сначала оформите **жильё** (аренда или своя квартира) в магазине терминала — **обязательное** условие для работ **тир 2+**.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
 
     if (cur.jobId) {
       const st = canWorkNow(cur, cur.jobId, Date.now());
@@ -2659,6 +2781,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const req = meetsJobReq(cur, def);
     if (!req.ok) {
       await interaction.reply({ content: `Не хватает навыков:\n- ${req.missing.join("\n- ")}`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const nowSw = Date.now();
+    if ((isTier2JobId(jobId) || isTier3PanelJob(jobId)) && !hasTier2PlusHousing(cur, nowSw)) {
+      await interaction.reply({
+        content: "Сначала оформите **жильё** (аренда или своя квартира) в магазине терминала — **обязательное** условие для работ **тир 2+**.",
+        flags: MessageFlags.Ephemeral,
+      });
       return true;
     }
 

@@ -1,6 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { APARTMENT_MODELS, CAR_MODELS, ECONOMY_LEGACY_BALANCE_MULT, PHONE_MODELS } from "./economyCatalog.js";
+import {
+  APARTMENT_MODELS,
+  CAR_MODELS,
+  ECONOMY_LEGACY_BALANCE_MULT,
+  PHONE_MODELS,
+  type HousingRentPlan,
+} from "./economyCatalog.js";
 
 export type FocusPreset = "role" | "balance" | "money";
 
@@ -70,6 +76,8 @@ export interface EconomyUser {
   housingKind?: HousingKind;
   /** Следующее списание аренды (unix ms). */
   housingRentNextDueMs?: number;
+  /** Пакет продления: посуточно / неделя / месяц (для авто-списания в полночь МСК). */
+  housingRentPlan?: HousingRentPlan;
   /** Выдан ли одноразовый престиж за текущую аренду. */
   housingRentPrestigeGranted?: boolean;
   /** Купленная квартира (если housingKind === "owned"). */
@@ -171,6 +179,11 @@ function normalizeHousingKind(v: unknown): HousingKind | undefined {
   return undefined;
 }
 
+function normalizeHousingRentPlan(v: unknown): HousingRentPlan | undefined {
+  if (v === "day" || v === "week" || v === "month") return v;
+  return undefined;
+}
+
 function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?: string): EconomyUser {
   const rawSkills = u?.skills ?? {};
   const skills: Partial<Record<SkillId, number>> = {};
@@ -259,6 +272,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   const housingRentNextDueMs = Number.isFinite((u as any)?.housingRentNextDueMs)
     ? Math.max(0, Math.floor((u as any).housingRentNextDueMs))
     : undefined;
+  const housingRentPlan = normalizeHousingRentPlan((u as any)?.housingRentPlan);
   const housingRentPrestigeGranted = (u as any)?.housingRentPrestigeGranted === true ? true : undefined;
   let ownedApartmentId =
     typeof (u as any)?.ownedApartmentId === "string" && VALID_APT_ID.has((u as any).ownedApartmentId)
@@ -321,6 +335,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     economyV3BalanceScaled,
     housingKind: housingKind === "none" ? undefined : housingKind,
     housingRentNextDueMs,
+    housingRentPlan,
     housingRentPrestigeGranted,
     ownedApartmentId,
     housingUtilityNextDueMs,

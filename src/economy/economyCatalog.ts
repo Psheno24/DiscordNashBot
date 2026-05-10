@@ -56,8 +56,44 @@ export function getCarDef(id: string | undefined): CarDef | undefined {
   return CAR_MODELS.find((c) => c.id === id);
 }
 
-export const HOUSING_RENT_MONTHLY_RUB = 70_000;
-export const HOUSING_RENT_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
+/** Один календарный день в мс (жильё, аренда). */
+export const MS_PER_DAY = 86400000;
+
+/** Коммуналка и прочие «месячные» циклы — 30 суток. */
+export const HOUSING_CALENDAR_MONTH_MS = 30 * MS_PER_DAY;
+
+/** @deprecated имя оставлено для совместимости импортов — то же, что календарный месяц коммуналки */
+export const HOUSING_RENT_PERIOD_MS = HOUSING_CALENDAR_MONTH_MS;
+
+/** Пакет «30 суток сразу» — дешевле посуточного эквивалента. */
+export const HOUSING_RENT_MONTH_PKG_RUB = 40_000;
+export const HOUSING_RENT_MONTH_PKG_MS = 30 * MS_PER_DAY;
+
+/** Посуточно: как старые 70k за 30 дней, одни сутки. */
+export const HOUSING_RENT_DAILY_MONTH_EQUIV_RUB = 70_000;
+export const HOUSING_RENT_DAY_PKG_RUB = Math.ceil(HOUSING_RENT_DAILY_MONTH_EQUIV_RUB / 30);
+export const HOUSING_RENT_DAY_PKG_MS = MS_PER_DAY;
+
+/** Неделя: среднее между дневной ставкой «70k/30» и «40k/30» за сутки, ×7. */
+export const HOUSING_RENT_WEEK_PKG_RUB = Math.round(
+  ((HOUSING_RENT_MONTH_PKG_RUB / 30 + HOUSING_RENT_DAILY_MONTH_EQUIV_RUB / 30) / 2) * 7,
+);
+export const HOUSING_RENT_WEEK_PKG_MS = 7 * MS_PER_DAY;
+
+export type HousingRentPlan = "day" | "week" | "month";
+
+export function housingRentPlanPriceRub(plan: HousingRentPlan): number {
+  if (plan === "day") return HOUSING_RENT_DAY_PKG_RUB;
+  if (plan === "week") return HOUSING_RENT_WEEK_PKG_RUB;
+  return HOUSING_RENT_MONTH_PKG_RUB;
+}
+
+export function housingRentPlanPeriodMs(plan: HousingRentPlan): number {
+  if (plan === "day") return HOUSING_RENT_DAY_PKG_MS;
+  if (plan === "week") return HOUSING_RENT_WEEK_PKG_MS;
+  return HOUSING_RENT_MONTH_PKG_MS;
+}
+
 /** Престиж за то, что живёшь в аренде (один раз при заселении; снимается при съезде). */
 export const HOUSING_RENT_PRESTIGE_ONE_TIME = 1_000;
 /** Доля цены квартиры, возвращаемая при продаже (остальное — «потери на сделке»). */

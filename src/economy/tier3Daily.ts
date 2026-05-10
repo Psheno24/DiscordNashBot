@@ -11,7 +11,9 @@ import {
   isTier3JobId,
   mskTickTodayYmd,
   tier3PromotionRank,
+  type Tier3JobId,
 } from "./tier3Jobs.js";
+import { tier3RankTitle } from "./tier3RankTitles.js";
 
 /**
  * Полночь по МСК: стрик календарных дней на тир-3 работе и ночной пассив (по архетипу).
@@ -74,7 +76,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
           guildId: guild.id,
           type: "job:passive",
           actorUserId: userId,
-          text: `${mention}: пассив **${def.title}** — **+${Math.floor(passive)}** ₽ (стрик **${streakOut.nextStreak}** дн., должность **${rankAfter}**).`,
+          text: `${mention}: пассив **${def.title}** — **+${Math.floor(passive)}** ₽ (стрик **${streakOut.nextStreak}** дн., **${tier3RankTitle(jobId as Tier3JobId, rankAfter)}**).`,
         });
       }
 
@@ -84,7 +86,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
           guildId: guild.id,
           type: "job:passive",
           actorUserId: userId,
-          text: `${mention}: **повышение** на **${def.title}** — должность **${rankAfter}** (каждые 30 дней стажа).`,
+          text: `${mention}: **повышение** на **${def.title}** — **${tier3RankTitle(jobId as Tier3JobId, rankAfter)}** (каждые 30 дней стажа).`,
         });
       }
     }
