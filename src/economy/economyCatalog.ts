@@ -1,4 +1,4 @@
-/** Тариф сим-карты курьера: один платёж на 30 суток (с баланса сим). */
+/** Тариф сим-карты доставки: один платёж на 30 суток (с баланса сим). */
 export const COURIER_SIM_MONTHLY_FEE_RUB = 1_000;
 export const COURIER_SIM_MONTHLY_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -36,7 +36,7 @@ export interface CarDef {
   priceRub: number;
   prestigeDelta: number;
   speedKmh: number;
-  /** КД смены курьера: от 2 ч (подержанный) до 1 ч (топ). */
+  /** КД смены доставки: от 2 ч (подержанный) до 1 ч (топ). */
   courierShiftCdMs: number;
 }
 

@@ -74,6 +74,14 @@ import { loadVoiceLadder } from "../voice/loadLadder.js";
 import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
 import { drawSimNumberFromPool, releaseSimNumberToPool } from "./simPoolStore.js";
 import { mskTodayYmd } from "./mskCalendar.js";
+import {
+  isTier12JobId,
+  tier12CareerDetailBlock,
+  tier12CareerEmbedLines,
+  tier12RankFlatBonusRub,
+  tier12RankFromShifts,
+  tier12RankTitle,
+} from "./tier12Career.js";
 
 export const ECON_BUTTON_MENU = "econ:menu";
 export const ECON_BUTTON_PROFILE = "econ:profile";
@@ -110,7 +118,7 @@ const ECON_COURIER_BIKE_1D = "econ:work:courierbike:1d";
 const ECON_COURIER_BIKE_3D = "econ:work:courierbike:3d";
 const ECON_COURIER_BIKE_7D = "econ:work:courierbike:7d";
 
-/** Экспедитор: база перед случайной надбавкой; плохие ветки могут увести итог в минус (MVP баланс с сборщиком). */
+/** Развлекательный центр: база перед случайной надбавкой; плохие ветки могут увести итог в минус (MVP баланс со складом). */
 const EXPEDITER_PAYOUT_FLOOR_RUB = 1_800;
 
 const ECON_PROFILE_BUTTON_INFO = "econ:profile:info";
@@ -620,17 +628,17 @@ function isWorkJobId(s: string): s is JobId {
 function jobOpeningLine(jobId: JobId): string {
   switch (jobId) {
     case "courier":
-      return "**Курьер** — фиксированная ставка за смену";
+      return "**Доставка** — фиксированная ставка за смену";
     case "waiter":
-      return "**Официант** — выплата за смену **случайная**";
+      return "**Кафе** — выплата за смену **случайная**";
     case "watchman":
-      return "**Ночной сторож** — **фикс** за смену при **самом длинном КД** (24 ч)";
+      return "**Кладбище** — **фикс** за смену при **самом длинном КД** (24 ч)";
     case "dispatcher":
-      return "**Диспетчер** — **фикс** + редкая премия, **очень длинный** КД (**спокойный** график, ниже ₽/ч)";
+      return "**Колл-центр** — **фикс** + редкая премия, **очень длинный** КД (**спокойный** график, ниже ₽/ч)";
     case "assembler":
-      return "**Сборщик** — **фикс**, редкий штраф, **премия каждые 7 смен**";
+      return "**Склад** — **фикс**, редкий штраф, **премия каждые 7 смен**";
     case "expediter":
-      return "**Экспедитор** — **случайная** выплата, **короткий** КД, иногда **убыток** по смене";
+      return "**Развлекательный центр** — **случайная** выплата, **короткий** КД, иногда **убыток** по смене";
     case "officeAnalyst":
       return "**Офис · аналитик** — **ежедневный оклад** (МСК) + смены, **Связь** и **Совещание**";
     case "shadowFixer":
@@ -647,17 +655,17 @@ function jobCardSummaryLine(jobId: JobId): string {
   const def = getAnyJobDef(jobId);
   switch (jobId) {
     case "courier":
-      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ за смену · КД **3** ч (вел **2** ч, авто **2**–**1** ч по классу)`;
+      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ за смену · КД **3** ч (вел **2** ч, авто **2**–**1** ч по классу) · **карьера** т1 (**5** ступеней)`;
     case "waiter":
-      return "**Случайная** выплата за смену (редко **минус**) · КД **5** ч";
+      return "**Случайная** выплата за смену (редко **минус**) · КД **5** ч · **карьера** т1";
     case "watchman":
-      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ · КД **24** ч`;
+      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ · КД **24** ч · **карьера** т1`;
     case "dispatcher":
-      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ · **2%** шанс премии **345–656** ₽ · КД **16** ч (спокойный график)`;
+      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ · **2%** шанс премии **345–656** ₽ · КД **16** ч · **карьера** т2`;
     case "assembler":
-      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ · **3%** штраф **138–414** ₽ · премия **${fmt(1_794)}** ₽ каждые **7** смен · КД **8** ч`;
+      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ · **3%** штраф **138–414** ₽ · премия **${fmt(1_794)}** ₽ каждые **7** смен · КД **8** ч · **карьера** т2`;
     case "expediter":
-      return `**Случайная** выплата · КД **4** ч · есть ветки **в минус**`;
+      return `**Случайная** выплата · КД **4** ч · риск **в минус** · **карьера** т2`;
     case "officeAnalyst": {
       const o = getTier3JobDef("officeAnalyst");
       return `**Ежедневный оклад** МСК (**${fmt(o.passiveBaseRub)}** ₽ × усиление ранга) + смена **${fmt(o.basePayoutRub)}** ₽ + надбавки · КД смены **12** ч`;
@@ -696,7 +704,7 @@ type JobDef = {
 const JOBS_STARTER: JobDef[] = [
   {
     id: "courier",
-    title: "Курьер",
+    title: "Доставка",
     baseCooldownMs: 3 * 60 * 60 * 1000,
     basePayoutRub: 1_700,
     description:
@@ -708,7 +716,7 @@ const JOBS_STARTER: JobDef[] = [
   },
   {
     id: "waiter",
-    title: "Официант",
+    title: "Кафе",
     baseCooldownMs: 5 * 60 * 60 * 1000,
     basePayoutRub: 0,
     description: [
@@ -717,7 +725,7 @@ const JOBS_STARTER: JobDef[] = [
   },
   {
     id: "watchman",
-    title: "Ночной сторож",
+    title: "Кладбище",
     baseCooldownMs: 24 * 60 * 60 * 1000,
     basePayoutRub: 1_904,
     description:
@@ -752,7 +760,7 @@ function jobDefFromTier3(d: Tier3JobDef): JobDef {
 const JOBS_TIER2: JobDef[] = [
   {
     id: "dispatcher",
-    title: "Диспетчер",
+    title: "Колл-центр",
     baseCooldownMs: 16 * 60 * 60 * 1000,
     basePayoutRub: 8_200,
     description: [
@@ -763,7 +771,7 @@ const JOBS_TIER2: JobDef[] = [
   },
   {
     id: "assembler",
-    title: "Сборщик",
+    title: "Склад",
     baseCooldownMs: 8 * 60 * 60 * 1000,
     basePayoutRub: 6_400,
     description: [
@@ -773,11 +781,11 @@ const JOBS_TIER2: JobDef[] = [
   },
   {
     id: "expediter",
-    title: "Экспедитор",
+    title: "Развлекательный центр",
     baseCooldownMs: 4 * 60 * 60 * 1000,
     basePayoutRub: 0,
     description: [
-      "**Короткий КД** (4 ч): **рандом** с шансом **убытка** по смене; в среднем ближе к сборщику по ₽/ч, но сильнее гуляет.",
+      "**Короткий КД** (4 ч): **рандом** с шансом **убытка** по смене; в среднем ближе к **складу** по ₽/ч, но сильнее гуляет.",
     ].join("\n"),
     reqSkills: { logistics: 28, communication: 20 },
   },
@@ -923,7 +931,7 @@ function hasOwnedCourierCar(u: ReturnType<typeof getEconomyUser>): boolean {
   return Boolean(u.ownedCarId && getCarDef(u.ownedCarId));
 }
 
-/** Строки для курьера: авто / вел, месячный тариф сим, баланс сим — только при текущей работе «курьер». */
+/** Строки для доставки: авто / вел, месячный тариф сим, баланс сим — только при текущей работе «доставка». */
 function courierWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
   if (u.jobId !== "courier") return [];
   const fee = COURIER_SIM_MONTHLY_FEE_RUB;
@@ -956,12 +964,14 @@ function jobUsesVariablePayout(jobId: JobId): boolean {
   return jobId === "waiter" || jobId === "expediter" || jobId === "shadowFixer";
 }
 
+const TIER12_PAYOUT_HINT = " Плюс **карьерная** надбавка (ранг **0…4**).";
+
 function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
   if (jobId === "waiter") {
-    return "Оплата за смену: **без фикса** — чаще **~1,5–2,1k ₽**; редко **минус** на счёт (**~5%** тяжёлых смен).";
+    return `Оплата за смену: **без фикса** — чаще **~1,5–2,1k ₽**; редко **минус** на счёт (**~5%** тяжёлых смен).${TIER12_PAYOUT_HINT}`;
   }
   if (jobId === "expediter") {
-    return "Оплата за смену: **без фикса** — в среднем **~3–3,5k ₽** за смену при активной игре; **~12%** веток могут дать **убыток**, иначе **~2,6–7k ₽**.";
+    return `Оплата за смену: **без фикса** — в среднем **~3–3,5k ₽** за смену при активной игре; **~12%** веток могут дать **убыток**, иначе **~2,6–7k ₽**.${TIER12_PAYOUT_HINT}`;
   }
   if (jobId === "shadowFixer") {
     return "Оплата за смену: **без фикса** — сильный разброс (до **~−1k…+4k ₽** и выше при ранге; ранг и стрик усиливают **плюсовые** ветки).";
@@ -969,7 +979,11 @@ function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
   if (jobId === "soleProp") {
     return "Доход: **ежедневный оклад** (полночь МСК) от баланса бизнеса (**реклама** / **персонал** / **контроль** — отдельно).";
   }
-  return `Оплата за смену: **${baseRub} ₽**`;
+  const baseLine = `Оплата за смену: **${baseRub} ₽**`;
+  if (isTier12JobId(jobId)) {
+    return `${baseLine}${TIER12_PAYOUT_HINT}`;
+  }
+  return baseLine;
 }
 
 function jobPayoutShortForMenu(jobId: JobId, baseRub: number): string {
@@ -1087,7 +1101,7 @@ function buildShopCarEmbed(member: GuildMember): EmbedBuilder {
     "",
     ...CAR_MODELS.map(
       (c) =>
-        `• **${c.label}** — **${fmt(c.priceRub)}** ₽ (+**${fmt(c.prestigeDelta)}** пр.) · КД курьера **${(c.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч`,
+        `• **${c.label}** — **${fmt(c.priceRub)}** ₽ (+**${fmt(c.prestigeDelta)}** пр.) · КД доставки **${(c.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч`,
     ),
   ];
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Авто").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
@@ -1663,9 +1677,9 @@ function buildTier2JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
 function buildStarterJobsRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}courier`).setLabel("Курьер").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}waiter`).setLabel("Официант").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}watchman`).setLabel("Ночной сторож").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}courier`).setLabel("Доставка").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}waiter`).setLabel("Кафе").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}watchman`).setLabel("Кладбище").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Назад").setStyle(ButtonStyle.Secondary),
@@ -1676,15 +1690,17 @@ function buildStarterJobsRows(): ActionRowBuilder<ButtonBuilder>[] {
 
 function buildJobDetailBody(jobId: JobId): string {
   const def = getAnyJobDef(jobId);
+  let main: string;
   switch (jobId) {
     case "courier":
-      return [
+      main = [
         "**КД:** **3** ч пешком · **2** ч с арендой электровела · с авто: **2** / **1,8** / **1,6** / **1,35** / **1,15** / **1** ч (от подержанного к топ-сегменту).",
         `**Смена:** **+${fmt(def.basePayoutRub)}** ₽ на основной счёт.`,
         `**Сим:** тариф **${fmt(COURIER_SIM_MONTHLY_FEE_RUB)}** ₽ с **баланса сим** на **30** суток — списывается при **первой** смене после окончания оплаченного периода; основной счёт **не** используется.`,
       ].join("\n\n");
+      break;
     case "waiter":
-      return [
+      main = [
         "**КД:** **5** ч.",
         "**Смена:** **случайная выплата** на счёт, **без** фиксированного оклада — за смену начисляется **одна** итоговая сумма.",
         "**Сценарии** (шанс · ориентир **уже в ₽ на счёт**):",
@@ -1697,24 +1713,28 @@ function buildJobDetailBody(jobId: JobId): string {
         "• **6%** · **~1 980–2 180** ₽ · очень редкий «жирный» вечер",
         "У «плюсовых» веток коридоры **могут пересекаться**.",
       ].join("\n\n");
+      break;
     case "watchman":
-      return ["**КД:** **24** ч.", `**Смена:** фикс **+${fmt(1_904)}** ₽, без модификаторов.`].join("\n\n");
+      main = ["**КД:** **24** ч.", `**Смена:** фикс **+${fmt(1_904)}** ₽, без модификаторов.`].join("\n\n");
+      break;
     case "dispatcher":
-      return [
+      main = [
         "**КД:** **16** ч.",
         `**Смена:** фикс **+${fmt(def.basePayoutRub)}** ₽ · **2%** шанс премии **+345…+656** ₽.`,
-        "**Роль:** мало нажатий, **ниже** ₽/час КД, чем у сборщика/экспедитора — обмен времени ожидания на предсказуемость.",
+        "**Роль:** мало нажатий, **ниже** ₽/час КД, чем у **склада** / **развлекательного центра** — обмен времени ожидания на предсказуемость.",
         "**Навыки:** коммуникация **28+**, дисциплина **20+** · нужно **жильё**.",
       ].join("\n\n");
+      break;
     case "assembler":
-      return [
+      main = [
         "**КД:** **8** ч.",
         `**Смена:** фикс **+${fmt(def.basePayoutRub)}** ₽ · **3%** штраф **−138…−414** ₽ · каждая **7-я** смена на этой работе: премия **+${fmt(1_794)}** ₽.`,
         "**Роль:** **стабильная** опора тир-2 — без минусовых смен, дисперсия только от редкого штрафа и премии.",
         "**Навыки:** дисциплина **28+**, логистика **20+** · нужно **жильё**.",
       ].join("\n\n");
+      break;
     case "expediter":
-      return [
+      main = [
         "**КД:** **4** ч.",
         `**Смена:** одна **случайная** сумма: база **${fmt(EXPEDITER_PAYOUT_FLOOR_RUB)}** ₽ + надбавка (или сильный минус). **Итог может быть отрицательным.**`,
         "**Сценарии** (шанс · ориентир **уже в ₽ на счёт**):",
@@ -1725,18 +1745,20 @@ function buildJobDetailBody(jobId: JobId): string {
         "• **10%** · **~5 600–7 000** ₽",
         "**Навыки:** логистика **28+**, коммуникация **20+** · нужно **жильё**.",
       ].join("\n\n");
+      break;
     case "officeAnalyst": {
       const basePass = getTier3JobDef("officeAnalyst").passiveBaseRub;
-      return [
+      main = [
         `**Ежедневный оклад (полночь МСК):** **${fmt(basePass)}** ₽ × (**1** + **8%** × **ранг**). Ранг растёт каждые **${TIER3_PROMOTION_EVERY_DAYS}** календарных дней стрика (макс. ранг **15**). Пример: ранг **0** → **${fmt(basePass)}** ₽/день; ранг **3** → **${fmt(Math.floor(basePass * (1 + 0.08 * 3)))}** ₽/день.`,
         "**КД смены:** **12** ч.",
         `**Смена:** **${fmt(def.basePayoutRub)}** ₽ + **150** ₽ × ранг + до **450** ₽ (**30** ₽ за каждые **5** дней стрика, не больше **450**) · **3%** штраф **−100…−280** ₽.`,
         "**Связь** и **Совещание** (КД **24** ч каждое): **floor(оклад_ориентир × p)**, где **p** случайно **10–30%**, ориентир = тот же **13 200**×(**1**+**8%**×ранг). Пример при ранге **0**: ориентир **13 200** → бонус **~1 320…3 960** ₽.",
         "**Навыки:** коммуникация **30+**, логистика **28+**, дисциплина **35+** · **жильё**.",
       ].join("\n\n");
+      break;
     }
     case "shadowFixer":
-      return [
+      main = [
         "**Ежедневного оклада нет.**",
         "**КД смены:** **3,5** ч.",
         "**Смена:** случайная; «удача» усиливается от **ранга** и **стрика** (коэффициент **posBoost** в коде: **1** + **2,5%**×ранг + до **+15%** от дней стрика).",
@@ -1745,8 +1767,9 @@ function buildJobDetailBody(jobId: JobId): string {
         "**Куратор:** **42%** **+5…10** дней к стрику · **36%** **+2…4** дня · **22%** без эффекта · КД **24** ч.",
         "**Навыки:** коммуникация **42+**, логистика **38+**, дисциплина **48+** · **жильё**.",
       ].join("\n\n");
+      break;
     case "soleProp":
-      return [
+      main = [
         "**Ежедневный оклад (полночь МСК):** считается от **баланса бизнеса** (отдельно от личного счёта, потолок **500 000 000** ₽).",
         "**Идея формулы:** `floor((520 + капитал × 0,0175) × (1 + 8%×ранг) × …)`** — дальше множители **престижа** (до **~+55%** на высоком престиже), **риска** −2…+2 (**+6%** к множителю за шаг, плюс случайный разброс при риске **≥1**), **эффективности** (**0,3…1**) и **временного** множителя (**1…1,35**).",
         "**Пример (риск 0, без временного буста, эффективность 1):** при **0** ₽ на бизнесе и ранге **0** базовая часть **~520** ₽/день; при **500 000** ₽ на бизнесе **~520 + 8 750** — точное значение см. строку «ориентир» в панели ИП.",
@@ -1755,9 +1778,14 @@ function buildJobDetailBody(jobId: JobId): string {
         "**Контроль:** отметка раз в **24** ч; пропуски отметок снижают эффективность; серии отметок могут её восстанавливать.",
         "**Навыки:** коммуникация **55+**, логистика **52+**, дисциплина **60+** · **жильё**.",
       ].join("\n\n");
+      break;
     default:
-      return def.title;
+      main = def.title;
   }
+  if (isTier12JobId(jobId)) {
+    return `${main}\n\n${tier12CareerDetailBlock(def.baseCooldownMs)}`;
+  }
+  return main;
 }
 
 function buildJobDetailEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
@@ -1789,6 +1817,9 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   const extra: string[] = [];
   const exp = getJobExp(u, jobId);
   extra.push(`Опыт смен на **этой** профессии: **${exp}**`);
+  if (isTier12JobId(jobId)) {
+    extra.push(...tier12CareerEmbedLines(jobId, exp, def.baseCooldownMs));
+  }
   if (jobId === "courier" && u.jobId === "courier") {
     extra.push("");
     extra.push(...courierWorkExtrasLines(u, now));
@@ -2135,6 +2166,7 @@ function buildCurrentJobEmbed(
       : [
           `Текущая работа: **${def.title}**`,
           `Опыт смен на этой работе: **${exp}**`,
+          ...(isTier12JobId(u.jobId) ? tier12CareerEmbedLines(u.jobId, exp, def.baseCooldownMs) : []),
           jobPayoutEmbedLine(u.jobId, def.basePayoutRub),
           `КД смены: **${cdHoursLabel(cd)} ч**`,
           state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
@@ -3017,7 +3049,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_COURIER_BIKE_1D || id === ECON_COURIER_BIKE_3D || id === ECON_COURIER_BIKE_7D) {
     const u = getEconomyUser(member.guild.id, member.id);
     if (u.jobId !== "courier") {
-      await interaction.reply({ content: "Аренда вела доступна только на **работе курьера**.", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "Аренда вела доступна только на **доставке**.", flags: MessageFlags.Ephemeral });
       return true;
     }
     if (hasOwnedCourierCar(u)) {
@@ -3054,9 +3086,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_WORK_BUTTON_TIER2) {
     const embed = buildTier2JobsOverviewEmbed(member);
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}dispatcher`).setLabel("Диспетчер").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}assembler`).setLabel("Сборщик").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}expediter`).setLabel("Экспедитор").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}dispatcher`).setLabel("Колл-центр").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}assembler`).setLabel("Склад").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}expediter`).setLabel("Развлекательный центр").setStyle(ButtonStyle.Secondary),
     );
     const nav = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Назад").setStyle(ButtonStyle.Secondary),
@@ -3590,6 +3622,22 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     let jobTotal = base + extra;
     const variablePayout = jobUsesVariablePayout(jobId);
     if (!variablePayout) jobTotal = Math.max(0, jobTotal);
+
+    if (isTier12JobId(jobId)) {
+      const rankBeforeT12 = tier12RankFromShifts(expBefore, def.baseCooldownMs);
+      const rankAfterT12 = tier12RankFromShifts(expAfter, def.baseCooldownMs);
+      jobTotal += tier12RankFlatBonusRub(jobId, rankAfterT12);
+      if (rankAfterT12 > rankBeforeT12) {
+        notes.push(`Повышение: **${tier12RankTitle(jobId, rankAfterT12)}** (ранг **${rankAfterT12}**).`);
+        appendFeedEvent({
+          ts: now,
+          guildId,
+          type: "job:promotion",
+          actorUserId: member.id,
+          text: `${member.toString()}: **${def.title}** — **${tier12RankTitle(jobId, rankAfterT12)}** (ранг **${rankAfterT12}**).`,
+        });
+      }
+    }
 
     let rublesNext = u.rubles;
     let simBalNext = u.simBalanceRub ?? 0;

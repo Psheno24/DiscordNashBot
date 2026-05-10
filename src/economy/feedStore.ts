@@ -8,6 +8,7 @@ export type FeedEventType =
   | "bet:updated"
   | "bet:resolved"
   | "job:shift"
+  | "job:promotion"
   | "job:passive"
   | "admin:budget";
 
