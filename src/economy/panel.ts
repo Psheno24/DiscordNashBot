@@ -30,6 +30,34 @@ import {
   type JobId,
   type SkillId,
 } from "./userStore.js";
+import {
+  getTier3JobDef,
+  isTier3JobId,
+  JOBS_TIER3,
+  SOLE_PROP_CAP_MAX,
+  SOLE_PROP_RISK_MAX,
+  SOLE_PROP_RISK_MIN,
+  TIER3_BOSS_CD_MS,
+  TIER3_SIDE_GIG_CD_MS,
+  tier3PatchWhenJobChanges,
+  tier3PromotionRank,
+  type Tier3JobDef,
+  type Tier3JobId,
+} from "./tier3Jobs.js";
+import {
+  APARTMENT_MODELS,
+  CAR_MODELS,
+  COURIER_SIM_MONTHLY_FEE_RUB,
+  COURIER_SIM_MONTHLY_PERIOD_MS,
+  getApartmentDef,
+  getCarDef,
+  getPhoneDef,
+  HOUSING_RENT_MONTHLY_RUB,
+  HOUSING_RENT_PERIOD_MS,
+  HOUSING_RENT_PRESTIGE_ONE_TIME,
+  PHONE_MODELS,
+  solePropPrestigeIncomeMult,
+} from "./economyCatalog.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
 import { drawSimNumberFromPool, releaseSimNumberToPool } from "./simPoolStore.js";
@@ -42,6 +70,13 @@ export const ECON_BUTTON_SKILLS = "econ:skills";
 export const ECON_BUTTON_SHOP = "econ:shop";
 const ECON_SHOP_HUB = "econ:shop:hub";
 const ECON_SHOP_PHONE = "econ:shop:phone";
+const ECON_SHOP_PHONE_BUY_PREFIX = "econ:shop:phoneBuy:";
+const ECON_SHOP_CAR = "econ:shop:car";
+const ECON_SHOP_CAR_BUY_PREFIX = "econ:shop:carBuy:";
+const ECON_SHOP_HOUSE = "econ:shop:house";
+const ECON_SHOP_HOUSE_RENT = "econ:shop:house:rent";
+const ECON_SHOP_HOUSE_LEAVE = "econ:shop:house:leave";
+const ECON_SHOP_APT_BUY_PREFIX = "econ:shop:aptBuy:";
 const ECON_SHOP_SIM = "econ:shop:sim";
 const ECON_SHOP_SIM_NEW = "econ:shop:sim:new";
 const ECON_SHOP_SIM_TOPUP_OPEN = "econ:shop:sim:topupOpen";
@@ -72,6 +107,17 @@ const ECON_WORK_BUTTON_QUIT_CONFIRM = "econ:work:quit:confirm";
 const ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX = "econ:work:switchOk:";
 
 const ECON_WORK_BUTTON_TIER2 = "econ:work:tier2";
+const ECON_WORK_BUTTON_TIER3 = "econ:work:tier3";
+const ECON_TIER3_SIDE = "econ:work:t3:side";
+const ECON_TIER3_BOSS = "econ:work:t3:boss";
+const ECON_TIER3_IP_INVEST_5K = "econ:work:t3:ip5k";
+const ECON_TIER3_IP_INVEST_25K = "econ:work:t3:ip25k";
+const IP_INVEST_AMOUNTS: Record<string, number> = {
+  [ECON_TIER3_IP_INVEST_5K]: 5_000,
+  [ECON_TIER3_IP_INVEST_25K]: 25_000,
+};
+const ECON_TIER3_IP_RISK_DOWN = "econ:work:t3:riskDn";
+const ECON_TIER3_IP_RISK_UP = "econ:work:t3:riskUp";
 const ECON_PLAYERS_BUTTON_TOP_PS = "econ:players:topPs";
 const ECON_PLAYERS_BUTTON_TOP_RUB = "econ:players:topRub";
 
@@ -84,14 +130,8 @@ const PANEL_COLOR = 0x263238;
 const PROFILE_COLOR = 0x1b5e20;
 const FEED_COLOR = 0x0d47a1;
 
-/** Магазин: телефон и симка */
-const SHOP_PHONE_PRICE_RUB = 1000;
 const SHOP_SIM_NEW_PRICE_RUB = 100;
 const SHOP_SIM_START_BALANCE_RUB = 50;
-/** Тариф «онлайн» курьера (24 ч) после оплаты с баланса сим. */
-const COURIER_ONLINE_24H_MS = 24 * 60 * 60 * 1000;
-/** Один раз с баланса сим при первой смене после истечения тарифа; внутри 24 ч доп. списаний с сим нет. */
-const COURIER_SIM_24H_FEE_RUB = 20;
 const BIKE_1D_MS = 1 * 86400000;
 const BIKE_3D_MS = 3 * 86400000;
 const BIKE_7D_MS = 7 * 86400000;
@@ -166,13 +206,14 @@ function buildMenuRow(): ActionRowBuilder<ButtonBuilder> {
 }
 
 function buildProfileHubPropertyLine(u: ReturnType<typeof getEconomyUser>): string {
+  const phoneLabel = u.hasPhone ? getPhoneDef(u.phoneModelId)?.label ?? "есть" : "нет";
   if (!u.hasPhone) {
     return `Телефон (**нет**)`;
   }
   if (!u.courierSimNumber) {
-    return `Телефон (**есть**, сим **нет**)`;
+    return `Телефон (**${phoneLabel}**, сим **нет**) · престиж **${fmt(u.prestigePoints ?? 0)}**`;
   }
-  return `Телефон (**есть**, сим **${u.courierSimNumber}**) — баланс сим **${fmt(u.simBalanceRub ?? 0)}** ₽`;
+  return `Телефон (**${phoneLabel}**, сим **${u.courierSimNumber}**) — баланс сим **${fmt(u.simBalanceRub ?? 0)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`;
 }
 
 function buildProfileHubEmbed(member: GuildMember): EmbedBuilder {
@@ -349,13 +390,18 @@ function buildFocusRows(cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
 }
 
 function buildProfilePurchasesLine(u: ReturnType<typeof getEconomyUser>): string {
+  const pl = u.hasPhone ? getPhoneDef(u.phoneModelId)?.label ?? "есть" : "нет";
+  const car = getCarDef(u.ownedCarId);
+  const hk = u.housingKind ?? "none";
+  const home =
+    hk === "rent" ? "аренда" : hk === "owned" ? (getApartmentDef(u.ownedApartmentId)?.label ?? "своё") : "нет";
   if (!u.hasPhone) {
-    return "Телефон: **нет**";
+    return `Телефон: **нет** · авто: **${car?.label ?? "нет"}** · жильё: **${home}** · престиж **${fmt(u.prestigePoints ?? 0)}**`;
   }
   if (!u.courierSimNumber) {
-    return "Телефон: **есть** (**нет сим**)";
+    return `Телефон: **${pl}** (**нет сим**) · авто: **${car?.label ?? "нет"}** · жильё: **${home}** · престиж **${fmt(u.prestigePoints ?? 0)}**`;
   }
-  return `Телефон: **есть** (**сим ${u.courierSimNumber}**, баланс **${fmt(u.simBalanceRub ?? 0)}** ₽)`;
+  return `Телефон: **${pl}** (**сим ${u.courierSimNumber}**, баланс **${fmt(u.simBalanceRub ?? 0)}** ₽) · авто: **${car?.label ?? "нет"}** · жильё: **${home}** · престиж **${fmt(u.prestigePoints ?? 0)}**`;
 }
 
 function buildProfileEmbed(member: GuildMember): EmbedBuilder {
@@ -509,6 +555,9 @@ const WORK_JOB_IDS = [
   "dispatcher",
   "assembler",
   "expediter",
+  "officeAnalyst",
+  "shadowFixer",
+  "soleProp",
 ] as const satisfies readonly JobId[];
 
 function isWorkJobId(s: string): s is JobId {
@@ -532,6 +581,8 @@ type JobDef = {
   basePayoutRub: number;
   description: string;
   reqSkills?: Partial<Record<SkillId, number>>;
+  tier3Archetype?: "legal" | "illegal" | "ip";
+  passiveBaseRub?: number;
 };
 
 // Чем выше потолок при активной игре — тем короче КД. Стабильный фикс — реже смены.
@@ -540,12 +591,12 @@ const JOBS_STARTER: JobDef[] = [
     id: "courier",
     title: "Курьер",
     baseCooldownMs: 3 * 60 * 60 * 1000,
-    basePayoutRub: 88,
+    basePayoutRub: 175,
     description:
       [
-        "**Самый короткий КД** тира (3 ч, с арендой вела — 2 ч).",
-        `Нужны **телефон** и **симка**. Раз в **24 ч** (при первой смене после перерыва) с **баланса сим** — **${COURIER_SIM_24H_FEE_RUB}** ₽ за **тариф** онлайн; внутри суток смены **без** доп. списаний с сим. **Основной счёт не трогается.**`,
-        "**Электровел** — посуточная аренда (кнопки в этой карточке).",
+        "**КД смены:** 3 ч без вела; с **арендой электровела** — 2 ч; с **авто** — по классу авто (**от 2 ч до 1 ч**).",
+        `Нужны **телефон** и **симка**. С **баланса сим** — **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ за **30 суток** «онлайн» (при первой смене после перерыва); внутри оплаченного периода смены **без** доп. списаний с сим. **Основной счёт не трогается.**`,
+        "**Электровел** — посуточная аренда (если **нет** своего авто).",
       ].join("\n"),
   },
   {
@@ -560,11 +611,11 @@ const JOBS_STARTER: JobDef[] = [
   {
     id: "watchman",
     title: "Ночной сторож",
-    baseCooldownMs: 16 * 60 * 60 * 1000,
-    basePayoutRub: 128,
+    baseCooldownMs: 24 * 60 * 60 * 1000,
+    basePayoutRub: 96,
     description:
       [
-        "**Самый длинный КД** (16 ч): редко нажимать, низкий стабильный фикс, без сюрпризов.",
+        "**Длинный КД** (24 ч): редкие смены, скромный стабильный фикс — не доминирует при «ленивом» графике.",
       ].join("\n"),
   },
 ];
@@ -577,30 +628,46 @@ function getJobDef(id: StarterJobId): JobDef {
   return d;
 }
 
+function jobDefFromTier3(d: Tier3JobDef): JobDef {
+  return {
+    id: d.id,
+    title: d.title,
+    baseCooldownMs: d.baseCooldownMs,
+    basePayoutRub: d.basePayoutRub,
+    description: d.description,
+    reqSkills: { ...d.reqSkills },
+    tier3Archetype: d.archetype,
+    passiveBaseRub: d.passiveBaseRub,
+  };
+}
+
 // Тир-2: та же логика КД; тир-3 — комбо из трёх навыков.
 const JOBS_TIER2: JobDef[] = [
   {
     id: "dispatcher",
     title: "Диспетчер",
-    baseCooldownMs: 12 * 60 * 60 * 1000,
-    basePayoutRub: 132,
-    description: ["**Длинный КД** (12 ч), стабильный фикс, мало кликов.", "Ниже потолок ₽/ч, чем у активных профессий тира."].join("\n"),
+    baseCooldownMs: 14 * 60 * 60 * 1000,
+    basePayoutRub: 195,
+    description: [
+      "**Длинный КД** (14 ч): стабильный фикс, мало кликов.",
+      "Иногда (**2%**) — мелкая премия за слаженную смену.",
+    ].join("\n"),
     reqSkills: { communication: 28, discipline: 20 },
   },
   {
     id: "assembler",
     title: "Сборщик",
-    baseCooldownMs: 7 * 60 * 60 * 1000,
-    basePayoutRub: 248,
-    description: ["**Средний КД** (7 ч): высокий оклад, премии за серию, редкие штрафы."].join("\n"),
+    baseCooldownMs: 8 * 60 * 60 * 1000,
+    basePayoutRub: 320,
+    description: ["**Средний КД** (8 ч): высокий оклад, премия каждые **7** смен, редкие штрафы."].join("\n"),
     reqSkills: { discipline: 28, logistics: 20 },
   },
   {
     id: "expediter",
     title: "Экспедитор",
-    baseCooldownMs: 2.5 * 60 * 60 * 1000,
+    baseCooldownMs: 3 * 60 * 60 * 1000,
     basePayoutRub: 0,
-    description: ["**Самый короткий КД** тира (2,5 ч): без фикса, сильный разброс, возможен убыток."].join("\n"),
+    description: ["**Короткий КД** (3 ч): без фикса, переразнесённый разброс — реже катастрофа, чуть уже верхний «куш»."].join("\n"),
     reqSkills: { logistics: 28, communication: 20 },
   },
 ];
@@ -610,6 +677,8 @@ function getAnyJobDef(id: JobId): JobDef {
   if (s) return s;
   const t2 = JOBS_TIER2.find((j) => j.id === id);
   if (t2) return t2;
+  const t3 = JOBS_TIER3.find((j) => j.id === id);
+  if (t3) return jobDefFromTier3(t3);
   throw new Error(`unknown job: ${id}`);
 }
 
@@ -662,34 +731,41 @@ function hasActiveBikeRental(u: ReturnType<typeof getEconomyUser>, now: number):
   return Number.isFinite(u.courierBikeUntilMs) && (u.courierBikeUntilMs ?? 0) > now;
 }
 
-/** Строки для курьера: электровелосипед, тариф онлайн 24 ч, баланс сим — только при текущей работе «курьер». */
+function hasOwnedCourierCar(u: ReturnType<typeof getEconomyUser>): boolean {
+  return Boolean(u.ownedCarId && getCarDef(u.ownedCarId));
+}
+
+/** Строки для курьера: авто / вел, месячный тариф сим, баланс сим — только при текущей работе «курьер». */
 function courierWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
   if (u.jobId !== "courier") return [];
-  const fee = COURIER_SIM_24H_FEE_RUB;
+  const fee = COURIER_SIM_MONTHLY_FEE_RUB;
   const lines: string[] = [];
-  if (hasActiveBikeRental(u, now)) {
+  const car = getCarDef(u.ownedCarId);
+  if (car) {
+    lines.push(`**Авто:** **${car.label}** (${car.speedKmh} км/ч) — КД смены **${(car.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч.`);
+  } else if (hasActiveBikeRental(u, now)) {
     const t = Math.floor((u.courierBikeUntilMs ?? 0) / 1000);
     lines.push(`**Электровелосипед:** оплачен до <t:${t}:F> (<t:${t}:R>).`);
   } else {
-    lines.push("**Электровелосипед:** аренда **не активна**.");
+    lines.push("**Электровелосипед:** аренда **не активна** (или купите **авто** в магазине).");
   }
   if (u.courierPhonePaidUntilMs && now < u.courierPhonePaidUntilMs) {
     const lt = Math.floor(u.courierPhonePaidUntilMs / 1000);
-    lines.push(`**Сим-карта:** **тариф 24 ч** оплачен до <t:${lt}:F> — смены в этот период **без** доп. списаний с баланса сим.`);
+    lines.push(`**Сим-карта:** **тариф 30 суток** оплачен до <t:${lt}:F> — смены в этот период **без** доп. списаний с баланса сим.`);
   } else {
     lines.push(
-      `**Сим-карта:** **тариф 24 ч** **не оплачен** — при следующем выходе на смену с баланса сим спишется **${fee}** ₽ и активируется тариф на сутки онлайн.`,
+      `**Сим-карта:** тариф **не оплачен** — при следующем выходе на смену с баланса сим спишется **${fee.toLocaleString("ru-RU")}** ₽ и продлится **30 суток** онлайн.`,
     );
   }
   const bals = u.simBalanceRub ?? 0;
   lines.push(
-    `**Баланс сим:** **${fmt(bals)}** ₽ — пополнение в магазине; **${fee}** ₽ с сим за **тариф 24 ч** (основной счёт **не** используется).`,
+    `**Баланс сим:** **${fmt(bals)}** ₽ — пополнение в магазине; **${fee.toLocaleString("ru-RU")}** ₽ с сим за **30 суток** (основной счёт **не** используется).`,
   );
   return lines;
 }
 
 function jobUsesVariablePayout(jobId: JobId): boolean {
-  return jobId === "waiter" || jobId === "expediter";
+  return jobId === "waiter" || jobId === "expediter" || jobId === "shadowFixer";
 }
 
 function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
@@ -697,13 +773,20 @@ function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
     return "Оплата за смену: **без фикса** — разброс **примерно −95…+380 ₽** (типичный зал **+55…+175 ₽**; редко — крупный куш или тяжёлый минус).";
   }
   if (jobId === "expediter") {
-    return "Оплата за смену: **без фикса** — разброс **примерно −58…+185 ₽** (частый коридор **+50…+110 ₽**).";
+    return "Оплата за смену: **без фикса** — разброс **примерно −80…+240 ₽** (частый коридор **+60…+110 ₽**).";
+  }
+  if (jobId === "shadowFixer") {
+    return "Оплата за смену: **без фикса** — сильный разброс (до **−280…+1200 ₽**; ранг и стрик усиливают **плюсовые** ветки).";
+  }
+  if (jobId === "soleProp") {
+    return "Оплата за смену: **фикс + оборот** — база **160** ₽ + доля от вложенного капитала; ранг по стажу добавляет стабильный бонус; **престиж** слегка множит итог.";
   }
   return `Оплата за смену: **${baseRub} ₽**`;
 }
 
 function jobPayoutShortForMenu(jobId: JobId, baseRub: number): string {
   if (jobUsesVariablePayout(jobId)) return "без фикса (рандом)";
+  if (jobId === "soleProp") return `~${baseRub}+ ₽`;
   return `${baseRub} ₽`;
 }
 
@@ -712,12 +795,25 @@ function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
   const simLine = u.hasPhone
     ? `• Симка${u.courierSimNumber ? " **(куплено)**" : ""} — первая **${SHOP_SIM_NEW_PRICE_RUB}** ₽ (+**${SHOP_SIM_START_BALANCE_RUB}** ₽ на баланс), замена **${SHOP_SIM_NEW_PRICE_RUB}** ₽`
     : `• Симка — сначала **телефон**`;
+  const phoneHint = u.hasPhone
+    ? `• Телефон — **${getPhoneDef(u.phoneModelId)?.label ?? "есть"}** (апгрейд в подменю)`
+    : "• Телефон — модели **от 5 000** ₽";
+  const carLine = u.ownedCarId ? `• Авто — **${getCarDef(u.ownedCarId)?.label ?? "есть"}**` : "• Авто — **нет**";
+  const hk = u.housingKind ?? "none";
+  const houseLine =
+    hk === "rent"
+      ? "• Жильё — **аренда** (70 000 ₽ / 30 дн.)"
+      : hk === "owned"
+        ? `• Жильё — **своя квартира** (${getApartmentDef(u.ownedApartmentId)?.label ?? "—"})`
+        : "• Жильё — **нет**";
   const lines = [
-    `Баланс: **${fmt(u.rubles)}** ₽`,
+    `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`,
     "",
     "**Список товаров:**",
-    `• Телефон — **${SHOP_PHONE_PRICE_RUB}** ₽${u.hasPhone ? " **(куплено)**" : ""}`,
+    phoneHint,
     simLine,
+    carLine,
+    houseLine,
   ];
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
 }
@@ -726,21 +822,177 @@ function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[
   const u = getEconomyUser(member.guild.id, member.id);
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(ECON_SHOP_PHONE)
-        .setLabel(u.hasPhone ? "Телефон (куплено)" : "Телефон")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(u.hasPhone),
+      new ButtonBuilder().setCustomId(ECON_SHOP_PHONE).setLabel("Телефон").setStyle(ButtonStyle.Primary),
       new ButtonBuilder()
         .setCustomId(ECON_SHOP_SIM)
         .setLabel("Симка")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(!u.hasPhone),
+      new ButtonBuilder().setCustomId(ECON_SHOP_CAR).setLabel("Авто").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE).setLabel("Жильё").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
     ),
   ];
+}
+
+function buildShopPhoneEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = getPhoneDef(u.phoneModelId);
+  const lines = [
+    `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`,
+    cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет телефона**",
+    "",
+    "Выберите модель. При **апгрейде** доплачивается разница в цене, престиж меняется на дельту моделей.",
+    "",
+    ...PHONE_MODELS.map((p) => `• **${p.label}** — **${fmt(p.priceRub)}** ₽ (+**${p.prestigeDelta}** престижа)`),
+  ];
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Телефон").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildShopPhoneRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = getPhoneDef(u.phoneModelId);
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  const chunk = 5;
+  for (let i = 0; i < PHONE_MODELS.length; i += chunk) {
+    const slice = PHONE_MODELS.slice(i, i + chunk);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((p) => {
+          const cost = cur ? Math.max(0, p.priceRub - cur.priceRub) : p.priceRub;
+          const downgrade = Boolean(cur && p.priceRub < cur.priceRub);
+          const disabled = downgrade || u.rubles < cost || (cur?.id === p.id && Boolean(u.hasPhone));
+          return new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_PHONE_BUY_PREFIX}${p.id}`)
+            .setLabel(`${p.label} (${cost ? fmt(cost) : "0"} ₽)`)
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(disabled);
+        }),
+      ),
+    );
+  }
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_HUB).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return rows;
+}
+
+function buildShopCarEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = getCarDef(u.ownedCarId);
+  const lines = [
+    `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`,
+    cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет авто**",
+    "",
+    "Покупка **заменяет** текущее авто: платите разницу в цене, престиж меняется на **дельту** моделей. С **авто** аренда вела не нужна.",
+    "",
+    ...CAR_MODELS.map(
+      (c) =>
+        `• **${c.label}** — **${fmt(c.priceRub)}** ₽ (+**${fmt(c.prestigeDelta)}** пр.) · КД курьера **${(c.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч`,
+    ),
+  ];
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Авто").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildShopCarRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = getCarDef(u.ownedCarId);
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < CAR_MODELS.length; i += 3) {
+    const slice = CAR_MODELS.slice(i, i + 3);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((c) => {
+          const cost = cur ? Math.max(0, c.priceRub - cur.priceRub) : c.priceRub;
+          const downgrade = Boolean(cur && c.priceRub < cur.priceRub);
+          const disabled = downgrade || u.rubles < cost || (cur?.id === c.id && Boolean(u.ownedCarId));
+          return new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_CAR_BUY_PREFIX}${c.id}`)
+            .setLabel(`${c.label.split(" ")[0] ?? c.label} (${fmt(cost)})`)
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(disabled);
+        }),
+      ),
+    );
+  }
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_HUB).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return rows;
+}
+
+function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const hk = u.housingKind ?? "none";
+  const lines: string[] = [
+    `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`,
+    "",
+    hk === "rent"
+      ? "Вы **снимаете** жильё. Раз в **30 дней** (полночь МСК) списывается **70 000** ₽. Одноразово за эту аренду: **+1000** престижа при заселении (снимается при съезде при отмене бонуса)."
+      : hk === "owned"
+        ? `Своя квартира: **${getApartmentDef(u.ownedApartmentId)?.label ?? "—"}**. Коммуналка раз в **30 дней** (МСК).`
+        : `**Аренда:** первый взнос **${fmt(HOUSING_RENT_MONTHLY_RUB)}** ₽, далее **${fmt(HOUSING_RENT_MONTHLY_RUB)}** ₽ / 30 дн. (+**${HOUSING_RENT_PRESTIGE_ONE_TIME}** престижа один раз).`,
+    "",
+    "**Купить квартиру** (если нет своей):",
+    ...APARTMENT_MODELS.map((a) => `• **${a.label}** — **${fmt(a.priceRub)}** ₽ · коммуналка **${fmt(a.monthlyUtilityRub)}** / мес · +**${fmt(a.prestigeDelta)}** пр.`),
+  ];
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Жильё").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const hk = u.housingKind ?? "none";
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (hk === "rent") {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE_LEAVE).setLabel("Съехать с аренды").setStyle(ButtonStyle.Danger),
+      ),
+    );
+  } else if (hk !== "owned") {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ECON_SHOP_HOUSE_RENT)
+          .setLabel(`Снять (${fmt(HOUSING_RENT_MONTHLY_RUB)} ₽)`)
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(u.rubles < HOUSING_RENT_MONTHLY_RUB),
+      ),
+    );
+  }
+  const curApt = getApartmentDef(u.ownedApartmentId);
+  for (let i = 0; i < APARTMENT_MODELS.length; i += 3) {
+    const slice = APARTMENT_MODELS.slice(i, i + 3);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((a) => {
+          const cost = hk === "owned" && curApt ? Math.max(0, a.priceRub - curApt.priceRub) : a.priceRub;
+          const downgrade = Boolean(hk === "owned" && curApt && a.priceRub < curApt.priceRub);
+          const disabled = downgrade || hk === "rent" || u.rubles < cost || (hk === "owned" && curApt?.id === a.id);
+          return new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_APT_BUY_PREFIX}${a.id}`)
+            .setLabel(`${a.label.slice(0, 12)}…`)
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(disabled);
+        }),
+      ),
+    );
+  }
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_HUB).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return rows;
 }
 
 function buildShopSimEmbed(member: GuildMember): EmbedBuilder {
@@ -823,6 +1075,8 @@ function getJobExp(u: ReturnType<typeof getEconomyUser>, jobId: JobId): number {
 
 function effectiveCourierCooldownMs(u: ReturnType<typeof getEconomyUser>, now: number = Date.now()): number {
   const def = getJobDef("courier");
+  const car = getCarDef(u.ownedCarId);
+  if (car) return car.courierShiftCdMs;
   if (hasActiveBikeRental(u, now)) return 2 * 60 * 60 * 1000;
   return def.baseCooldownMs;
 }
@@ -868,6 +1122,7 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Без навыка (начальные)").setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком (тир 2)").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER3).setLabel("Тир 3").setStyle(ButtonStyle.Secondary),
       ),
       buildMenuRow(),
     ];
@@ -892,6 +1147,7 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Без навыка (начальные)").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком (тир 2)").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER3).setLabel("Тир 3").setStyle(ButtonStyle.Secondary),
     ),
   );
   rows.push(
@@ -929,7 +1185,7 @@ function buildStarterJobsEmbed(member: GuildMember): EmbedBuilder {
     const pay = jobPayoutShortForMenu(d.id, d.basePayoutRub);
     let s = `**${d.title}** — ${pay}, КД **${cdh} ч**.`;
     if (d.id === "courier") {
-      s += ` С баланса сим: **${COURIER_SIM_24H_FEE_RUB}** ₽ на **тариф 24 ч** онлайн при необходимости; внутри тарифа без доп. списаний с сим.`;
+      s += ` С баланса сим: **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ на **30 суток** онлайн при необходимости; внутри оплаченного периода без доп. списаний с сим.`;
     } else if (d.id === "waiter") {
       s += " Оклад **без фикса** (рандом прибыли/убытка).";
     } else {
@@ -984,6 +1240,11 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
     extra.push("");
     extra.push(...courierWorkExtrasLines(u, now));
   }
+  const t3 = tier3StatusLines(u, jobId, now);
+  if (t3.length) {
+    extra.push("");
+    extra.push(...t3);
+  }
   const req = meetsJobReq(u, def);
   if ((def.reqSkills ?? {}) && Object.keys(def.reqSkills ?? {}).length > 0) {
     extra.push("");
@@ -1009,6 +1270,127 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
 
 function isTier2JobId(jobId: JobId): boolean {
   return JOBS_TIER2.some((j) => j.id === jobId);
+}
+
+function isTier3PanelJob(jobId: JobId): boolean {
+  return isTier3JobId(jobId);
+}
+
+function workCatalogBackButtonId(jobId: JobId): string {
+  if (isTier3PanelJob(jobId)) return ECON_WORK_BUTTON_TIER3;
+  if (isTier2JobId(jobId)) return ECON_WORK_BUTTON_TIER2;
+  return ECON_WORK_BUTTON_STARTERS;
+}
+
+function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): string[] {
+  if (!isTier3PanelJob(jobId)) return [];
+  const def = getTier3JobDef(jobId as Tier3JobId);
+  const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
+  const lines: string[] = [];
+  lines.push(`**Должность (ранг):** **${rank}** · стрик МСК: **${u.jobMskDayStreak ?? 0}** дн.`);
+  if (def.archetype === "legal") {
+    lines.push(`Пассив в полночь МСК: **~${def.passiveBaseRub}** ₽ базы × множитель ранга (см. тик ленты).`);
+  } else if (def.archetype === "illegal") {
+    lines.push(`Пассива **нет**; стрик и ранг **слегка** поднимают удачные смены.`);
+  } else {
+    lines.push(`В обороте ИП: **${fmt(u.solePropCapitalRub ?? 0)}** ₽ / **${SOLE_PROP_CAP_MAX}** max · риск **${u.solePropRiskDial ?? 0}** (**${SOLE_PROP_RISK_MIN}**…**${SOLE_PROP_RISK_MAX}**).`);
+  }
+  const sideLeft = (u.tier3SideGigReadyAt ?? 0) - now;
+  const bossLeft = (u.tier3BossReadyAt ?? 0) - now;
+  lines.push(sideLeft > 0 ? `Подработка: через **${formatCooldown(sideLeft)}**.` : `Подработка: **доступна**.`);
+  const bossLabel = def.archetype === "illegal" ? "Куратор" : "Начальник";
+  lines.push(bossLeft > 0 ? `${bossLabel}: через **${formatCooldown(bossLeft)}**.` : `${bossLabel}: **доступен**.`);
+  return lines;
+}
+
+function buildTier3JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
+  const lines: string[] = [];
+  for (const d of JOBS_TIER3) {
+    const jd = jobDefFromTier3(d);
+    const cdh = cdHoursLabel(d.baseCooldownMs);
+    const pay = jobPayoutShortForMenu(jd.id, jd.basePayoutRub);
+    lines.push(`**${d.title}** — ${pay}, КД **${cdh} ч**. Требования: ${formatJobTierReqLine(jd)}`);
+  }
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Профессии (тир 3)")
+    .setDescription(
+      [
+        "**Легал** — пассив в полночь МСК, стаж 30 дней → ранг и больше пассива.",
+        "**Нелегал** — короткий КД и сильный рандом, пассива почти нет.",
+        "**ИП** — вложения и «риск» крутят ночной пассив.",
+        "",
+        ...lines,
+      ].join("\n\n"),
+    )
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildTier3JobRows(): ActionRowBuilder<ButtonBuilder>[] {
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}officeAnalyst`).setLabel("Офис").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}shadowFixer`).setLabel("Схемы").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}soleProp`).setLabel("ИП").setStyle(ButtonStyle.Secondary),
+  );
+  const nav = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+  );
+  return [row, nav];
+}
+
+function buildTier3ActionRows(member: GuildMember, jobId: JobId): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const now = Date.now();
+  const def = getTier3JobDef(jobId as Tier3JobId);
+  const sideReady = !u.tier3SideGigReadyAt || now >= u.tier3SideGigReadyAt;
+  const bossReady = !u.tier3BossReadyAt || now >= u.tier3BossReadyAt;
+
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(ECON_TIER3_SIDE)
+        .setLabel("Подработка (премия)")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(!sideReady),
+      new ButtonBuilder()
+        .setCustomId(ECON_TIER3_BOSS)
+        .setLabel(def.archetype === "illegal" ? "Куратор" : "Начальник")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!bossReady),
+    ),
+  );
+
+  if (def.archetype === "ip") {
+    const cap = u.solePropCapitalRub ?? 0;
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ECON_TIER3_IP_INVEST_5K)
+          .setLabel("Вложить 5 000 ₽")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(u.rubles < 5_000 || cap >= SOLE_PROP_CAP_MAX),
+        new ButtonBuilder()
+          .setCustomId(ECON_TIER3_IP_INVEST_25K)
+          .setLabel("Вложить 25 000 ₽")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(u.rubles < 25_000 || cap >= SOLE_PROP_CAP_MAX),
+        new ButtonBuilder()
+          .setCustomId(ECON_TIER3_IP_RISK_DOWN)
+          .setLabel("Риск −")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled((u.solePropRiskDial ?? 0) <= SOLE_PROP_RISK_MIN),
+        new ButtonBuilder()
+          .setCustomId(ECON_TIER3_IP_RISK_UP)
+          .setLabel("Риск +")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled((u.solePropRiskDial ?? 0) >= SOLE_PROP_RISK_MAX),
+      ),
+    );
+  }
+
+  return rows;
 }
 
 function buildSwitchJobConfirmEmbed(member: GuildMember, newJobId: JobId): EmbedBuilder {
@@ -1040,7 +1422,7 @@ function buildSwitchJobConfirmRows(newJobId: JobId): ActionRowBuilder<ButtonBuil
 
 function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: boolean): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
-  const backId = isTier2JobId(jobId) ? ECON_WORK_BUTTON_TIER2 : ECON_WORK_BUTTON_STARTERS;
+  const backId = workCatalogBackButtonId(jobId);
   const now = Date.now();
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
 
@@ -1060,8 +1442,11 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
           .setDisabled(!state.ok),
       ),
     );
-    if (jobId === "courier" && !hasActiveBikeRental(u, now)) {
+    if (jobId === "courier" && !hasOwnedCourierCar(u) && !hasActiveBikeRental(u, now)) {
       rows.push(buildCourierBikeRow(member));
+    }
+    if (isTier3PanelJob(jobId)) {
+      rows.push(...buildTier3ActionRows(member, jobId));
     }
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1092,7 +1477,7 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
 
 function buildCurrentJobEmbed(
   member: GuildMember,
-  opts?: { lastShiftDeltaRub?: number; lastShiftNotes?: string[] },
+  opts?: { lastShiftDeltaRub?: number; lastShiftNotes?: string[]; tier3ActionNotes?: string[] },
 ): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   if (!u.jobId) {
@@ -1114,6 +1499,11 @@ function buildCurrentJobEmbed(
     `КД смены: **${cdHoursLabel(cd)} ч**`,
     state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
   ];
+  const t3 = tier3StatusLines(u, u.jobId, now);
+  if (t3.length) {
+    lines.push("");
+    lines.push(...t3);
+  }
   if (u.jobId === "courier") {
     lines.push("");
     lines.push(...courierWorkExtrasLines(u, now));
@@ -1125,6 +1515,11 @@ function buildCurrentJobEmbed(
     if (opts.lastShiftNotes?.length) {
       lines.push(`Детали: ${opts.lastShiftNotes.join(", ")}`);
     }
+  }
+
+  if (opts?.tier3ActionNotes?.length) {
+    lines.push("");
+    lines.push(...opts.tier3ActionNotes);
   }
 
   return new EmbedBuilder().setColor(PROFILE_COLOR).setTitle("Моя работа").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
@@ -1146,7 +1541,7 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   }
 
   const state = canWorkNow(u, u.jobId, now);
-  const backId = isTier2JobId(u.jobId) ? ECON_WORK_BUTTON_TIER2 : ECON_WORK_BUTTON_STARTERS;
+  const backId = workCatalogBackButtonId(u.jobId);
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_SHIFT).setLabel("Выйти на смену").setStyle(ButtonStyle.Success).setDisabled(!state.ok),
@@ -1157,8 +1552,11 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
         .setDisabled(!state.ok),
     ),
   );
-  if (u.jobId === "courier" && !hasActiveBikeRental(u, now)) {
+  if (u.jobId === "courier" && !hasOwnedCourierCar(u) && !hasActiveBikeRental(u, now)) {
     rows.push(buildCourierBikeRow(member));
+  }
+  if (isTier3PanelJob(u.jobId)) {
+    rows.push(...buildTier3ActionRows(member, u.jobId));
   }
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1398,6 +1796,13 @@ function isEconomyButton(id: string): boolean {
       ECON_COURIER_BIKE_7D,
       ECON_WORK_BUTTON_STARTERS,
       ECON_WORK_BUTTON_TIER2,
+      ECON_WORK_BUTTON_TIER3,
+      ECON_TIER3_SIDE,
+      ECON_TIER3_BOSS,
+      ECON_TIER3_IP_INVEST_5K,
+      ECON_TIER3_IP_INVEST_25K,
+      ECON_TIER3_IP_RISK_DOWN,
+      ECON_TIER3_IP_RISK_UP,
       ECON_WORK_BUTTON_SHIFT,
       ECON_WORK_BUTTON_MY_JOB,
       ECON_WORK_BUTTON_QUIT,
@@ -1518,17 +1923,170 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_SHOP_PHONE) {
+    await replyOrUpdate(interaction, { embeds: [buildShopPhoneEmbed(member)], components: buildShopPhoneRows(member) });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PHONE_BUY_PREFIX)) {
+    const pid = id.slice(ECON_SHOP_PHONE_BUY_PREFIX.length);
+    const defP = getPhoneDef(pid);
+    if (!defP) {
+      await interaction.reply({ content: "Неизвестная модель телефона.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
     const u = getEconomyUser(member.guild.id, member.id);
-    if (u.hasPhone) {
-      await interaction.reply({ content: "У вас уже есть телефон.", flags: MessageFlags.Ephemeral });
+    const cur = getPhoneDef(u.phoneModelId);
+    const cost = cur ? Math.max(0, defP.priceRub - cur.priceRub) : defP.priceRub;
+    const prestigeDelta = defP.prestigeDelta - (cur?.prestigeDelta ?? 0);
+    if (cur && defP.priceRub < cur.priceRub) {
+      await interaction.reply({ content: "Понижение модели **недоступно**.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (u.rubles < SHOP_PHONE_PRICE_RUB) {
-      await interaction.reply({ content: `Нужно **${SHOP_PHONE_PRICE_RUB} ₽** для телефона.`, flags: MessageFlags.Ephemeral });
+    if (u.rubles < cost) {
+      await interaction.reply({ content: `Нужно ещё **${fmt(cost)}** ₽.`, flags: MessageFlags.Ephemeral });
       return true;
     }
-    patchEconomyUser(member.guild.id, member.id, { rubles: u.rubles - SHOP_PHONE_PRICE_RUB, hasPhone: true });
-    await replyOrUpdate(interaction, { embeds: [buildShopHubEmbed(member)], components: buildShopHubRows(member) });
+    if (cur?.id === defP.id && u.hasPhone) {
+      await interaction.reply({ content: "У вас уже эта модель.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    patchEconomyUser(member.guild.id, member.id, {
+      rubles: u.rubles - cost,
+      hasPhone: true,
+      phoneModelId: defP.id,
+      prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeDelta),
+    });
+    await replyOrUpdate(interaction, { embeds: [buildShopPhoneEmbed(member)], components: buildShopPhoneRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_CAR) {
+    await replyOrUpdate(interaction, { embeds: [buildShopCarEmbed(member)], components: buildShopCarRows(member) });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_CAR_BUY_PREFIX)) {
+    const cid = id.slice(ECON_SHOP_CAR_BUY_PREFIX.length);
+    const defC = getCarDef(cid);
+    if (!defC) {
+      await interaction.reply({ content: "Неизвестная модель авто.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const u = getEconomyUser(member.guild.id, member.id);
+    const cur = getCarDef(u.ownedCarId);
+    const cost = cur ? Math.max(0, defC.priceRub - cur.priceRub) : defC.priceRub;
+    const prestigeDelta = defC.prestigeDelta - (cur?.prestigeDelta ?? 0);
+    if (cur && defC.priceRub < cur.priceRub) {
+      await interaction.reply({ content: "Понижение класса **недоступно**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (u.rubles < cost) {
+      await interaction.reply({ content: `Нужно ещё **${fmt(cost)}** ₽.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (cur?.id === defC.id) {
+      await interaction.reply({ content: "У вас уже это авто.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    patchEconomyUser(member.guild.id, member.id, {
+      rubles: u.rubles - cost,
+      ownedCarId: defC.id,
+      prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeDelta),
+      courierBikeUntilMs: undefined,
+    });
+    await replyOrUpdate(interaction, { embeds: [buildShopCarEmbed(member)], components: buildShopCarRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_HOUSE) {
+    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_HOUSE_RENT) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    const hk = u.housingKind ?? "none";
+    if (hk === "rent") {
+      await interaction.reply({ content: "Вы уже **снимаете** жильё.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (hk === "owned") {
+      await interaction.reply({ content: "У вас **своя квартира** — аренда недоступна.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (u.rubles < HOUSING_RENT_MONTHLY_RUB) {
+      await interaction.reply({ content: `Нужно **${fmt(HOUSING_RENT_MONTHLY_RUB)}** ₽ за первый период.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const now = Date.now();
+    const prestigeGain = u.housingRentPrestigeGranted ? 0 : HOUSING_RENT_PRESTIGE_ONE_TIME;
+    patchEconomyUser(member.guild.id, member.id, {
+      rubles: u.rubles - HOUSING_RENT_MONTHLY_RUB,
+      housingKind: "rent",
+      housingRentNextDueMs: now + HOUSING_RENT_PERIOD_MS,
+      housingRentPrestigeGranted: true,
+      prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeGain),
+    });
+    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_HOUSE_LEAVE) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    if ((u.housingKind ?? "none") !== "rent") {
+      await interaction.reply({ content: "Вы **не** на аренде.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const lost = u.housingRentPrestigeGranted ? HOUSING_RENT_PRESTIGE_ONE_TIME : 0;
+    patchEconomyUser(member.guild.id, member.id, {
+      housingKind: "none",
+      housingRentNextDueMs: undefined,
+      housingRentPrestigeGranted: false,
+      prestigePoints: Math.max(0, (u.prestigePoints ?? 0) - lost),
+    });
+    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_APT_BUY_PREFIX)) {
+    const aid = id.slice(ECON_SHOP_APT_BUY_PREFIX.length);
+    const defA = getApartmentDef(aid);
+    if (!defA) {
+      await interaction.reply({ content: "Неизвестная квартира.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const u = getEconomyUser(member.guild.id, member.id);
+    const hk = u.housingKind ?? "none";
+    if (hk === "rent") {
+      await interaction.reply({ content: "Сначала **съедьте с аренды**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const curA = getApartmentDef(u.ownedApartmentId);
+    const cost = hk === "owned" && curA ? Math.max(0, defA.priceRub - curA.priceRub) : defA.priceRub;
+    const prestigeDelta = defA.prestigeDelta - (curA?.prestigeDelta ?? 0);
+    if (hk === "owned" && curA && defA.priceRub < curA.priceRub) {
+      await interaction.reply({ content: "Переезд на более дешёвую квартиру **недоступен**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (u.rubles < cost) {
+      await interaction.reply({ content: `Нужно ещё **${fmt(cost)}** ₽.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (hk === "owned" && curA?.id === defA.id) {
+      await interaction.reply({ content: "У вас уже эта квартира.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const now = Date.now();
+    patchEconomyUser(member.guild.id, member.id, {
+      rubles: u.rubles - cost,
+      housingKind: "owned",
+      ownedApartmentId: defA.id,
+      housingUtilityNextDueMs: now + HOUSING_RENT_PERIOD_MS,
+      housingRentNextDueMs: undefined,
+      housingRentPrestigeGranted: false,
+      prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeDelta),
+    });
+    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
     return true;
   }
 
@@ -1597,6 +2155,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await interaction.reply({ content: "Аренда вела доступна только на **работе курьера**.", flags: MessageFlags.Ephemeral });
       return true;
     }
+    if (hasOwnedCourierCar(u)) {
+      await interaction.reply({ content: "С **личным авто** аренда вела **не нужна**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
     const now = Date.now();
     if (hasActiveBikeRental(u, now)) {
       const fresh = courierWorkRefreshPayload(member, interaction);
@@ -1657,6 +2219,151 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_WORK_BUTTON_TIER3) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (u.jobId) {
+      const st = canWorkNow(u, u.jobId, Date.now());
+      if (!st.ok) {
+        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildWorkMenuRows(member) });
+        return true;
+      }
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildTier3JobsOverviewEmbed(member)],
+      components: buildTier3JobRows(),
+    });
+    return true;
+  }
+
+  if (
+    id === ECON_TIER3_SIDE ||
+    id === ECON_TIER3_BOSS ||
+    id === ECON_TIER3_IP_INVEST_5K ||
+    id === ECON_TIER3_IP_INVEST_25K ||
+    id === ECON_TIER3_IP_RISK_DOWN ||
+    id === ECON_TIER3_IP_RISK_UP
+  ) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    const now = Date.now();
+    if (!u.jobId || !isTier3JobId(u.jobId)) {
+      await interaction.reply({ content: "Доступно только на **работе тир-3**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const jobId = u.jobId;
+    const def3 = getTier3JobDef(jobId as Tier3JobId);
+
+    if (id === ECON_TIER3_SIDE) {
+      if (u.tier3SideGigReadyAt && now < u.tier3SideGigReadyAt) {
+        await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+        return true;
+      }
+      const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
+      const bonus = randInt(280, 520) + rank * 25;
+      patchEconomyUser(member.guild.id, member.id, {
+        rubles: u.rubles + bonus,
+        tier3SideGigReadyAt: now + TIER3_SIDE_GIG_CD_MS,
+      });
+      appendFeedEvent({
+        ts: now,
+        guildId: member.guild.id,
+        type: "job:shift",
+        actorUserId: member.id,
+        text: `${member.toString()}: подработка **${def3.title}** (**+${bonus}** ₽).`,
+      });
+      await ensureEconomyFeedPanel(interaction.client);
+      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+      return true;
+    }
+
+    if (id === ECON_TIER3_BOSS) {
+      if (u.tier3BossReadyAt && now < u.tier3BossReadyAt) {
+        await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+        return true;
+      }
+      const streak = u.jobMskDayStreak ?? 0;
+      const r = Math.random();
+      let delta = 0;
+      let detail: string;
+      if (r < 0.35) {
+        delta = randInt(5, 8);
+        detail =
+          def3.archetype === "illegal"
+            ? `Куратор доволен: **+${delta}** дн. к стрику (быстрее к следующей должности).`
+            : `Начальник доволен: **+${delta}** дн. к стрику (быстрее к следующей должности).`;
+      } else if (r < 0.75) {
+        detail = def3.archetype === "illegal" ? "Куратор нейтрален — **без изменений**." : "Начальник нейтрален — **без изменений**.";
+      } else {
+        delta = -randInt(2, 6);
+        detail =
+          def3.archetype === "illegal"
+            ? `Куратор недоволен: **${delta}** дн. к стрику (откат прогресса).`
+            : `Начальник недоволен: **${delta}** дн. к стрику (откат прогресса).`;
+      }
+      const nextStreak = Math.max(0, streak + delta);
+      patchEconomyUser(member.guild.id, member.id, {
+        jobMskDayStreak: nextStreak,
+        tier3BossReadyAt: now + TIER3_BOSS_CD_MS,
+      });
+      appendFeedEvent({
+        ts: now,
+        guildId: member.guild.id,
+        type: "job:shift",
+        actorUserId: member.id,
+        text: `${member.toString()}: ${def3.archetype === "illegal" ? "куратор" : "начальник"} (**${def3.title}**): стрик **${streak}** → **${nextStreak}** дн.`,
+      });
+      await ensureEconomyFeedPanel(interaction.client);
+      await replyOrUpdate(interaction, {
+        embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [detail] })],
+        components: buildCurrentJobRows(member),
+      });
+      return true;
+    }
+
+    if (
+      jobId !== "soleProp" &&
+      (id === ECON_TIER3_IP_INVEST_5K ||
+        id === ECON_TIER3_IP_INVEST_25K ||
+        id === ECON_TIER3_IP_RISK_DOWN ||
+        id === ECON_TIER3_IP_RISK_UP)
+    ) {
+      await interaction.reply({ content: "Кнопки вложений только на работе **ИП**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    if (id === ECON_TIER3_IP_INVEST_5K || id === ECON_TIER3_IP_INVEST_25K) {
+      const amt = IP_INVEST_AMOUNTS[id];
+      if (!amt) {
+        await interaction.reply({ content: "Неизвестная сумма вложения.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const cap = u.solePropCapitalRub ?? 0;
+      const room = Math.max(0, SOLE_PROP_CAP_MAX - cap);
+      const take = Math.min(amt, room, u.rubles);
+      if (take <= 0) {
+        await interaction.reply({ content: "Недостаточно ₽ или достигнут **максимум** капитала в обороте.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      patchEconomyUser(member.guild.id, member.id, {
+        rubles: u.rubles - take,
+        solePropCapitalRub: cap + take,
+      });
+      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+      return true;
+    }
+
+    if (id === ECON_TIER3_IP_RISK_DOWN || id === ECON_TIER3_IP_RISK_UP) {
+      const curDial = u.solePropRiskDial ?? 0;
+      const nextDial = id === ECON_TIER3_IP_RISK_DOWN ? curDial - 1 : curDial + 1;
+      const clamped = Math.min(SOLE_PROP_RISK_MAX, Math.max(SOLE_PROP_RISK_MIN, nextDial));
+      patchEconomyUser(member.guild.id, member.id, { solePropRiskDial: clamped });
+      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+      return true;
+    }
+
+    await interaction.reply({ content: "Действие не распознано.", flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
   if (id.startsWith(ECON_WORK_BUTTON_JOB_PREFIX)) {
     const raw = id.slice(ECON_WORK_BUTTON_JOB_PREFIX.length);
     if (!isWorkJobId(raw)) {
@@ -1703,7 +2410,12 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
 
-    patchEconomyUser(member.guild.id, member.id, { jobId, jobChosenAt: Date.now() });
+    const curTake = getEconomyUser(member.guild.id, member.id);
+    patchEconomyUser(member.guild.id, member.id, {
+      jobId,
+      jobChosenAt: Date.now(),
+      ...tier3PatchWhenJobChanges(curTake, jobId),
+    });
     await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
     return true;
   }
@@ -1724,7 +2436,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
 
     if (!cur.jobId) {
-      patchEconomyUser(member.guild.id, member.id, { jobId, jobChosenAt: Date.now() });
+      patchEconomyUser(member.guild.id, member.id, {
+        jobId,
+        jobChosenAt: Date.now(),
+        ...tier3PatchWhenJobChanges(cur, jobId),
+      });
       await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
       return true;
     }
@@ -1739,7 +2455,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
 
-    patchEconomyUser(member.guild.id, member.id, { jobId, jobChosenAt: Date.now() });
+    patchEconomyUser(member.guild.id, member.id, {
+      jobId,
+      jobChosenAt: Date.now(),
+      ...tier3PatchWhenJobChanges(cur, jobId),
+    });
     await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
     return true;
   }
@@ -1776,7 +2496,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         return true;
       }
     }
-    patchEconomyUser(member.guild.id, member.id, { jobId: undefined, jobChosenAt: undefined, lastWorkAt: undefined });
+    const uQuit = getEconomyUser(member.guild.id, member.id);
+    patchEconomyUser(member.guild.id, member.id, {
+      jobId: undefined,
+      jobChosenAt: undefined,
+      lastWorkAt: undefined,
+      ...tier3PatchWhenJobChanges(uQuit, undefined),
+    });
     await replyOrUpdate(interaction, { embeds: [buildWorkMenuEmbed(member)], components: buildWorkMenuRows(member) });
     return true;
   }
@@ -1806,9 +2532,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         return true;
       }
       const onlineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
-      if (onlineDue && (u.simBalanceRub ?? 0) < COURIER_SIM_24H_FEE_RUB) {
+      if (onlineDue && (u.simBalanceRub ?? 0) < COURIER_SIM_MONTHLY_FEE_RUB) {
         await interaction.reply({
-          content: `На балансе сим нужно **${COURIER_SIM_24H_FEE_RUB}** ₽ за **тариф 24 ч** онлайн (пополните в магазине).`,
+          content: `На балансе сим нужно **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ за **30 суток** онлайн (пополните в магазине).`,
           flags: MessageFlags.Ephemeral,
         });
         return true;
@@ -1849,36 +2575,80 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     } else if (jobId === "watchman") {
       // только фикс
     } else if (jobId === "dispatcher") {
-      // только фикс
+      if (chance(0.02)) {
+        const bonus = randInt(30, 60);
+        extra += bonus;
+        notes.push(`премия ${formatDelta(bonus)} (редко, слаженная смена)`);
+      }
     } else if (jobId === "assembler") {
-      if (chance(0.025)) {
-        const fine = randInt(35, 95);
+      if (chance(0.03)) {
+        const fine = randInt(40, 120);
         extra -= fine;
         notes.push(`штраф ${formatDelta(-fine)}`);
       }
-      if (expAfter % 6 === 0) {
-        const bonus = 200;
+      if (expAfter % 7 === 0) {
+        const bonus = 260;
         extra += bonus;
-        notes.push(`премия ${formatDelta(bonus)} (6 смен)`);
+        notes.push(`премия ${formatDelta(bonus)} (7 смен)`);
       }
     } else if (jobId === "expediter") {
       base = 0;
       const r = Math.random();
-      if (r < 0.11) {
-        extra = -randInt(22, 58);
+      if (r < 0.08) {
+        extra = -randInt(30, 80);
         notes.push(`Штраф / убыток **${formatDelta(extra)}** — поломка груза, штраф заказчика или срыв срока.`);
       } else if (r < 0.33) {
-        extra = randInt(18, 42);
+        extra = randInt(25, 55);
         notes.push(`Доп. к смене **${formatDelta(extra)}** — ровный маршрут без сюрпризов.`);
       } else if (r < 0.68) {
-        extra = randInt(48, 82);
+        extra = randInt(60, 110);
         notes.push(`Доп. к смене **${formatDelta(extra)}** — плотный график, много точек.`);
       } else if (r < 0.9) {
-        extra = randInt(72, 118);
+        extra = randInt(95, 160);
         notes.push(`Доп. к смене **${formatDelta(extra)}** — удачные рейсы, премия за скорость.`);
       } else {
-        extra = randInt(108, 185);
+        extra = randInt(140, 240);
         notes.push(`Доп. к смене **${formatDelta(extra)}** — «жирный» день: крупные заказы и бонусы.`);
+      }
+    } else if (jobId === "officeAnalyst") {
+      const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
+      base = def.basePayoutRub + rank * 15 + Math.min(50, Math.floor((u.jobMskDayStreak ?? 0) / 5) * 3);
+      if (chance(0.015)) {
+        const fine = randInt(25, 70);
+        extra -= fine;
+        notes.push(`штраф ${formatDelta(-fine)}`);
+      }
+    } else if (jobId === "shadowFixer") {
+      base = 0;
+      const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
+      const streak = u.jobMskDayStreak ?? 0;
+      const posBoost = 1 + rank * 0.025 + Math.min(0.15, streak * 0.002);
+      const r = Math.random();
+      if (r < 0.1) {
+        extra = -randInt(70, 280);
+        notes.push(`срыв **${formatDelta(extra)}** — материалы, облавы, двойной крёст.`);
+      } else if (r < 0.38) {
+        extra = Math.floor(randInt(50, 140) * posBoost);
+        notes.push(`серая сделка **${formatDelta(extra)}**.`);
+      } else if (r < 0.72) {
+        extra = Math.floor(randInt(140, 360) * posBoost);
+        notes.push(`удачный поток **${formatDelta(extra)}**.`);
+      } else if (r < 0.92) {
+        extra = Math.floor(randInt(300, 720) * posBoost);
+        notes.push(`жирный лот **${formatDelta(extra)}**.`);
+      } else {
+        extra = Math.floor(randInt(550, 1200) * posBoost);
+        notes.push(`крупный куш **${formatDelta(extra)}**.`);
+      }
+    } else if (jobId === "soleProp") {
+      const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
+      const cap = u.solePropCapitalRub ?? 0;
+      const prestigeMult = solePropPrestigeIncomeMult(u.prestigePoints ?? 0);
+      base = Math.floor((def.basePayoutRub + Math.floor(Math.sqrt(cap + 1) * 5) + rank * 20) * prestigeMult);
+      if (chance(0.04)) {
+        const loss = randInt(25, 70);
+        extra -= loss;
+        notes.push(`внеплановый расход **${formatDelta(-loss)}**`);
       }
     } else if (jobId === "courier") {
       // фикс в base
@@ -1895,9 +2665,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     if (jobId === "courier") {
       const onlineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
       if (onlineDue) {
-        simBalNext -= COURIER_SIM_24H_FEE_RUB;
-        phoneUntilNext = now + COURIER_ONLINE_24H_MS;
-        notes.push(`тариф 24ч ${formatDelta(-COURIER_SIM_24H_FEE_RUB)} (баланс сим)`);
+        simBalNext -= COURIER_SIM_MONTHLY_FEE_RUB;
+        phoneUntilNext = now + COURIER_SIM_MONTHLY_PERIOD_MS;
+        notes.push(`тариф 30 суток ${formatDelta(-COURIER_SIM_MONTHLY_FEE_RUB)} (баланс сим)`);
       }
     }
 

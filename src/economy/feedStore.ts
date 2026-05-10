@@ -8,6 +8,7 @@ export type FeedEventType =
   | "bet:updated"
   | "bet:resolved"
   | "job:shift"
+  | "job:passive"
   | "admin:budget";
 
 export interface FeedEvent {
