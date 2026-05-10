@@ -3023,29 +3023,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_WORK_BUTTON_STARTERS) {
-    // Пока откат после смены не прошёл — запрещаем смену работы.
-    const u = getEconomyUser(member.guild.id, member.id);
-    if (u.jobId) {
-      const st = canWorkNow(u, u.jobId, Date.now());
-      if (!st.ok) {
-        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildWorkMenuRows(member) });
-        return true;
-      }
-    }
     await replyOrUpdate(interaction, { embeds: [buildStarterJobsEmbed(member)], components: buildStarterJobsRows() });
     return true;
   }
 
   if (id === ECON_WORK_BUTTON_TIER2) {
-    // Пока откат после смены не прошёл — запрещаем смену работы.
-    const u = getEconomyUser(member.guild.id, member.id);
-    if (u.jobId) {
-      const st = canWorkNow(u, u.jobId, Date.now());
-      if (!st.ok) {
-        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildWorkMenuRows(member) });
-        return true;
-      }
-    }
     const embed = buildTier2JobsOverviewEmbed(member);
     const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}dispatcher`).setLabel("Диспетчер").setStyle(ButtonStyle.Secondary),
@@ -3061,14 +3043,6 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_WORK_BUTTON_TIER3) {
-    const u = getEconomyUser(member.guild.id, member.id);
-    if (u.jobId) {
-      const st = canWorkNow(u, u.jobId, Date.now());
-      if (!st.ok) {
-        await replyOrUpdate(interaction, { embeds: [buildCooldownBlockedEmbed(member, st.msLeft)], components: buildWorkMenuRows(member) });
-        return true;
-      }
-    }
     await replyOrUpdate(interaction, {
       embeds: [buildTier3JobsOverviewEmbed(member)],
       components: buildTier3JobRows(),
