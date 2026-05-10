@@ -10,6 +10,36 @@ import {
 import { getEconomyUser, patchEconomyUser, type EconomyUser } from "./userStore.js";
 import { isTier3JobId, tier3PatchWhenJobChanges } from "./tier3Jobs.js";
 
+/** Пропорциональный возврат ₽ за неиспользованное время текущей оплаченной аренды (для покупки квартиры и т.п.). */
+export function housingRentUnusedRefundRub(u: EconomyUser, nowMs: number = Date.now()): number {
+  if (u.housingKind !== "rent" || u.housingRentNextDueMs == null) return 0;
+  const remainingMs = u.housingRentNextDueMs - nowMs;
+  if (remainingMs <= 0) return 0;
+
+  const chainStart = u.housingRentChainStartedAtMs;
+  const totalPaid = u.housingRentTotalPaidRub;
+  if (chainStart != null && totalPaid != null && totalPaid > 0) {
+    const totalMs = u.housingRentNextDueMs - chainStart;
+    if (totalMs > 0) return Math.floor((totalPaid * remainingMs) / totalMs);
+  }
+
+  const paidRub = u.housingRentLastPaidRub;
+  const periodMs = u.housingRentLastPeriodMs;
+  if (paidRub != null && periodMs != null && periodMs > 0) {
+    const segStart = u.housingRentNextDueMs - periodMs;
+    const overlapStart = Math.max(nowMs, segStart);
+    const refundMs = u.housingRentNextDueMs - overlapStart;
+    if (refundMs <= 0) return 0;
+    return Math.floor((paidRub * refundMs) / periodMs);
+  }
+
+  const plan = u.housingRentPlan ?? "month";
+  const pr = housingRentPlanPriceRub(plan);
+  const pm = housingRentPlanPeriodMs(plan);
+  if (pm <= 0) return 0;
+  return Math.floor((pr * remainingMs) / pm);
+}
+
 const TIER2_JOB_IDS = new Set(["dispatcher", "assembler", "expediter"]);
 
 export function jobRequiresHousingForEmployment(jobId: string | undefined): boolean {
@@ -37,7 +67,7 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
   const mark: { housingLastMskYmd: string } = { housingLastMskYmd: todayYmd };
 
   if (u.housingKind === "rent" && u.housingRentNextDueMs != null && nowMs >= u.housingRentNextDueMs) {
-    const plan: HousingRentPlan = u.housingRentPlan ?? "month";
+    const plan: HousingRentPlan = u.housingRentRenewalPlan ?? u.housingRentPlan ?? "month";
     const renewRub = housingRentPlanPriceRub(plan);
     const renewMs = housingRentPlanPeriodMs(plan);
     if (u.rubles >= renewRub) {
@@ -45,6 +75,10 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
         rubles: u.rubles - renewRub,
         housingRentNextDueMs: u.housingRentNextDueMs + renewMs,
         housingRentPlan: plan,
+        housingRentRenewalPlan: undefined,
+        housingRentLastPaidRub: renewRub,
+        housingRentLastPeriodMs: renewMs,
+        housingRentTotalPaidRub: (u.housingRentTotalPaidRub ?? 0) + renewRub,
         ...mark,
       });
       appendFeedEvent({
@@ -62,6 +96,11 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
         housingKind: "none",
         housingRentNextDueMs: undefined,
         housingRentPlan: undefined,
+        housingRentRenewalPlan: undefined,
+        housingRentLastPaidRub: undefined,
+        housingRentLastPeriodMs: undefined,
+        housingRentChainStartedAtMs: undefined,
+        housingRentTotalPaidRub: undefined,
         housingRentPrestigeGranted: false,
         prestigePoints: Math.max(0, p - lost),
         ...quit,

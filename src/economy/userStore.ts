@@ -5,6 +5,8 @@ import {
   CAR_MODELS,
   ECONOMY_LEGACY_BALANCE_MULT,
   PHONE_MODELS,
+  housingRentPlanPeriodMs,
+  housingRentPlanPriceRub,
   type HousingRentPlan,
 } from "./economyCatalog.js";
 
@@ -78,6 +80,16 @@ export interface EconomyUser {
   housingRentNextDueMs?: number;
   /** Пакет продления: посуточно / неделя / месяц (для авто-списания в полночь МСК). */
   housingRentPlan?: HousingRentPlan;
+  /** После окончания текущей оплаченной аренды следующее автосписание этим пакетом (подтверждённый выбор). */
+  housingRentRenewalPlan?: HousingRentPlan;
+  /** Последняя оплата аренды (₽) — для возврата недожитых дней при покупке квартиры. */
+  housingRentLastPaidRub?: number;
+  /** Период последней оплаты (мс). */
+  housingRentLastPeriodMs?: number;
+  /** Начало текущей непрерывной оплаченной аренды (для пропорционального возврата при нескольких продлениях). */
+  housingRentChainStartedAtMs?: number;
+  /** Сумма всех оплат по текущей цепочке аренды (₽). */
+  housingRentTotalPaidRub?: number;
   /** Выдан ли одноразовый престиж за текущую аренду. */
   housingRentPrestigeGranted?: boolean;
   /** Купленная квартира (если housingKind === "owned"). */
@@ -273,6 +285,19 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     ? Math.max(0, Math.floor((u as any).housingRentNextDueMs))
     : undefined;
   const housingRentPlan = normalizeHousingRentPlan((u as any)?.housingRentPlan);
+  const housingRentRenewalPlan = normalizeHousingRentPlan((u as any)?.housingRentRenewalPlan);
+  const housingRentLastPaidRub = Number.isFinite((u as any)?.housingRentLastPaidRub)
+    ? Math.max(0, Math.floor((u as any).housingRentLastPaidRub))
+    : undefined;
+  const housingRentLastPeriodMs = Number.isFinite((u as any)?.housingRentLastPeriodMs)
+    ? Math.max(0, Math.floor((u as any).housingRentLastPeriodMs))
+    : undefined;
+  let housingRentChainStartedAtMs = Number.isFinite((u as any)?.housingRentChainStartedAtMs)
+    ? Math.max(0, Math.floor((u as any).housingRentChainStartedAtMs))
+    : undefined;
+  let housingRentTotalPaidRub = Number.isFinite((u as any)?.housingRentTotalPaidRub)
+    ? Math.max(0, Math.floor((u as any).housingRentTotalPaidRub))
+    : undefined;
   const housingRentPrestigeGranted = (u as any)?.housingRentPrestigeGranted === true ? true : undefined;
   let ownedApartmentId =
     typeof (u as any)?.ownedApartmentId === "string" && VALID_APT_ID.has((u as any).ownedApartmentId)
@@ -316,6 +341,16 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     housingKind = "none";
   }
 
+  if (housingKind === "rent" && housingRentNextDueMs != null && (housingRentChainStartedAtMs == null || housingRentTotalPaidRub == null)) {
+    const p = housingRentPlan ?? "month";
+    const periodMs =
+      housingRentLastPeriodMs != null && housingRentLastPeriodMs > 0 ? housingRentLastPeriodMs : housingRentPlanPeriodMs(p);
+    const paidGuess =
+      housingRentLastPaidRub != null && housingRentLastPaidRub > 0 ? housingRentLastPaidRub : housingRentPlanPriceRub(p);
+    housingRentChainStartedAtMs = housingRentNextDueMs - periodMs;
+    housingRentTotalPaidRub = paidGuess;
+  }
+
   const out: EconomyUser = {
     psTotal: Math.max(0, Math.floor(u?.psTotal ?? 0)),
     rubles: Math.max(0, Math.floor(u?.rubles ?? 0)),
@@ -336,6 +371,11 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     housingKind: housingKind === "none" ? undefined : housingKind,
     housingRentNextDueMs,
     housingRentPlan,
+    housingRentRenewalPlan,
+    housingRentLastPaidRub,
+    housingRentLastPeriodMs,
+    housingRentChainStartedAtMs,
+    housingRentTotalPaidRub,
     housingRentPrestigeGranted,
     ownedApartmentId,
     housingUtilityNextDueMs,

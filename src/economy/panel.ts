@@ -67,7 +67,7 @@ import {
   PHONE_MODELS,
   type HousingRentPlan,
 } from "./economyCatalog.js";
-import { economyUserClearTier2PlusJobPatch } from "./economyHousing.js";
+import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub } from "./economyHousing.js";
 import { tier3RankTitle } from "./tier3RankTitles.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
@@ -76,6 +76,7 @@ import { mskTodayYmd } from "./mskCalendar.js";
 
 export const ECON_BUTTON_MENU = "econ:menu";
 export const ECON_BUTTON_PROFILE = "econ:profile";
+export const ECON_BUTTON_HOUSING = "econ:housing";
 export const ECON_BUTTON_PLAYERS = "econ:players";
 export const ECON_BUTTON_WORK = "econ:work";
 export const ECON_BUTTON_SKILLS = "econ:skills";
@@ -90,6 +91,14 @@ const ECON_SHOP_HOUSE_RENT_1D = "econ:shop:house:rent:1d";
 const ECON_SHOP_HOUSE_RENT_7D = "econ:shop:house:rent:7d";
 const ECON_SHOP_HOUSE_RENT_30D = "econ:shop:house:rent:30d";
 const ECON_SHOP_HOUSE_LEAVE = "econ:shop:house:leave";
+/** Экран «Жильё» в главном меню (не магазин): только арендатор. */
+const ECON_HOUSING_EDIT = "econ:housing:edit";
+const ECON_HOUSING_BACK = "econ:housing:back";
+const ECON_HOUSING_LEAVE = "econ:housing:leave";
+const ECON_HOUSING_EXT_PREFIX = "econ:housing:ext:";
+const ECON_SHOP_HOUSE_RENEW_AFTER_REQ_PREFIX = "econ:shop:house:renewReq:";
+const ECON_SHOP_HOUSE_RENEW_AFTER_CNF_PREFIX = "econ:shop:house:renewCnf:";
+const ECON_SHOP_HOUSE_RENEW_AFTER_CAN = "econ:shop:house:renewCan";
 const ECON_SHOP_APT_BUY_PREFIX = "econ:shop:aptBuy:";
 const ECON_SHOP_APT_SELL = "econ:shop:apt:sell";
 const ECON_SHOP_SIM = "econ:shop:sim";
@@ -159,6 +168,12 @@ function fmt(n: number): string {
   return Math.floor(n).toLocaleString("ru-RU");
 }
 
+function rentPlanLabelRu(p: HousingRentPlan | undefined): string {
+  if (p === "day") return "1 сутки";
+  if (p === "week") return "7 суток";
+  return "30 суток";
+}
+
 function focusLabel(f: FocusPreset): string {
   if (f === "role") return "Роль (СР)";
   if (f === "money") return "Деньги (₽)";
@@ -186,7 +201,23 @@ function buildTerminalPanelEmbed(guildName: string): EmbedBuilder {
     .setFooter({ text: `Сервер: ${guildName}` });
 }
 
-function buildTerminalPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
+function buildTerminalPanelRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const showHousing = (u.housingKind ?? "none") === "rent";
+  if (showHousing) {
+    return [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_BUTTON_PROFILE).setLabel("Профиль").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(ECON_BUTTON_HOUSING).setLabel("Жильё").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Работа").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_BUTTON_SHOP).setLabel("Магазин").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_BUTTON_SKILLS).setLabel("Навыки").setStyle(ButtonStyle.Secondary),
+      ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_BUTTON_PLAYERS).setLabel("Игроки").setStyle(ButtonStyle.Secondary),
+      ),
+    ];
+  }
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_PROFILE).setLabel("Профиль").setStyle(ButtonStyle.Primary),
@@ -1027,34 +1058,231 @@ function buildShopCarRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[
   return rows;
 }
 
+type HousingRentRefreshMode = "shop" | "myRentEdit";
+
+function applyRentPlanPurchase(member: GuildMember, plan: HousingRentPlan): { ok: true } | { ok: false; reply: string } {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const hk = u.housingKind ?? "none";
+  if (hk === "owned") return { ok: false, reply: "У вас **своя квартира** — аренда недоступна." };
+  const price = housingRentPlanPriceRub(plan);
+  const periodMs = housingRentPlanPeriodMs(plan);
+  if (u.rubles < price) return { ok: false, reply: `Нужно **${fmt(price)}** ₽.` };
+  const now = Date.now();
+  const baseEnd = hk === "rent" && u.housingRentNextDueMs && u.housingRentNextDueMs > now ? u.housingRentNextDueMs : now;
+  const nextDue = baseEnd + periodMs;
+  const prestigeGain = u.housingRentPrestigeGranted ? 0 : HOUSING_RENT_PRESTIGE_ONE_TIME;
+  const chainStart = hk === "rent" ? (u.housingRentChainStartedAtMs ?? now) : now;
+  const totalPaid = (hk === "rent" ? (u.housingRentTotalPaidRub ?? 0) : 0) + price;
+  patchEconomyUser(member.guild.id, member.id, {
+    rubles: u.rubles - price,
+    housingKind: "rent",
+    housingRentNextDueMs: nextDue,
+    housingRentPlan: plan,
+    housingRentLastPaidRub: price,
+    housingRentLastPeriodMs: periodMs,
+    housingRentChainStartedAtMs: chainStart,
+    housingRentTotalPaidRub: totalPaid,
+    housingRentPrestigeGranted: true,
+    prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeGain),
+  });
+  return { ok: true };
+}
+
+async function replyAfterRentPlanPurchase(
+  interaction: ButtonInteraction,
+  member: GuildMember,
+  mode: HousingRentRefreshMode,
+): Promise<void> {
+  if (mode === "shop") {
+    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+  } else {
+    await replyOrUpdate(interaction, { embeds: [buildMyRentEditEmbed(member)], components: buildMyRentEditRows(member) });
+  }
+}
+
+/** Главный экран «Жильё» в меню терминала — только для аренды. */
+function buildMyRentHomeEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const now = Date.now();
+  const due = u.housingRentNextDueMs;
+  const dueLine =
+    due != null && now < due
+      ? `Оплачено **до** <t:${Math.floor(due / 1000)}:F> (ваше локальное время в Discord).`
+      : due != null
+        ? `Срок по данным: <t:${Math.floor(due / 1000)}:F> — **продлите** в магазине или здесь (**Изменить срок**).`
+        : "Срок окончания **не задан** — оформите аренду в **Магазин** → жильё.";
+  const curPlan = u.housingRentPlan ?? "month";
+  const curRub = housingRentPlanPriceRub(curPlan);
+  const renewLine =
+    u.housingRentRenewalPlan != null
+      ? `После окончания текущего срока первое автосписание в полночь МСК: **${rentPlanLabelRu(u.housingRentRenewalPlan)}** (**${fmt(housingRentPlanPriceRub(u.housingRentRenewalPlan))}** ₽).`
+      : `Пакет на **следующий** цикл после текущего срока **не выбран** — в полночь спишется пакет **текущего** цикла: **${rentPlanLabelRu(curPlan)}** (**${fmt(curRub)}** ₽).`;
+  const refundLine =
+    due != null && now < due
+      ? `Если купите квартиру в магазине, на счёт вернётся **≈ ${fmt(housingRentUnusedRefundRub(u, now))}** ₽ за неиспользованное время.`
+      : "";
+  const lines = [
+    "**Статус:** снимаете жильё (**аренда**).",
+    "",
+    dueLine,
+    "",
+    `**Полночь МСК по текущему циклу:** при наступлении срока спишется **${rentPlanLabelRu(curPlan)}** (**${fmt(curRub)}** ₽), срок сдвинется на следующий период этого пакета.`,
+    "",
+    "**Следующий цикл (после оплаченного срока):**",
+    renewLine,
+    "",
+    refundLine,
+    "",
+    "Чтобы **добавить оплаченные дни** сейчас или **задать пакет** на первое автосписание после срока — нажмите **Изменить срок**.",
+    "Оформить **новую** аренду с нуля или **купить квартиру** — только **Магазин** → жильё.",
+  ].filter(Boolean);
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Моя аренда")
+    .setDescription(lines.join("\n"))
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildMyRentHomeRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_HOUSING_EDIT).setLabel("Изменить срок").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_HOUSING_LEAVE).setLabel("Съехать с аренды").setStyle(ButtonStyle.Danger),
+    ),
+  ];
+}
+
+function buildMyRentEditEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const now = Date.now();
+  const due = u.housingRentNextDueMs;
+  const prepaid =
+    due != null && now < due
+      ? `Сейчас оплачено **до** <t:${Math.floor(due / 1000)}:F>. Новый пакет **добавляет время от этой даты** (не от сегодня).`
+      : "Срок **истёк или на исходе** — всё равно можно оплатить пакет: отсчёт пойдёт от **сейчас**.";
+  const lines = [
+    "**1. Продлить сейчас** — спишется выбранная сумма, конец оплаченного срока **сдвинется**.",
+    prepaid,
+    "",
+    "**2. Пакет после срока** — что спишется в **первую** полночь МСК **после** окончания текущего оплаченного периода (текущий срок **не** сокращается и **не** продлевается этим действием).",
+    "",
+    "Нужны только **аренда** или **покупка квартиры** — раздел **Магазин** → жильё.",
+  ];
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Жильё · срок и продление")
+    .setDescription(lines.join("\n"))
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildMyRentEditRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_HOUSING_EXT_PREFIX}day`)
+        .setLabel(`+1 сут. (${fmt(HOUSING_RENT_DAY_PKG_RUB)} ₽)`)
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(u.rubles < HOUSING_RENT_DAY_PKG_RUB),
+      new ButtonBuilder()
+        .setCustomId(`${ECON_HOUSING_EXT_PREFIX}week`)
+        .setLabel(`+7 сут. (${fmt(HOUSING_RENT_WEEK_PKG_RUB)} ₽)`)
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(u.rubles < HOUSING_RENT_WEEK_PKG_RUB),
+      new ButtonBuilder()
+        .setCustomId(`${ECON_HOUSING_EXT_PREFIX}month`)
+        .setLabel(`+30 сут. (${fmt(HOUSING_RENT_MONTH_PKG_RUB)} ₽)`)
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(u.rubles < HOUSING_RENT_MONTH_PKG_RUB),
+    ),
+  ];
+  const nowR = Date.now();
+  if (u.housingRentNextDueMs != null && nowR < u.housingRentNextDueMs) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${ECON_SHOP_HOUSE_RENEW_AFTER_REQ_PREFIX}day`)
+          .setLabel("После срока: 1 сут.")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${ECON_SHOP_HOUSE_RENEW_AFTER_REQ_PREFIX}week`)
+          .setLabel("После срока: 7 сут.")
+          .setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(`${ECON_SHOP_HOUSE_RENEW_AFTER_REQ_PREFIX}month`)
+          .setLabel("После срока: 30 сут.")
+          .setStyle(ButtonStyle.Success),
+      ),
+    );
+  }
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_HOUSING_BACK).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return rows;
+}
+
 function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const hk = u.housingKind ?? "none";
-  const rentHint =
-    hk === "rent" && u.housingRentNextDueMs
-      ? `\nОплачено до <t:${Math.floor(u.housingRentNextDueMs / 1000)}:F> · пакет продления: **${u.housingRentPlan === "day" ? "сутки" : u.housingRentPlan === "week" ? "неделя" : "30 суток"}**.`
-      : "";
   const lines: string[] = [
-    `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`,
+    "Баланс: **" + fmt(u.rubles) + "** \u20bd, престиж **" + fmt(u.prestigePoints ?? 0) + "**",
     "",
-    "**Требование для работ тир 2+:** нужна **аренда с запасом срока** или **своя квартира** — сначала жильё, потом устройство.",
+    "**Требование для работ тир 2+:** **аренда** с запасом срока или **своя квартира**.",
     "",
-    "**Аренда** (кнопки ниже):",
-    `• **30 суток** — **${fmt(HOUSING_RENT_MONTH_PKG_RUB)}** ₽ (**выгоднее** посуточного эквивалента).`,
-    `• **7 суток** — **${fmt(HOUSING_RENT_WEEK_PKG_RUB)}** ₽ (промежуточная ставка).`,
-    `• **1 сутки** — **${fmt(HOUSING_RENT_DAY_PKG_RUB)}** ₽ (как **${fmt(HOUSING_RENT_DAILY_MONTH_EQUIV_RUB)}** ₽ за **30** таких оплат).`,
-    `В полночь МСК при наступлении срока списывается **тот же пакет**, что был выбран последним. Одноразово при первом заселении в аренду: **+${HOUSING_RENT_PRESTIGE_ONE_TIME}** престижа (снимается при съезде).${rentHint}`,
-    "",
-    hk === "rent"
-      ? "Вы **снимаете** жильё (можно **продлить** тем же пакетом до истечения срока)."
-      : hk === "owned"
-        ? `Своя квартира: **${getApartmentDef(u.ownedApartmentId)?.label ?? "—"}**. Коммуналка раз в **30 дней** (МСК). Продажа: **${Math.round(APARTMENT_SELL_REFUND_RATE * 100)}%** цены на руки, престиж от квартиры **снимается**.`
-        : "",
-    "",
-    "**Купить квартиру** (если нет своей; на аренде сначала съедьте):",
-    ...APARTMENT_MODELS.map((a) => `• **${a.label}** — **${fmt(a.priceRub)}** ₽ · коммуналка **${fmt(a.monthlyUtilityRub)}** / мес · +**${fmt(a.prestigeDelta)}** пр.`),
-  ].filter(Boolean);
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Жильё").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
+  ];
+  if (hk === "owned") {
+    lines.push(
+      "**Своя квартира**",
+      "- **" + (getApartmentDef(u.ownedApartmentId)?.label ?? "-") + "**",
+      "- Коммуналка раз в **30 дней** (полночь МСК).",
+      "- Продажа: **" + Math.round(APARTMENT_SELL_REFUND_RATE * 100) + "%** цены на руки; престиж от квартиры **снимается**.",
+      "",
+      "**Смена квартиры** - кнопки ниже (платите разницу). **Аренда** в этом разделе недоступна.",
+    );
+  } else if (hk === "rent") {
+    lines.push(
+      "**Аренда уже оформлена.**",
+      "Здесь можно **продлить** оплаченный срок или **купить** квартиру (неиспользованное время с аренды вернётся на счёт **пропорционально**).",
+      "",
+      "Срок окончания, автопродление после него и **съезд** — кнопка **Жильё** в главном меню терминала.",
+    );
+  } else {
+    lines.push(
+      "**Снять жильё в аренду** - выберите пакет ниже:",
+      "- **30 суток** - **" + fmt(HOUSING_RENT_MONTH_PKG_RUB) + "** \u20bd",
+      "- **7 суток** - **" + fmt(HOUSING_RENT_WEEK_PKG_RUB) + "** \u20bd",
+      "- **1 сутки** - **" + fmt(HOUSING_RENT_DAY_PKG_RUB) + "** \u20bd",
+      "",
+      "При **первом** заселении: **+" + String(HOUSING_RENT_PRESTIGE_ONE_TIME) + "** престижа (снимается при съезде).",
+      "",
+      "**Купить квартиру** - кнопки ниже (полная цена, пока нет своей).",
+    );
+  }
+  lines.push("", "**Квартиры:**");
+  for (const a of APARTMENT_MODELS) {
+    lines.push(
+      "- **" +
+        a.label +
+        "** - **" +
+        fmt(a.priceRub) +
+        "** \u20bd, коммуналка **" +
+        fmt(a.monthlyUtilityRub) +
+        "** / мес, +**" +
+        fmt(a.prestigeDelta) +
+        "** пр.",
+    );
+  }
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Магазин \u00b7 Жиль\u0451")
+    .setDescription(lines.join("\n"))
+    .setFooter({ text: "Запросил: " + member.user.tag });
 }
 
 function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
@@ -1062,11 +1290,6 @@ function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder
   const hk = u.housingKind ?? "none";
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   if (hk === "rent") {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE_LEAVE).setLabel("Съехать с аренды").setStyle(ButtonStyle.Danger),
-      ),
-    );
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
@@ -1108,6 +1331,8 @@ function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder
     );
   }
   const curApt = getApartmentDef(u.ownedApartmentId);
+  const nowApt = Date.now();
+  const rentRef = hk === "rent" ? housingRentUnusedRefundRub(u, nowApt) : 0;
   if (hk === "owned" && curApt) {
     const refund = Math.floor(curApt.priceRub * APARTMENT_SELL_REFUND_RATE);
     rows.push(
@@ -1126,7 +1351,7 @@ function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder
         ...slice.map((a) => {
           const cost = hk === "owned" && curApt ? Math.max(0, a.priceRub - curApt.priceRub) : a.priceRub;
           const downgrade = Boolean(hk === "owned" && curApt && a.priceRub < curApt.priceRub);
-          const disabled = downgrade || hk === "rent" || u.rubles < cost || (hk === "owned" && curApt?.id === a.id);
+          const disabled = downgrade || u.rubles + rentRef < cost || (hk === "owned" && curApt?.id === a.id);
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_APT_BUY_PREFIX}${a.id}`)
             .setLabel(`${a.label.slice(0, 12)}…`)
@@ -2030,6 +2255,10 @@ function isEconomyButton(id: string): boolean {
     [
       ECON_BUTTON_MENU,
       ECON_BUTTON_PROFILE,
+      ECON_BUTTON_HOUSING,
+      ECON_HOUSING_EDIT,
+      ECON_HOUSING_BACK,
+      ECON_HOUSING_LEAVE,
       ECON_PROFILE_BUTTON_INFO,
       ECON_PROFILE_BUTTON_FOCUS,
       ECON_PROFILE_BUTTON_LADDER,
@@ -2089,6 +2318,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     cid.startsWith(ECON_WORK_BUTTON_TAKE_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX) ||
     cid.startsWith("econ:shop") ||
+    cid.startsWith("econ:housing:") ||
     cid.startsWith(ECON_SKILL_BUTTON_PREFIX);
   if (!isKnown) return false;
   if (!interaction.inGuild() || !interaction.guildId || !interaction.member) {
@@ -2107,13 +2337,52 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_BUTTON_MENU) {
     await replyOrUpdate(interaction, {
       embeds: [buildTerminalPanelEmbed(member.guild.name)],
-      components: buildTerminalPanelRows(),
+      components: buildTerminalPanelRows(member),
     });
     return true;
   }
 
   if (id === ECON_BUTTON_PROFILE) {
     await replyOrUpdate(interaction, { embeds: [buildProfileHubEmbed(member)], components: buildProfileHubRows("info") });
+    return true;
+  }
+
+  if (id === ECON_BUTTON_HOUSING) {
+    const uh = getEconomyUser(member.guild.id, member.id);
+    if ((uh.housingKind ?? "none") !== "rent") {
+      await interaction.reply({
+        content: "Экран **Жильё** доступен при **аренде**. Оформить можно в **Магазин** → жильё.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [buildMyRentHomeEmbed(member)], components: buildMyRentHomeRows(member) });
+    return true;
+  }
+
+  if (id === ECON_HOUSING_EDIT) {
+    const ue = getEconomyUser(member.guild.id, member.id);
+    if ((ue.housingKind ?? "none") !== "rent") {
+      await interaction.reply({
+        content: "Вы **не** на аренде. Жильё оформляется в **Магазин** → жильё.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [buildMyRentEditEmbed(member)], components: buildMyRentEditRows(member) });
+    return true;
+  }
+
+  if (id === ECON_HOUSING_BACK) {
+    const ub = getEconomyUser(member.guild.id, member.id);
+    if ((ub.housingKind ?? "none") !== "rent") {
+      await replyOrUpdate(interaction, {
+        embeds: [buildTerminalPanelEmbed(member.guild.name)],
+        components: buildTerminalPanelRows(member),
+      });
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [buildMyRentHomeEmbed(member)], components: buildMyRentHomeRows(member) });
     return true;
   }
 
@@ -2259,36 +2528,34 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_SHOP_HOUSE_RENT_1D || id === ECON_SHOP_HOUSE_RENT_7D || id === ECON_SHOP_HOUSE_RENT_30D) {
-    const u = getEconomyUser(member.guild.id, member.id);
-    const hk = u.housingKind ?? "none";
-    if (hk === "owned") {
-      await interaction.reply({ content: "У вас **своя квартира** — аренда недоступна.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
     const plan: HousingRentPlan = id === ECON_SHOP_HOUSE_RENT_1D ? "day" : id === ECON_SHOP_HOUSE_RENT_7D ? "week" : "month";
-    const price = housingRentPlanPriceRub(plan);
-    const periodMs = housingRentPlanPeriodMs(plan);
-    if (u.rubles < price) {
-      await interaction.reply({ content: `Нужно **${fmt(price)}** ₽.`, flags: MessageFlags.Ephemeral });
+    const r = applyRentPlanPurchase(member, plan);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
       return true;
     }
-    const now = Date.now();
-    const baseEnd = hk === "rent" && u.housingRentNextDueMs && u.housingRentNextDueMs > now ? u.housingRentNextDueMs : now;
-    const nextDue = baseEnd + periodMs;
-    const prestigeGain = u.housingRentPrestigeGranted ? 0 : HOUSING_RENT_PRESTIGE_ONE_TIME;
-    patchEconomyUser(member.guild.id, member.id, {
-      rubles: u.rubles - price,
-      housingKind: "rent",
-      housingRentNextDueMs: nextDue,
-      housingRentPlan: plan,
-      housingRentPrestigeGranted: true,
-      prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeGain),
-    });
-    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+    await replyAfterRentPlanPurchase(interaction, member, "shop");
     return true;
   }
 
-  if (id === ECON_SHOP_HOUSE_LEAVE) {
+  if (id.startsWith(ECON_HOUSING_EXT_PREFIX)) {
+    const raw = id.slice(ECON_HOUSING_EXT_PREFIX.length);
+    const plan: HousingRentPlan | undefined =
+      raw === "day" ? "day" : raw === "week" ? "week" : raw === "month" ? "month" : undefined;
+    if (!plan) {
+      await interaction.reply({ content: "Неверный пакет.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const r = applyRentPlanPurchase(member, plan);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyAfterRentPlanPurchase(interaction, member, "myRentEdit");
+    return true;
+  }
+
+  if (id === ECON_SHOP_HOUSE_LEAVE || id === ECON_HOUSING_LEAVE) {
     const u = getEconomyUser(member.guild.id, member.id);
     if ((u.housingKind ?? "none") !== "rent") {
       await interaction.reply({ content: "Вы **не** на аренде.", flags: MessageFlags.Ephemeral });
@@ -2300,11 +2567,116 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       housingKind: "none",
       housingRentNextDueMs: undefined,
       housingRentPlan: undefined,
+      housingRentRenewalPlan: undefined,
+      housingRentLastPaidRub: undefined,
+      housingRentLastPeriodMs: undefined,
+      housingRentChainStartedAtMs: undefined,
+      housingRentTotalPaidRub: undefined,
       housingRentPrestigeGranted: false,
       prestigePoints: Math.max(0, (u.prestigePoints ?? 0) - lost),
       ...quitJob,
     });
-    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+    if (id === ECON_HOUSING_LEAVE) {
+      await replyOrUpdate(interaction, {
+        embeds: [buildTerminalPanelEmbed(member.guild.name)],
+        components: buildTerminalPanelRows(member),
+      });
+    } else {
+      await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+    }
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_HOUSE_RENEW_AFTER_REQ_PREFIX)) {
+    const raw = id.slice(ECON_SHOP_HOUSE_RENEW_AFTER_REQ_PREFIX.length);
+    const planNext: HousingRentPlan | undefined =
+      raw === "day" ? "day" : raw === "week" ? "week" : raw === "month" ? "month" : undefined;
+    if (!planNext) {
+      await interaction.reply({ content: "Неверный пакет.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const uR = getEconomyUser(member.guild.id, member.id);
+    if ((uR.housingKind ?? "none") !== "rent") {
+      await interaction.reply({ content: "План следующего цикла доступен только **на аренде**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const nowR = Date.now();
+    if (!uR.housingRentNextDueMs || nowR >= uR.housingRentNextDueMs) {
+      await interaction.reply({
+        content: "Нет активного оплаченного срока — **продлите** аренду, затем можно выбрать пакет на следующий цикл.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    const priceN = housingRentPlanPriceRub(planNext);
+    const embedR = new EmbedBuilder()
+      .setColor(PANEL_COLOR)
+      .setTitle("Пакет на следующий цикл")
+      .setDescription(
+        [
+          `Сейчас действует оплаченный срок **до** <t:${Math.floor(uR.housingRentNextDueMs / 1000)}:F> — **он не меняется.**`,
+          "",
+          `После его окончания **первое** автосписание в полночь МСК будет по пакету **${rentPlanLabelRu(planNext)}** (**${fmt(priceN)}** ₽).`,
+          "",
+          "Ручные продления до этой даты и пакет **текущего** цикла **не** затрагиваются.",
+        ].join("\n"),
+      )
+      .setFooter({ text: `Запросил: ${member.user.tag}` });
+    await interaction.reply({
+      flags: MessageFlags.Ephemeral,
+      embeds: [embedR],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_HOUSE_RENEW_AFTER_CNF_PREFIX}${planNext}`)
+            .setLabel("Подтвердить")
+            .setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE_RENEW_AFTER_CAN).setLabel("Отмена").setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_HOUSE_RENEW_AFTER_CNF_PREFIX)) {
+    const raw = id.slice(ECON_SHOP_HOUSE_RENEW_AFTER_CNF_PREFIX.length);
+    const planNext: HousingRentPlan | undefined =
+      raw === "day" ? "day" : raw === "week" ? "week" : raw === "month" ? "month" : undefined;
+    if (!planNext) {
+      await interaction.reply({ content: "Неверный пакет.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const uC = getEconomyUser(member.guild.id, member.id);
+    if ((uC.housingKind ?? "none") !== "rent") {
+      await interaction.reply({ content: "Вы **не** на аренде.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const nowC = Date.now();
+    if (!uC.housingRentNextDueMs || nowC >= uC.housingRentNextDueMs) {
+      await interaction.reply({
+        content: "Срок аренды уже истёк или не оплачен — действие недоступно.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    patchEconomyUser(member.guild.id, member.id, { housingRentRenewalPlan: planNext });
+    const priceC = housingRentPlanPriceRub(planNext);
+    const doneEmb = new EmbedBuilder()
+      .setColor(PANEL_COLOR)
+      .setTitle("Сохранено")
+      .setDescription(
+        [
+          `После <t:${Math.floor(uC.housingRentNextDueMs / 1000)}:F> первое автосписание в полночь МСК: **${rentPlanLabelRu(planNext)}** (**${fmt(priceC)}** ₽).`,
+          "",
+          "До этой даты можно **переопределить** пакет в **Жильё** → **Изменить срок** (кнопки «После срока»).",
+        ].join("\n"),
+      );
+    await interaction.update({ embeds: [doneEmb], components: [] });
+    return true;
+  }
+
+  if (id === ECON_SHOP_HOUSE_RENEW_AFTER_CAN) {
+    await interaction.update({ content: "Отменено.", embeds: [], components: [] });
     return true;
   }
 
@@ -2317,10 +2689,6 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     const u = getEconomyUser(member.guild.id, member.id);
     const hk = u.housingKind ?? "none";
-    if (hk === "rent") {
-      await interaction.reply({ content: "Сначала **съедьте с аренды**.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
     const curA = getApartmentDef(u.ownedApartmentId);
     const cost = hk === "owned" && curA ? Math.max(0, defA.priceRub - curA.priceRub) : defA.priceRub;
     const prestigeDelta = defA.prestigeDelta - (curA?.prestigeDelta ?? 0);
@@ -2328,24 +2696,44 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await interaction.reply({ content: "Переезд на более дешёвую квартиру **недоступен**.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (u.rubles < cost) {
-      await interaction.reply({ content: `Нужно ещё **${fmt(cost)}** ₽.`, flags: MessageFlags.Ephemeral });
+    const now = Date.now();
+    const rentRefund = hk === "rent" ? housingRentUnusedRefundRub(u, now) : 0;
+    if (u.rubles + rentRefund < cost) {
+      await interaction.reply({
+        content: `Нужно ещё **${fmt(Math.max(0, cost - rentRefund))}** ₽ (с учётом возврата с аренды **${fmt(rentRefund)}** ₽).`,
+        flags: MessageFlags.Ephemeral,
+      });
       return true;
     }
     if (hk === "owned" && curA?.id === defA.id) {
       await interaction.reply({ content: "У вас уже эта квартира.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    const now = Date.now();
     patchEconomyUser(member.guild.id, member.id, {
-      rubles: u.rubles - cost,
+      rubles: u.rubles + rentRefund - cost,
       housingKind: "owned",
       ownedApartmentId: defA.id,
       housingUtilityNextDueMs: now + HOUSING_CALENDAR_MONTH_MS,
       housingRentNextDueMs: undefined,
+      housingRentPlan: undefined,
+      housingRentRenewalPlan: undefined,
+      housingRentLastPaidRub: undefined,
+      housingRentLastPeriodMs: undefined,
+      housingRentChainStartedAtMs: undefined,
+      housingRentTotalPaidRub: undefined,
       housingRentPrestigeGranted: false,
       prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeDelta),
     });
+    if (rentRefund > 0) {
+      appendFeedEvent({
+        ts: now,
+        guildId: member.guild.id,
+        type: "job:passive",
+        actorUserId: member.id,
+        text: `${member.toString()} купил квартиру **${defA.label}** с аренды: возврат **+${fmt(rentRefund)}** ₽ за неиспользованное время.`,
+      });
+      await ensureEconomyFeedPanel(interaction.client);
+    }
     await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
     return true;
   }
