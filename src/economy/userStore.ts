@@ -353,7 +353,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
 
   const out: EconomyUser = {
     psTotal: Math.max(0, Math.floor(u?.psTotal ?? 0)),
-    rubles: Math.max(0, Math.floor(u?.rubles ?? 0)),
+    rubles: Math.max(0, Math.round((Number.isFinite(Number(u?.rubles)) ? Number(u!.rubles) : 0) * 100) / 100),
     focus: (u?.focus ?? "balance") as FocusPreset,
     voiceDay: typeof u?.voiceDay === "string" ? u.voiceDay : undefined,
     voiceMinutesToday: Number.isFinite(u?.voiceMinutesToday) ? Math.max(0, Math.floor(u!.voiceMinutesToday!)) : undefined,

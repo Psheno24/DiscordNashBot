@@ -178,7 +178,10 @@ const COURIER_BIKE_7D_RUB = 520;
 
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return "—";
-  return Math.floor(n).toLocaleString("ru-RU");
+  const rounded = Math.round(n * 100) / 100;
+  const isWhole = Math.abs(rounded - Math.round(rounded)) < 1e-9;
+  const x = isWhole ? Math.round(rounded) : rounded;
+  return x.toLocaleString("ru-RU", isWhole ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
 function rentPlanLabelRu(p: HousingRentPlan | undefined): string {
