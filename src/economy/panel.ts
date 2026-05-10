@@ -31,7 +31,7 @@ import {
   type SkillId,
 } from "./userStore.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
-import { listBetEvents, type BetEvent } from "../bets/store.js";
+import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
 import { drawSimNumberFromPool, releaseSimNumberToPool } from "./simPoolStore.js";
 
 export const ECON_BUTTON_MENU = "econ:menu";
@@ -54,6 +54,9 @@ const ECON_PROFILE_BUTTON_INFO = "econ:profile:info";
 const ECON_PROFILE_BUTTON_FOCUS = "econ:profile:focus";
 const ECON_PROFILE_BUTTON_LADDER = "econ:profile:ladder";
 const ECON_PROFILE_BUTTON_BETS_HISTORY = "econ:profile:betsHistory";
+const ECON_PROFILE_BETS_PAGE_PREFIX = "econ:profile:betsPage:";
+/** Записей на страницу (лимит описания эмбеда ~4096 символов). */
+const PROFILE_BETS_PAGE_SIZE = 7;
 
 const ECON_BUTTON_FOCUS_ROLE = "econ:focus:role";
 const ECON_BUTTON_FOCUS_BALANCE = "econ:focus:balance";
@@ -214,28 +217,35 @@ function buildProfileHubRows(active: "info" | "focus" | "ladder" | "bets"): Acti
   ];
 }
 
-/** Чистый результат по ₽ относительно баланса до ставки: выигрыш = выплата − тело, проиграли = −тело, отмена = 0. */
-function betNetRublesForUser(ev: BetEvent, userId: string): number | "pending" | "cancelled" {
-  const b = ev.bets[userId];
-  if (!b) return "pending";
+/** Чистый результат одной принятой ставки (кэф зафиксирован при приёме). */
+function betStakeNetRubles(ev: BetEvent, bet: PlacedBet): number | "pending" | "cancelled" {
   if (ev.status === "cancelled") return "cancelled";
   if (ev.status !== "resolved" || !ev.winningOptionId) return "pending";
-  const winOpt = ev.options.find((o) => o.id === ev.winningOptionId);
-  if (!winOpt) return "pending";
-  if (b.optionId === ev.winningOptionId) {
-    const payout = Math.floor(b.amount * winOpt.odds);
-    return payout - b.amount;
+  if (bet.optionId === ev.winningOptionId) {
+    const payout = Math.floor(bet.amount * bet.oddsAtPlacement);
+    return payout - bet.amount;
   }
-  return -b.amount;
+  return -bet.amount;
 }
 
-function buildProfileBetHistoryEmbed(member: GuildMember): EmbedBuilder {
+function listMemberBetStakes(member: GuildMember): { ev: BetEvent; bet: PlacedBet }[] {
   const guildId = member.guild.id;
   const userId = member.id;
-  const all = listBetEvents(guildId).sort((a, b) => b.createdAt - a.createdAt);
-  const mine = all.filter((e) => Boolean(e.bets[userId])).slice(0, 15);
+  const out: { ev: BetEvent; bet: PlacedBet }[] = [];
+  for (const ev of listBetEvents(guildId)) {
+    const stakes = ev.bets[userId];
+    if (!stakes?.length) continue;
+    for (const bet of stakes) out.push({ ev, bet });
+  }
+  out.sort((a, b) => b.bet.ts - a.bet.ts);
+  return out;
+}
 
-  if (mine.length === 0) {
+function buildProfileBetHistoryEmbed(member: GuildMember, page: number): EmbedBuilder {
+  const mine = listMemberBetStakes(member);
+  const total = mine.length;
+
+  if (total === 0) {
     return new EmbedBuilder()
       .setColor(PROFILE_COLOR)
       .setTitle("История ставок")
@@ -243,12 +253,16 @@ function buildProfileBetHistoryEmbed(member: GuildMember): EmbedBuilder {
       .setFooter({ text: `Запросил: ${member.user.tag}` });
   }
 
+  const totalPages = Math.max(1, Math.ceil(total / PROFILE_BETS_PAGE_SIZE));
+  const p = Math.max(0, Math.min(Math.floor(page), totalPages - 1));
+  const slice = mine.slice(p * PROFILE_BETS_PAGE_SIZE, p * PROFILE_BETS_PAGE_SIZE + PROFILE_BETS_PAGE_SIZE);
+
   const blocks: string[] = [];
-  for (const e of mine) {
-    const b = e.bets[userId]!;
+  for (const { ev: e, bet: b } of slice) {
     const opt = e.options.find((o) => o.id === b.optionId);
     const label = opt?.label ?? b.optionId;
-    const net = betNetRublesForUser(e, userId);
+    const oddStr = b.oddsAtPlacement.toLocaleString("ru-RU");
+    const net = betStakeNetRubles(e, b);
     let resultLine: string;
     if (net === "pending") {
       resultLine = "_Итог: ждёт решения админа._";
@@ -262,15 +276,50 @@ function buildProfileBetHistoryEmbed(member: GuildMember): EmbedBuilder {
       resultLine = "**0 ₽** (без изменения баланса по итогу).";
     }
     blocks.push(
-      [`**${e.title}**`, `Ставка: **${fmt(b.amount)} ₽** на «${label}»`, resultLine].join("\n"),
+      [
+        `**${e.title}**`,
+        `Ставка: **${fmt(b.amount)} ₽** на «${label}» · кэф при приёме **x${oddStr}**`,
+        resultLine,
+      ].join("\n"),
     );
   }
+
+  const intro =
+    totalPages > 1
+      ? `_Всего ставок: **${total}** · страница **${p + 1}** из **${totalPages}**_\n\n`
+      : `_Всего ставок: **${total}**_\n\n`;
 
   return new EmbedBuilder()
     .setColor(PROFILE_COLOR)
     .setTitle("История ставок")
-    .setDescription(blocks.join("\n\n"))
+    .setDescription(intro + blocks.join("\n\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildProfileBetsTabComponents(member: GuildMember, page: number): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  const mine = listMemberBetStakes(member);
+  const totalPages = Math.max(1, Math.ceil(mine.length / PROFILE_BETS_PAGE_SIZE));
+  const p = Math.max(0, Math.min(Math.floor(page), totalPages - 1));
+
+  if (totalPages > 1) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(`${ECON_PROFILE_BETS_PAGE_PREFIX}${p - 1}`)
+          .setLabel("← Ранее")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(p === 0),
+        new ButtonBuilder()
+          .setCustomId(`${ECON_PROFILE_BETS_PAGE_PREFIX}${p + 1}`)
+          .setLabel("Далее →")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(p >= totalPages - 1),
+      ),
+    );
+  }
+  rows.push(...buildProfileHubRows("bets"));
+  return rows;
 }
 
 function buildFocusRows(cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
@@ -1357,6 +1406,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   const cid = interaction.customId;
   const isKnown =
     isEconomyButton(cid) ||
+    cid.startsWith(ECON_PROFILE_BETS_PAGE_PREFIX) ||
     cid.startsWith(ECON_FEED_BUTTON_PAGE_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_JOB_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_TAKE_PREFIX) ||
@@ -1407,7 +1457,21 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_PROFILE_BUTTON_BETS_HISTORY) {
-    await replyOrUpdate(interaction, { embeds: [buildProfileBetHistoryEmbed(member)], components: buildProfileHubRows("bets") });
+    await replyOrUpdate(interaction, {
+      embeds: [buildProfileBetHistoryEmbed(member, 0)],
+      components: buildProfileBetsTabComponents(member, 0),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_PROFILE_BETS_PAGE_PREFIX)) {
+    const raw = id.slice(ECON_PROFILE_BETS_PAGE_PREFIX.length);
+    const parsed = Number.parseInt(raw, 10);
+    const page = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+    await replyOrUpdate(interaction, {
+      embeds: [buildProfileBetHistoryEmbed(member, page)],
+      components: buildProfileBetsTabComponents(member, page),
+    });
     return true;
   }
 

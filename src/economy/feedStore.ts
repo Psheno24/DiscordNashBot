@@ -5,6 +5,7 @@ export type FeedEventType =
   | "voice:earn"
   | "bet:created"
   | "bet:placed"
+  | "bet:updated"
   | "bet:resolved"
   | "job:shift"
   | "admin:budget";

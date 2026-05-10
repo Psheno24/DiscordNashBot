@@ -14,6 +14,8 @@ export interface PlacedBet {
   optionId: string;
   amount: number;
   ts: number;
+  /** Коэффициент на момент приёма ставки (не меняется при редактировании линии). */
+  oddsAtPlacement: number;
 }
 
 export interface BetEvent {
@@ -31,7 +33,8 @@ export interface BetEvent {
   messageId?: string;
   /** После решения события — удалить сообщение в ленте после этого времени (unix ms). */
   resolvedDeleteFeedMessageAtMs?: number;
-  bets: Record<string, PlacedBet>;
+  /** userId → список ставок (можно несколько на событие). */
+  bets: Record<string, PlacedBet[]>;
 }
 
 interface StoreShape {
@@ -58,14 +61,35 @@ function writeStore(s: StoreShape) {
   writeFileSync(storePath(), JSON.stringify(s, null, 2), "utf-8");
 }
 
+/** Миграция: один объект → массив; дополняем oddsAtPlacement из текущих опций. */
+export function normalizeBetEvent(ev: BetEvent): BetEvent {
+  const bets: Record<string, PlacedBet[]> = {};
+  const raw = ev.bets as unknown as Record<string, PlacedBet | PlacedBet[] | undefined>;
+  for (const uid of Object.keys(raw ?? {})) {
+    const v = raw[uid];
+    const arr = Array.isArray(v) ? v : v ? [v] : [];
+    bets[uid] = arr.map((b) => ({
+      optionId: b.optionId,
+      amount: Math.max(0, Math.floor(b.amount)),
+      ts: b.ts,
+      oddsAtPlacement:
+        typeof (b as PlacedBet).oddsAtPlacement === "number" && Number.isFinite((b as PlacedBet).oddsAtPlacement)
+          ? (b as PlacedBet).oddsAtPlacement
+          : ev.options.find((o) => o.id === b.optionId)?.odds ?? 1,
+    }));
+  }
+  return { ...ev, bets };
+}
+
 export function getBetEvent(guildId: string, eventId: string): BetEvent | undefined {
   const s = readStore();
-  return s.guilds[guildId]?.[eventId];
+  const ev = s.guilds[guildId]?.[eventId];
+  return ev ? normalizeBetEvent(ev as BetEvent) : undefined;
 }
 
 export function listBetEvents(guildId: string): BetEvent[] {
   const s = readStore();
-  return Object.values(s.guilds[guildId] ?? {});
+  return Object.values(s.guilds[guildId] ?? {}).map((e) => normalizeBetEvent(e as BetEvent));
 }
 
 export function upsertBetEvent(ev: BetEvent): BetEvent {
@@ -75,4 +99,3 @@ export function upsertBetEvent(ev: BetEvent): BetEvent {
   writeStore(s);
   return ev;
 }
-
