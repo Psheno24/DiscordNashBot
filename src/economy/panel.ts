@@ -52,6 +52,7 @@ import {
   getApartmentDef,
   getCarDef,
   getPhoneDef,
+  APARTMENT_SELL_REFUND_RATE,
   HOUSING_RENT_MONTHLY_RUB,
   HOUSING_RENT_PERIOD_MS,
   HOUSING_RENT_PRESTIGE_ONE_TIME,
@@ -77,6 +78,7 @@ const ECON_SHOP_HOUSE = "econ:shop:house";
 const ECON_SHOP_HOUSE_RENT = "econ:shop:house:rent";
 const ECON_SHOP_HOUSE_LEAVE = "econ:shop:house:leave";
 const ECON_SHOP_APT_BUY_PREFIX = "econ:shop:aptBuy:";
+const ECON_SHOP_APT_SELL = "econ:shop:apt:sell";
 const ECON_SHOP_SIM = "econ:shop:sim";
 const ECON_SHOP_SIM_NEW = "econ:shop:sim:new";
 const ECON_SHOP_SIM_TOPUP_OPEN = "econ:shop:sim:topupOpen";
@@ -591,7 +593,7 @@ const JOBS_STARTER: JobDef[] = [
     id: "courier",
     title: "Курьер",
     baseCooldownMs: 3 * 60 * 60 * 1000,
-    basePayoutRub: 175,
+    basePayoutRub: 1_180,
     description:
       [
         "**КД смены:** 3 ч без вела; с **арендой электровела** — 2 ч; с **авто** — по классу авто (**от 2 ч до 1 ч**).",
@@ -612,10 +614,10 @@ const JOBS_STARTER: JobDef[] = [
     id: "watchman",
     title: "Ночной сторож",
     baseCooldownMs: 24 * 60 * 60 * 1000,
-    basePayoutRub: 96,
+    basePayoutRub: 1_380,
     description:
       [
-        "**Длинный КД** (24 ч): редкие смены, скромный стабильный фикс — не доминирует при «ленивом» графике.",
+        "**Длинный КД** (24 ч): **высокий фикс** за смену — ориентир «~1 нажатие в день» ≈ **~40k/мес** без идеального КД.",
       ].join("\n"),
   },
 ];
@@ -647,7 +649,7 @@ const JOBS_TIER2: JobDef[] = [
     id: "dispatcher",
     title: "Диспетчер",
     baseCooldownMs: 14 * 60 * 60 * 1000,
-    basePayoutRub: 195,
+    basePayoutRub: 2_850,
     description: [
       "**Длинный КД** (14 ч): стабильный фикс, мало кликов.",
       "Иногда (**2%**) — мелкая премия за слаженную смену.",
@@ -658,7 +660,7 @@ const JOBS_TIER2: JobDef[] = [
     id: "assembler",
     title: "Сборщик",
     baseCooldownMs: 8 * 60 * 60 * 1000,
-    basePayoutRub: 320,
+    basePayoutRub: 1_680,
     description: ["**Средний КД** (8 ч): высокий оклад, премия каждые **7** смен, редкие штрафы."].join("\n"),
     reqSkills: { discipline: 28, logistics: 20 },
   },
@@ -770,16 +772,16 @@ function jobUsesVariablePayout(jobId: JobId): boolean {
 
 function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
   if (jobId === "waiter") {
-    return "Оплата за смену: **без фикса** — разброс **примерно −95…+380 ₽** (типичный зал **+55…+175 ₽**; редко — крупный куш или тяжёлый минус).";
+    return "Оплата за смену: **без фикса** — разброс **примерно +825…+1580 ₽** к базовому коридору (типичный зал **~+1.0…+1.3k ₽**; редко — крупный куш или тяжёлый минус).";
   }
   if (jobId === "expediter") {
-    return "Оплата за смену: **без фикса** — разброс **примерно −80…+240 ₽** (частый коридор **+60…+110 ₽**).";
+    return "Оплата за смену: **без фикса** — сдвиг к **~+1.3…+2.5k ₽** за смену при активной игре (возможны штрафы и «жирные» дни).";
   }
   if (jobId === "shadowFixer") {
     return "Оплата за смену: **без фикса** — сильный разброс (до **−280…+1200 ₽**; ранг и стрик усиливают **плюсовые** ветки).";
   }
   if (jobId === "soleProp") {
-    return "Оплата за смену: **фикс + оборот** — база **160** ₽ + доля от вложенного капитала; ранг по стажу добавляет стабильный бонус; **престиж** слегка множит итог.";
+    return "Оплата за смену: **фикс + оборот** — база **420** ₽ + доля от вложенного капитала; ранг по стажу добавляет стабильный бонус; **престиж** множит итог.";
   }
   return `Оплата за смену: **${baseRub} ₽**`;
 }
@@ -938,7 +940,7 @@ function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
     hk === "rent"
       ? "Вы **снимаете** жильё. Раз в **30 дней** (полночь МСК) списывается **70 000** ₽. Одноразово за эту аренду: **+1000** престижа при заселении (снимается при съезде при отмене бонуса)."
       : hk === "owned"
-        ? `Своя квартира: **${getApartmentDef(u.ownedApartmentId)?.label ?? "—"}**. Коммуналка раз в **30 дней** (МСК).`
+        ? `Своя квартира: **${getApartmentDef(u.ownedApartmentId)?.label ?? "—"}**. Коммуналка раз в **30 дней** (МСК). Продажа: **${Math.round(APARTMENT_SELL_REFUND_RATE * 100)}%** цены на руки, престиж от квартиры **снимается**.`
         : `**Аренда:** первый взнос **${fmt(HOUSING_RENT_MONTHLY_RUB)}** ₽, далее **${fmt(HOUSING_RENT_MONTHLY_RUB)}** ₽ / 30 дн. (+**${HOUSING_RENT_PRESTIGE_ONE_TIME}** престижа один раз).`,
     "",
     "**Купить квартиру** (если нет своей):",
@@ -969,6 +971,17 @@ function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder
     );
   }
   const curApt = getApartmentDef(u.ownedApartmentId);
+  if (hk === "owned" && curApt) {
+    const refund = Math.floor(curApt.priceRub * APARTMENT_SELL_REFUND_RATE);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ECON_SHOP_APT_SELL)
+          .setLabel(`Продать квартиру (+${fmt(refund)} ₽)`)
+          .setStyle(ButtonStyle.Danger),
+      ),
+    );
+  }
   for (let i = 0; i < APARTMENT_MODELS.length; i += 3) {
     const slice = APARTMENT_MODELS.slice(i, i + 3);
     rows.push(
@@ -1791,6 +1804,7 @@ function isEconomyButton(id: string): boolean {
       ECON_SHOP_SIM,
       ECON_SHOP_SIM_NEW,
       ECON_SHOP_SIM_TOPUP_OPEN,
+      ECON_SHOP_APT_SELL,
       ECON_COURIER_BIKE_1D,
       ECON_COURIER_BIKE_3D,
       ECON_COURIER_BIKE_7D,
@@ -2090,6 +2104,38 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_SHOP_APT_SELL) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    if ((u.housingKind ?? "none") !== "owned") {
+      await interaction.reply({ content: "Продать можно только **свою** квартиру.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const curA = getApartmentDef(u.ownedApartmentId);
+    if (!curA) {
+      await interaction.reply({ content: "Квартира не найдена в данных.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const refund = Math.floor(curA.priceRub * APARTMENT_SELL_REFUND_RATE);
+    const nextPrestige = Math.max(0, (u.prestigePoints ?? 0) - curA.prestigeDelta);
+    patchEconomyUser(member.guild.id, member.id, {
+      rubles: u.rubles + refund,
+      housingKind: "none",
+      ownedApartmentId: undefined,
+      housingUtilityNextDueMs: undefined,
+      prestigePoints: nextPrestige,
+    });
+    appendFeedEvent({
+      ts: Date.now(),
+      guildId: member.guild.id,
+      type: "job:passive",
+      actorUserId: member.id,
+      text: `${member.toString()} продал квартиру **${curA.label}**: **+${fmt(refund)}** ₽ (**${Math.round(APARTMENT_SELL_REFUND_RATE * 100)}%**), престиж **−${fmt(curA.prestigeDelta)}**.`,
+    });
+    await ensureEconomyFeedPanel(interaction.client);
+    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+    return true;
+  }
+
   if (id === ECON_SHOP_SIM) {
     const su = getEconomyUser(member.guild.id, member.id);
     if (!su.hasPhone) {
@@ -2258,7 +2304,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         return true;
       }
       const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
-      const bonus = randInt(280, 520) + rank * 25;
+      const bonus = randInt(480, 920) + rank * 40;
       patchEconomyUser(member.guild.id, member.id, {
         rubles: u.rubles + bonus,
         tier3SideGigReadyAt: now + TIER3_SIDE_GIG_CD_MS,
@@ -2572,11 +2618,12 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         extra = randInt(235, 380);
         notes.push(`Доп. **${formatDelta(extra)}** — «золотой» вечер: корпоратив, крупные чаевые, бонус заведения.`);
       }
+      extra += 1_200;
     } else if (jobId === "watchman") {
       // только фикс
     } else if (jobId === "dispatcher") {
       if (chance(0.02)) {
-        const bonus = randInt(30, 60);
+        const bonus = randInt(100, 190);
         extra += bonus;
         notes.push(`премия ${formatDelta(bonus)} (редко, слаженная смена)`);
       }
@@ -2587,7 +2634,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         notes.push(`штраф ${formatDelta(-fine)}`);
       }
       if (expAfter % 7 === 0) {
-        const bonus = 260;
+        const bonus = 520;
         extra += bonus;
         notes.push(`премия ${formatDelta(bonus)} (7 смен)`);
       }
@@ -2610,9 +2657,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         extra = randInt(140, 240);
         notes.push(`Доп. к смене **${formatDelta(extra)}** — «жирный» день: крупные заказы и бонусы.`);
       }
+      extra += 1_250;
     } else if (jobId === "officeAnalyst") {
       const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
-      base = def.basePayoutRub + rank * 15 + Math.min(50, Math.floor((u.jobMskDayStreak ?? 0) / 5) * 3);
+      base = def.basePayoutRub + rank * 40 + Math.min(120, Math.floor((u.jobMskDayStreak ?? 0) / 5) * 8);
       if (chance(0.015)) {
         const fine = randInt(25, 70);
         extra -= fine;
@@ -2628,23 +2676,23 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         extra = -randInt(70, 280);
         notes.push(`срыв **${formatDelta(extra)}** — материалы, облавы, двойной крёст.`);
       } else if (r < 0.38) {
-        extra = Math.floor(randInt(50, 140) * posBoost);
+        extra = Math.floor(randInt(55, 155) * posBoost * 1.12);
         notes.push(`серая сделка **${formatDelta(extra)}**.`);
       } else if (r < 0.72) {
-        extra = Math.floor(randInt(140, 360) * posBoost);
+        extra = Math.floor(randInt(155, 400) * posBoost * 1.12);
         notes.push(`удачный поток **${formatDelta(extra)}**.`);
       } else if (r < 0.92) {
-        extra = Math.floor(randInt(300, 720) * posBoost);
+        extra = Math.floor(randInt(320, 780) * posBoost * 1.12);
         notes.push(`жирный лот **${formatDelta(extra)}**.`);
       } else {
-        extra = Math.floor(randInt(550, 1200) * posBoost);
+        extra = Math.floor(randInt(580, 1280) * posBoost * 1.12);
         notes.push(`крупный куш **${formatDelta(extra)}**.`);
       }
     } else if (jobId === "soleProp") {
       const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
       const cap = u.solePropCapitalRub ?? 0;
       const prestigeMult = solePropPrestigeIncomeMult(u.prestigePoints ?? 0);
-      base = Math.floor((def.basePayoutRub + Math.floor(Math.sqrt(cap + 1) * 5) + rank * 20) * prestigeMult);
+      base = Math.floor((def.basePayoutRub + Math.floor(Math.sqrt(cap + 1) * 6) + rank * 28) * prestigeMult);
       if (chance(0.04)) {
         const loss = randInt(25, 70);
         extra -= loss;

@@ -60,6 +60,8 @@ export const HOUSING_RENT_MONTHLY_RUB = 70_000;
 export const HOUSING_RENT_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
 /** Престиж за то, что живёшь в аренде (один раз при заселении; снимается при съезде). */
 export const HOUSING_RENT_PRESTIGE_ONE_TIME = 1_000;
+/** Доля цены квартиры, возвращаемая при продаже (остальное — «потери на сделке»). */
+export const APARTMENT_SELL_REFUND_RATE = 0.45;
 
 export type ApartmentId = "apt_2m" | "apt_5m" | "apt_12m" | "apt_25m" | "apt_45m" | "apt_70m" | "apt_100m";
 

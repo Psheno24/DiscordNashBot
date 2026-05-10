@@ -34,14 +34,14 @@ export const JOBS_TIER3: Tier3JobDef[] = [
     id: "officeAnalyst",
     title: "Офис · аналитик",
     baseCooldownMs: 12 * 60 * 60 * 1000,
-    basePayoutRub: 260,
+    basePayoutRub: 2_200,
     description: [
       "**Легальный** тир-3: оклад за смену + **пассив в полночь МСК**, стаж **30 дней** → должность (**ранг**) и сильнее пассив.",
       "**Подработка** (крупная премия, реже) и **начальник** (удача по КД) — в «Моя работа».",
     ].join("\n"),
     reqSkills: { communication: 30, logistics: 28, discipline: 35 },
     archetype: "legal",
-    passiveBaseRub: 55,
+    passiveBaseRub: 3_200,
   },
   {
     id: "shadowFixer",
@@ -60,14 +60,14 @@ export const JOBS_TIER3: Tier3JobDef[] = [
     id: "soleProp",
     title: "ИП · услуги",
     baseCooldownMs: 8 * 60 * 60 * 1000,
-    basePayoutRub: 160,
+    basePayoutRub: 420,
     description: [
       "**ИП** тир-3: **вложения** в оборот (до **500 000 000** ₽), **престиж** и **риск** влияют на **ночной пассив**; при **риске ≥ 1** к ночи добавляется лёгкий разброс.",
-      "Смена: фикс + доля от оборота + ранг; при увольнении **капитал возвращается**.",
+      "Смена: фикс + доля от оборота + ранг + **престиж**; при увольнении **капитал возвращается**.",
     ].join("\n"),
     reqSkills: { communication: 55, logistics: 52, discipline: 60 },
     archetype: "ip",
-    passiveBaseRub: 35,
+    passiveBaseRub: 95,
   },
 ];
 
@@ -123,7 +123,7 @@ export function computeTier3PassiveRub(input: {
   const cap = Math.max(0, Math.min(SOLE_PROP_CAP_MAX, input.solePropCapitalRub));
   const dial = Math.min(SOLE_PROP_RISK_MAX, Math.max(SOLE_PROP_RISK_MIN, input.solePropRiskDial));
   const prestigeMult = solePropPrestigeIncomeMult(input.prestigePoints ?? 0);
-  const base = input.def.passiveBaseRub + cap * 0.004;
+  const base = input.def.passiveBaseRub + cap * 0.0055;
   let riskJitter = 1 + dial * 0.06;
   if (dial >= 1) {
     riskJitter += (randInt(-10, 10) / 100) * dial;
