@@ -7,15 +7,16 @@ import {
   SlashCommandBuilder,
 } from "discord.js";
 import { discordToken } from "./config.js";
-import { randomJoinCopy } from "./copy/ussrMemberActivity.js";
-import { embedInfo } from "./theme.js";
+import { randomJoinCopy, randomLeaveCopy } from "./copy/ussrMemberActivity.js";
+import { embedInfo, embedWarn } from "./theme.js";
 
 /** Имя слэш-команды (латиница, требование Discord). */
 export const welcomePreviewCommandName = "welcome-preview";
+export const leavePreviewCommandName = "leave-preview";
 
-const data = new SlashCommandBuilder()
+const welcomeCommand = new SlashCommandBuilder()
   .setName(welcomePreviewCommandName)
-  .setDescription("Случайное приветственное сообщение учёта (как при вступлении на сервер)")
+  .setDescription("Случайное приветствие учёта (как при вступлении на сервер)")
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addUserOption((opt) =>
     opt
@@ -24,18 +25,29 @@ const data = new SlashCommandBuilder()
       .setRequired(false),
   );
 
-export async function registerWelcomePreviewCommands(client: Client) {
+const leaveCommand = new SlashCommandBuilder()
+  .setName(leavePreviewCommandName)
+  .setDescription("Случайное сообщение о выбытии (как при уходе с сервера)")
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .addUserOption((opt) =>
+    opt
+      .setName("member")
+      .setDescription("Чей ник подставить в текст (по умолчанию — вы)")
+      .setRequired(false),
+  );
+
+export async function registerMemberActivityPreviewCommands(client: Client) {
   const appId = client.user?.id;
   if (!appId) return;
 
   const rest = new REST({ version: "10" }).setToken(discordToken());
-  const body = [data.toJSON()];
+  const body = [welcomeCommand.toJSON(), leaveCommand.toJSON()];
 
   for (const guild of client.guilds.cache.values()) {
     try {
       await rest.put(Routes.applicationGuildCommands(appId, guild.id), { body });
     } catch (e) {
-      console.warn("ИИ Управление: не удалось зарегистрировать welcome-preview на гильдии", guild.id, e);
+      console.warn("ИИ Управление: не удалось зарегистрировать превью учёта на гильдии", guild.id, e);
     }
   }
 }
@@ -53,6 +65,23 @@ export async function handleWelcomePreviewCommand(interaction: ChatInputCommandI
   await interaction.reply({
     content: target.id === interaction.user.id ? `${interaction.user}` : `${target}`,
     embeds: [embedInfo(title, description)],
+    allowedMentions: { users: [target.id] },
+  });
+}
+
+export async function handleLeavePreviewCommand(interaction: ChatInputCommandInteraction) {
+  const guild = interaction.guild;
+  if (!guild) {
+    await interaction.reply({ content: "Команда только на сервере.", ephemeral: true });
+    return;
+  }
+
+  const target = interaction.options.getUser("member") ?? interaction.user;
+  const { title, description } = randomLeaveCopy(target.tag, guild.name);
+
+  await interaction.reply({
+    content: target.id === interaction.user.id ? `${interaction.user}` : `${target}`,
+    embeds: [embedWarn(title, description)],
     allowedMentions: { users: [target.id] },
   });
 }

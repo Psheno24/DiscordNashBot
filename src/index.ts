@@ -12,8 +12,10 @@ import { ensureEconomyFeedPanel, ensureEconomyTerminalPanel, handleEconomyButton
 import { scheduleEconomyMskMidnightTick } from "./economy/tier3Daily.js";
 import { ensureBetsHealth, handleBetButton, handleBetModal, handleNeuroAdminBetFlow, handleNeuroAdminButton } from "./bets/bets.js";
 import {
+  handleLeavePreviewCommand,
   handleWelcomePreviewCommand,
-  registerWelcomePreviewCommands,
+  leavePreviewCommandName,
+  registerMemberActivityPreviewCommands,
   welcomePreviewCommandName,
 } from "./welcomePreview.js";
 
@@ -28,7 +30,7 @@ const client = new Client({
 
 client.once(Events.ClientReady, async (c) => {
   console.log(`ИИ Управление на связи: ${c.user.tag}`);
-  await registerWelcomePreviewCommands(c);
+  await registerMemberActivityPreviewCommands(c);
   await ensureNeuroPanel(c);
   await ensureEconomyTerminalPanel(c);
   await ensureEconomyFeedPanel(c);
@@ -43,9 +45,15 @@ registerVoiceLadder(client);
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
-    if (interaction.isChatInputCommand() && interaction.commandName === welcomePreviewCommandName) {
-      await handleWelcomePreviewCommand(interaction);
-      return;
+    if (interaction.isChatInputCommand()) {
+      if (interaction.commandName === welcomePreviewCommandName) {
+        await handleWelcomePreviewCommand(interaction);
+        return;
+      }
+      if (interaction.commandName === leavePreviewCommandName) {
+        await handleLeavePreviewCommand(interaction);
+        return;
+      }
     }
 
     if (interaction.isButton()) {
