@@ -39,6 +39,7 @@ const BET_BUTTON_CONFIRM_CANCEL_PREFIX = "bet:confirmCancel:";
 const MODAL_BET_AMOUNT_PREFIX = "modal:bet:amount:";
 
 const BET_COLOR = 0xb71c1c;
+const BET_RESOLVED_FEED_MESSAGE_DELETE_AFTER_MS = 24 * 60 * 60 * 1000;
 
 const ADMIN_BET_MANAGE_PREFIX = "neuroAdmin:bet:";
 const ADMIN_BET_CHOOSE_PREFIX = "neuroAdmin:betChoose:";
@@ -185,10 +186,10 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("closeAt")
-          .setLabel("Закрытие приёма (МСК): DD-MM HH:MM")
+          .setLabel("Закрытие приёма (МСК)")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
-          .setPlaceholder("09-05 18:30"),
+          .setPlaceholder("09.05 18:30 или 09-05-2026 18:30"),
       ),
     );
     await interaction.showModal(modal);
@@ -216,20 +217,35 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
   return false;
 }
 
+function normalizeOddsToken(raw: string): string {
+  return raw.trim().replace(/^x\s*/i, "").trim();
+}
+
 function parseOddsField(raw: string): number | undefined {
-  const odds = Number.parseFloat(raw.trim().replace(",", "."));
+  const compact = normalizeOddsToken(raw).replace(/\s/g, "").replace(/,/g, ".");
+  const odds = Number.parseFloat(compact);
   if (!Number.isFinite(odds) || odds < 1.01 || odds > 100) return undefined;
   return odds;
 }
 
-/** Последний токен — коэффициент, всё слева — название (пробел в названии допускается). */
+/** Сумма ставки в ₽: целое > 0; пробелы; запятая или точка как десятичный разделитель (копейки отбрасываются); группы тысяч точками (`1.234`). */
+function parseBetAmountRubles(raw: string): number | undefined {
+  let s = raw.trim().replace(/\u00a0/g, " ").replace(/\s/g, "");
+  if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, "");
+  s = s.replace(/,/g, ".");
+  const n = Math.floor(Number.parseFloat(s));
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return n;
+}
+
+/** Последний токен — коэффициент (можно с префиксом x), остальное — название; пробелы/табы нормализуются. */
 function parseTeamOddsLine(raw: string): { label: string; odds: number } | undefined {
-  const t = raw.trim();
+  const t = raw.trim().replace(/\u00a0/g, " ").replace(/\s+/g, " ");
   if (!t) return undefined;
-  const idx = t.lastIndexOf(" ");
-  if (idx <= 0) return undefined;
-  const label = t.slice(0, idx).trim();
-  const oddsPart = t.slice(idx + 1).trim();
+  const parts = t.split(" ");
+  if (parts.length < 2) return undefined;
+  const oddsPart = parts[parts.length - 1]!;
+  const label = parts.slice(0, -1).join(" ").trim();
   const odds = parseOddsField(oddsPart);
   if (!label || odds == null) return undefined;
   return { label, odds };
@@ -239,40 +255,72 @@ function betOption(id: string, label: string, odds: number): { id: string; label
   return { id, label: label.slice(0, 80), odds };
 }
 
+/**
+ * Закрытие приёма по МСК (UTC+3).
+ * Форматы: `DD-MM HH:MM`, `DD.MM HH:MM`, `DD/MM HH:MM`, опционально с годом `DD-MM-YYYY HH:MM`.
+ * День и месяц могут быть без ведущего нуля. Год без указания — ближайшее будущее время в этом или следующем календарном году.
+ */
 function parseCloseAt(raw: string, now = Date.now()): number | undefined {
-  const t = raw.trim();
+  const t = raw.trim().replace(/\u00a0/g, " ").replace(/\s+/g, " ");
   if (!t) return undefined;
-  // DD-MM HH:MM (МСК, без года). Берём ближайшую будущую дату.
-  const m = t.match(/^(\d{2})-(\d{2})\s+(\d{2}):(\d{2})$/);
-  if (!m) return undefined;
-  const dd = Number(m[1]);
-  const mo = Number(m[2]);
-  const hh = Number(m[3]);
-  const mm = Number(m[4]);
-  if (![dd, mo, hh, mm].every(Number.isFinite)) return undefined;
-  if (mo < 1 || mo > 12) return undefined;
-  if (dd < 1 || dd > 31) return undefined;
-  if (hh < 0 || hh > 23) return undefined;
-  if (mm < 0 || mm > 59) return undefined;
 
-  // МСК = UTC+3 (без DST). Преобразуем "стеночное" МСК-время в UTC timestamp.
   const MSK_OFFSET_MS = 3 * 60 * 60 * 1000;
   const nowMsk = new Date(now + MSK_OFFSET_MS);
-  const year = nowMsk.getUTCFullYear();
+  const defaultYear = nowMsk.getUTCFullYear();
+
+  const withYear = t.match(/^(\d{1,2})[-./](\d{1,2})[-./](\d{4})\s+(\d{1,2}):(\d{2})$/);
+  const noYear = t.match(/^(\d{1,2})[-./](\d{1,2})\s+(\d{1,2}):(\d{2})$/);
+
+  let dd: number;
+  let mo: number;
+  let hh: number;
+  let mm: number;
+  let explicitYear: number | undefined;
+
+  if (withYear) {
+    dd = Number(withYear[1]);
+    mo = Number(withYear[2]);
+    explicitYear = Number(withYear[3]);
+    hh = Number(withYear[4]);
+    mm = Number(withYear[5]);
+  } else if (noYear) {
+    dd = Number(noYear[1]);
+    mo = Number(noYear[2]);
+    explicitYear = undefined;
+    hh = Number(noYear[3]);
+    mm = Number(noYear[4]);
+  } else {
+    return undefined;
+  }
+
+  if (![dd, mo, hh, mm].every(Number.isFinite)) return undefined;
+  if (explicitYear != null && !Number.isFinite(explicitYear)) return undefined;
+  if (mo < 1 || mo > 12 || dd < 1 || dd > 31 || hh < 0 || hh > 23 || mm < 0 || mm > 59) return undefined;
 
   const makeTs = (y: number) => {
-    // Создаём дату как UTC, но это будет "MSK" без сдвига, затем вычитаем offset чтобы получить UTC.
     const asUtc = Date.UTC(y, mo - 1, dd, hh, mm, 0, 0);
     return asUtc - MSK_OFFSET_MS;
   };
 
-  let ts = makeTs(year);
-  if (!Number.isFinite(ts)) return undefined;
-  if (ts <= now) {
-    ts = makeTs(year + 1);
+  const calendarOk = (y: number, ts: number) => {
+    if (!Number.isFinite(ts)) return false;
+    const chk = new Date(ts + MSK_OFFSET_MS);
+    return chk.getUTCFullYear() === y && chk.getUTCMonth() === mo - 1 && chk.getUTCDate() === dd;
+  };
+
+  if (explicitYear != null) {
+    const ts = makeTs(explicitYear);
+    if (!calendarOk(explicitYear, ts)) return undefined;
+    if (ts > now) return ts;
+    return undefined;
   }
-  if (!Number.isFinite(ts) || ts <= now) return undefined;
-  return ts;
+
+  for (const y of [defaultYear, defaultYear + 1]) {
+    const ts = makeTs(y);
+    if (!calendarOk(y, ts)) continue;
+    if (ts > now) return ts;
+  }
+  return undefined;
 }
 
 function parseUserId(raw: string): string | undefined {
@@ -282,17 +330,23 @@ function parseUserId(raw: string): string | undefined {
   return undefined;
 }
 
-function buildBetEmbed(ev: BetEvent): EmbedBuilder {
+function betStatusDescriptionLine(ev: BetEvent): string {
   const closes = Math.floor(ev.closesAt / 1000);
   const accepting = isAcceptingBets(ev);
-  const statusLine =
-    accepting
-      ? `Приём ставок до <t:${closes}:R> (до <t:${closes}:t>).`
-      : ev.status === "open" || (ev.status as any) === "closed"
-        ? `Приём ставок **закрыт** (закрылось <t:${closes}:R>).`
-      : ev.status === "resolved"
-        ? `Результат: **${ev.options.find((o) => o.id === ev.winningOptionId)?.label ?? "—"}**.`
-        : "Событие отменено.";
+  if (accepting) {
+    return `Приём ставок до <t:${closes}:R> (до <t:${closes}:t>).`;
+  }
+  if (ev.status === "open" || (ev.status as any) === "closed") {
+    return `Приём ставок **закрыт**. Окончание приёма: <t:${closes}:F>.`;
+  }
+  if (ev.status === "resolved") {
+    return `Результат: **${ev.options.find((o) => o.id === ev.winningOptionId)?.label ?? "—"}**.`;
+  }
+  return "Событие отменено.";
+}
+
+function buildBetEmbed(ev: BetEvent): EmbedBuilder {
+  const statusLine = betStatusDescriptionLine(ev);
 
   const opts = ev.options.map((o) => `• **${o.label}** — x${o.odds.toLocaleString("ru-RU")}`).join("\n");
   return new EmbedBuilder()
@@ -319,15 +373,7 @@ function buildBetMenuEmbed(
   balanceRub: number,
   userBet?: { optionLabel: string; amount: number; potential: number },
 ): EmbedBuilder {
-  const closes = Math.floor(ev.closesAt / 1000);
-  const statusLine =
-    isAcceptingBets(ev)
-      ? `Приём ставок до <t:${closes}:R> (до <t:${closes}:t>).`
-      : ev.status === "open" || (ev.status as any) === "closed"
-        ? `Приём ставок **закрыт** (закрылось <t:${closes}:R>).`
-      : ev.status === "resolved"
-        ? `Результат: **${ev.options.find((o) => o.id === ev.winningOptionId)?.label ?? "—"}**.`
-        : "Событие отменено.";
+  const statusLine = betStatusDescriptionLine(ev);
   const opts = ev.options.map((o) => `• **${o.label}** — x${o.odds.toLocaleString("ru-RU")}`).join("\n");
   const myBetBlock = userBet
     ? [
@@ -526,7 +572,8 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
           .setCustomId("amount")
           .setLabel(`Сколько ₽ поставить? Баланс: ${u.rubles.toLocaleString("ru-RU")} ₽`)
           .setStyle(TextInputStyle.Short)
-          .setRequired(true),
+          .setRequired(true)
+          .setPlaceholder("1000 или 1 000 или 500,50"),
       ),
     );
     await interaction.showModal(modal);
@@ -666,18 +713,20 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
     const closeAtRaw = interaction.fields.getTextInputValue("closeAt").trim();
     const closesAt = parseCloseAt(closeAtRaw, Date.now());
 
-    if (!title || !t1 || !t2 || !closesAt) {
-      await interaction.reply({
-        content: [
-          "Проверьте поля:",
-          "• **Команда и коэфф** — последний токен через пробел: коэффициент **1,01–100** (например `Зенит 1,9`).",
-          "• **Закрытие** — **DD-MM HH:MM** по МСК (например `09-05 18:30`).",
-          drawRaw && drawOdds == null ? "• **Ничья:** если поле заполнено, нужен корректный коэффициент." : "",
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        flags: MessageFlags.Ephemeral,
-      });
+    if (!title || !t1 || !t2 || !closesAt || (drawRaw && drawOdds == null)) {
+      const lines = ["Проверьте поля:"];
+      if (!title) lines.push("• **Название события** не должно быть пустым.");
+      if (!t1)
+        lines.push(
+          "• **Команда 1:** после названия через пробел коэффициент **1,01–100** (например `Зенит 1,9` или `Команда А x2`).",
+        );
+      if (!t2) lines.push("• **Команда 2:** то же правило, что для первой команды.");
+      if (!closesAt)
+        lines.push(
+          "• **Закрытие приёма** по МСК: **день-месяц время**, например `09-05 18:30`, `09.05 18:30` или с годом `09-05-2026 18:30`. Время должно быть **в будущем**.",
+        );
+      if (drawRaw && drawOdds == null) lines.push("• **Ничья:** укажите один коэффициент (например `3,2`) или оставьте поле пустым.");
+      await interaction.reply({ content: lines.join("\n"), flags: MessageFlags.Ephemeral });
       return true;
     }
 
@@ -714,18 +763,25 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       bets: {},
     };
 
-    const sent = await feed.send({
-      embeds: [buildBetEmbed(ev)],
-      components: buildBetRows(ev),
-    });
-    ev.channelId = sent.channelId;
-    ev.messageId = sent.id;
-    upsertBetEvent(ev);
+    try {
+      const sent = await feed.send({
+        embeds: [buildBetEmbed(ev)],
+        components: buildBetRows(ev),
+      });
+      ev.channelId = sent.channelId;
+      ev.messageId = sent.id;
+      upsertBetEvent(ev);
 
-    appendFeedEvent({ ts: Date.now(), guildId, type: "bet:created", actorUserId: interaction.user.id, text: `Создана ставка: **${title}**.` });
-    await ensureEconomyFeedPanel(interaction.client);
+      appendFeedEvent({ ts: Date.now(), guildId, type: "bet:created", actorUserId: interaction.user.id, text: `Создана ставка: **${title}**.` });
+      await ensureEconomyFeedPanel(interaction.client);
 
-    await interaction.reply({ content: "Ставка создана и опубликована в ленте.", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "Ставка создана и опубликована в ленте.", flags: MessageFlags.Ephemeral });
+    } catch (e) {
+      await interaction.reply({
+        content: "Не удалось отправить сообщение в канал ленты (права бота или лимиты Discord). Ставка **не** сохранена.",
+        flags: MessageFlags.Ephemeral,
+      });
+    }
     return true;
   }
 
@@ -791,14 +847,12 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       return true;
     }
 
-    const amountRaw = interaction.fields.getTextInputValue("amount").trim().replace(/\s+/g, "");
-    if (!/^\d+$/.test(amountRaw)) {
-      await interaction.reply({ content: "Сумма должна быть числом (только цифры).", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    const amount = Number.parseInt(amountRaw, 10);
-    if (!Number.isFinite(amount) || amount <= 0) {
-      await interaction.reply({ content: "Некорректная сумма.", flags: MessageFlags.Ephemeral });
+    const amount = parseBetAmountRubles(interaction.fields.getTextInputValue("amount"));
+    if (amount == null) {
+      await interaction.reply({
+        content: "Укажите сумму в ₽ (целое число больше нуля). Можно с пробелами и с **запятой** или **точкой**.",
+        flags: MessageFlags.Ephemeral,
+      });
       return true;
     }
 
@@ -846,6 +900,23 @@ export async function ensureBetsHealth(client: Client) {
     for (const guild of client.guilds.cache.values()) {
       const events = listBetEvents(guild.id);
       for (const ev of events) {
+        if (
+          ev.status === "resolved" &&
+          ev.resolvedDeleteFeedMessageAtMs &&
+          now >= ev.resolvedDeleteFeedMessageAtMs &&
+          ev.channelId &&
+          ev.messageId
+        ) {
+          const ch = await client.channels.fetch(ev.channelId).catch(() => null);
+          if (ch?.isTextBased() && !ch.isDMBased()) {
+            const msg = await ch.messages.fetch(ev.messageId).catch(() => null);
+            if (msg) await msg.delete().catch(() => null);
+          }
+          ev.messageId = undefined;
+          ev.resolvedDeleteFeedMessageAtMs = undefined;
+          upsertBetEvent(ev);
+        }
+
         if (ev.status === "open" && now > ev.closesAt) {
           // совместимость со старым store.ts: статус 'closed' хранится как строка
           (ev as any).status = "closed";
@@ -1009,6 +1080,7 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
     }
     ev.status = "resolved";
     ev.winningOptionId = optionId;
+    ev.resolvedDeleteFeedMessageAtMs = Date.now() + BET_RESOLVED_FEED_MESSAGE_DELETE_AFTER_MS;
     upsertBetEvent(ev);
     appendFeedEvent({ ts: Date.now(), guildId, type: "bet:resolved", text: `Ставка «${ev.title}» решена: победил исход **${opt.label}**.` });
     await ensureEconomyFeedPanel(interaction.client);

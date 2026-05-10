@@ -29,6 +29,8 @@ export interface BetEvent {
   /** channelId/messageId где опубликовано */
   channelId?: string;
   messageId?: string;
+  /** После решения события — удалить сообщение в ленте после этого времени (unix ms). */
+  resolvedDeleteFeedMessageAtMs?: number;
   bets: Record<string, PlacedBet>;
 }
 

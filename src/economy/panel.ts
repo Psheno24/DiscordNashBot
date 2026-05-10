@@ -255,9 +255,9 @@ function buildProfileBetHistoryEmbed(member: GuildMember): EmbedBuilder {
     } else if (net === "cancelled") {
       resultLine = "Итог: **возврат** ставки (событие отменено).";
     } else if (net > 0) {
-      resultLine = `\`\`\`ansi\n\u001b[1;32m+${fmt(net)} ₽\u001b[0m\n\`\`\``;
+      resultLine = `Итог: **+${fmt(net)} ₽** чистыми (сверх суммы ставки).`;
     } else if (net < 0) {
-      resultLine = `\`\`\`ansi\n\u001b[1;31m${formatDelta(net)}\u001b[0m\n\`\`\``;
+      resultLine = `Итог: **${formatDelta(net)}**`;
     } else {
       resultLine = "**0 ₽** (без изменения баланса по итогу).";
     }
