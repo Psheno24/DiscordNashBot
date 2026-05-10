@@ -28,20 +28,20 @@ export type Tier3JobDef = {
   passiveBaseRub: number;
 };
 
-/** Мягкий вход (легал), средний (нелегал), высокий (ИП). Баланс: тир-2 ослаблен относительно тир-3 по сумме актив+пассив+мета. */
+/** Легал / нелегал / ИП: тир-3 сильнее тир-2 по суммарному доходу (долгая прокачка навыков). */
 export const JOBS_TIER3: Tier3JobDef[] = [
   {
     id: "officeAnalyst",
     title: "Офис · аналитик",
     baseCooldownMs: 12 * 60 * 60 * 1000,
-    basePayoutRub: 380,
+    basePayoutRub: 2_100,
     description: [
-      "**Легальный** тир-3: основной доход — **пассив в полночь МСК**; смены дают скромный оклад. Стаж **30 дней** → ранг и сильнее пассив.",
-      "**Отчёт** и **совещание** (КД **24 ч** каждое) — небольшой бонус **10–30%** от «дневного пассива»-ориентира.",
+      "**Легальный** тир-3: основной доход — **крупный пассив в полночь МСК**; смены — заметное дополнение. Стаж **30 дней** → ранг и сильнее пассив.",
+      "**Отчёт** и **совещание** (КД **24 ч** каждое) — бонус **10–30%** от «дневного пассива»-ориентира.",
     ].join("\n"),
     reqSkills: { communication: 30, logistics: 28, discipline: 35 },
     archetype: "legal",
-    passiveBaseRub: 3_200,
+    passiveBaseRub: 13_200,
   },
   {
     id: "shadowFixer",
@@ -62,12 +62,12 @@ export const JOBS_TIER3: Tier3JobDef[] = [
     baseCooldownMs: 8 * 60 * 60 * 1000,
     basePayoutRub: 0,
     description: [
-      "**ИП** тир-3: доход **только пассивом** в полночь МСК от **баланса бизнеса** (до **500 000 000** ₽); **престиж** слегка усиливает пассив.",
+      "**ИП** тир-3: доход **только пассивом** в полночь МСК от **баланса бизнеса** (до **500 000 000** ₽); **престиж** усиливает пассив; оборот на бизнесе даёт **ощутимый** прирост.",
       "**Реклама** (риск/доход с баланса бизнеса, лимит суммы растёт с рангом), **персонал** (КД **7 дн.**), **контроль** (КД **сутки**). Пополнение и вывод баланса бизнеса — кнопками **в бизнес** / **на счёт**.",
     ].join("\n"),
     reqSkills: { communication: 55, logistics: 52, discipline: 60 },
     archetype: "ip",
-    passiveBaseRub: 95,
+    passiveBaseRub: 520,
   },
 ];
 
@@ -128,7 +128,9 @@ export function computeTier3PassiveRub(input: {
   const cap = Math.max(0, Math.min(SOLE_PROP_CAP_MAX, input.solePropCapitalRub));
   const dial = Math.min(SOLE_PROP_RISK_MAX, Math.max(SOLE_PROP_RISK_MIN, input.solePropRiskDial));
   const prestigeMult = solePropPrestigeIncomeMult(input.prestigePoints ?? 0);
-  const base = input.def.passiveBaseRub + cap * 0.0055;
+  /** ₽ за единицу капитала на балансе бизнеса (MVP: ощутимый рост с вложений). */
+  const solePropCapPerRubNight = 0.0175;
+  const base = input.def.passiveBaseRub + cap * solePropCapPerRubNight;
   let riskJitter = 1 + dial * 0.06;
   if (dial >= 1) {
     riskJitter += (randInt(-10, 10) / 100) * dial;

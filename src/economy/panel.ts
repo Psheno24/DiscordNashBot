@@ -606,7 +606,7 @@ const JOBS_STARTER: JobDef[] = [
     id: "courier",
     title: "Курьер",
     baseCooldownMs: 3 * 60 * 60 * 1000,
-    basePayoutRub: 1_180,
+    basePayoutRub: 1_628,
     description:
       [
         "**КД смены:** 3 ч без вела; с **арендой электровела** — 2 ч; с **авто** — по классу авто (**от 2 ч до 1 ч**).",
@@ -627,10 +627,10 @@ const JOBS_STARTER: JobDef[] = [
     id: "watchman",
     title: "Ночной сторож",
     baseCooldownMs: 24 * 60 * 60 * 1000,
-    basePayoutRub: 1_380,
+    basePayoutRub: 1_904,
     description:
       [
-        "**Длинный КД** (24 ч): **высокий фикс** за смену — ориентир «~1 нажатие в день» ≈ **~40k/мес** без идеального КД.",
+        "**Длинный КД** (24 ч): **высокий фикс** за смену — ориентир «~1 нажатие в день» ≈ **~57k/мес** без идеального КД.",
       ].join("\n"),
   },
 ];
@@ -662,7 +662,7 @@ const JOBS_TIER2: JobDef[] = [
     id: "dispatcher",
     title: "Диспетчер",
     baseCooldownMs: 14 * 60 * 60 * 1000,
-    basePayoutRub: 2_850,
+    basePayoutRub: 9_833,
     description: [
       "**Длинный КД** (14 ч): стабильный фикс, мало кликов.",
       "Иногда (**2%**) — мелкая премия за слаженную смену.",
@@ -673,7 +673,7 @@ const JOBS_TIER2: JobDef[] = [
     id: "assembler",
     title: "Сборщик",
     baseCooldownMs: 8 * 60 * 60 * 1000,
-    basePayoutRub: 1_680,
+    basePayoutRub: 5_796,
     description: ["**Средний КД** (8 ч): высокий оклад, премия каждые **7** смен, редкие штрафы."].join("\n"),
     reqSkills: { discipline: 28, logistics: 20 },
   },
@@ -743,7 +743,7 @@ function tier3ReferencePassiveRubFromStreak(streakDays: number): number {
 
 function solePropAdMaxRub(streakDays: number): number {
   const rank = tier3PromotionRank(streakDays);
-  return Math.min(SOLE_PROP_CAP_MAX, 50_000 + rank * 15_000);
+  return Math.min(SOLE_PROP_CAP_MAX, 125_000 + rank * 40_000);
 }
 
 function rubFromTier3MetaPercent(streakDays: number): number {
@@ -862,13 +862,13 @@ function jobUsesVariablePayout(jobId: JobId): boolean {
 
 function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
   if (jobId === "waiter") {
-    return "Оплата за смену: **без фикса** — разброс **примерно +825…+1580 ₽** к базовому коридору (типичный зал **~+1.0…+1.3k ₽**; редко — крупный куш или тяжёлый минус).";
+    return "Оплата за смену: **без фикса** — широкий разброс (ориентир **~+1,1…+2,2k ₽** к коридору; типичный зал **~+1,4…+1,8k ₽**; редко — крупный куш или тяжёлый минус).";
   }
   if (jobId === "expediter") {
-    return "Оплата за смену: **без фикса** — сдвиг к **~+1.3…+2.5k ₽** за смену при активной игре (возможны штрафы и «жирные» дни).";
+    return "Оплата за смену: **без фикса** — ориентир **~+4,5…+8,5k ₽**/смену при активной игре (возможны штрафы и «жирные» дни).";
   }
   if (jobId === "shadowFixer") {
-    return "Оплата за смену: **без фикса** — сильный разброс (до **−280…+1200 ₽**; ранг и стрик усиливают **плюсовые** ветки).";
+    return "Оплата за смену: **без фикса** — сильный разброс (до **~−1k…+4k ₽** и выше при ранге; ранг и стрик усиливают **плюсовые** ветки).";
   }
   if (jobId === "soleProp") {
     return "Доход: **только ночной пассив** МСК от баланса бизнеса (**реклама** / **персонал** / **контроль** — отдельно).";
@@ -2935,22 +2935,23 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         notes.push(`Доп. **${formatDelta(extra)}** — «золотой» вечер: корпоратив, крупные чаевые, бонус заведения.`);
       }
       extra += 1_200;
+      extra = Math.round(extra * 1.38);
     } else if (jobId === "watchman") {
       // только фикс
     } else if (jobId === "dispatcher") {
       if (chance(0.02)) {
-        const bonus = randInt(100, 190);
+        const bonus = randInt(345, 656);
         extra += bonus;
         notes.push(`премия ${formatDelta(bonus)} (редко, слаженная смена)`);
       }
     } else if (jobId === "assembler") {
       if (chance(0.03)) {
-        const fine = randInt(40, 120);
+        const fine = randInt(138, 414);
         extra -= fine;
         notes.push(`штраф ${formatDelta(-fine)}`);
       }
       if (expAfter % 7 === 0) {
-        const bonus = 520;
+        const bonus = 1_794;
         extra += bonus;
         notes.push(`премия ${formatDelta(bonus)} (7 смен)`);
       }
@@ -2958,27 +2959,27 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       base = 0;
       const r = Math.random();
       if (r < 0.08) {
-        extra = -randInt(30, 80);
+        extra = -randInt(104, 276);
         notes.push(`Штраф / убыток **${formatDelta(extra)}** — поломка груза, штраф заказчика или срыв срока.`);
       } else if (r < 0.33) {
-        extra = randInt(25, 55);
+        extra = randInt(86, 190);
         notes.push(`Доп. к смене **${formatDelta(extra)}** — ровный маршрут без сюрпризов.`);
       } else if (r < 0.68) {
-        extra = randInt(60, 110);
+        extra = randInt(207, 380);
         notes.push(`Доп. к смене **${formatDelta(extra)}** — плотный график, много точек.`);
       } else if (r < 0.9) {
-        extra = randInt(95, 160);
+        extra = randInt(328, 552);
         notes.push(`Доп. к смене **${formatDelta(extra)}** — удачные рейсы, премия за скорость.`);
       } else {
-        extra = randInt(140, 240);
+        extra = randInt(483, 828);
         notes.push(`Доп. к смене **${formatDelta(extra)}** — «жирный» день: крупные заказы и бонусы.`);
       }
-      extra += 1_250;
+      extra += 4_312;
     } else if (jobId === "officeAnalyst") {
       const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
-      base = def.basePayoutRub + rank * 40 + Math.min(120, Math.floor((u.jobMskDayStreak ?? 0) / 5) * 8);
+      base = def.basePayoutRub + rank * 150 + Math.min(450, Math.floor((u.jobMskDayStreak ?? 0) / 5) * 30);
       if (chance(0.015)) {
-        const fine = randInt(25, 70);
+        const fine = randInt(63, 175);
         extra -= fine;
         notes.push(`штраф ${formatDelta(-fine)}`);
       }
@@ -2989,19 +2990,19 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       const posBoost = 1 + rank * 0.025 + Math.min(0.15, streak * 0.002);
       const r = Math.random();
       if (r < 0.1) {
-        extra = -randInt(70, 280);
+        extra = -Math.round(randInt(70, 280) * 3.45);
         notes.push(`срыв **${formatDelta(extra)}** — материалы, облавы, двойной крёст.`);
       } else if (r < 0.38) {
-        extra = Math.floor(randInt(55, 155) * posBoost * 1.12);
+        extra = Math.floor(randInt(55, 155) * posBoost * 1.12 * 3.45);
         notes.push(`серая сделка **${formatDelta(extra)}**.`);
       } else if (r < 0.72) {
-        extra = Math.floor(randInt(155, 400) * posBoost * 1.12);
+        extra = Math.floor(randInt(155, 400) * posBoost * 1.12 * 3.45);
         notes.push(`удачный поток **${formatDelta(extra)}**.`);
       } else if (r < 0.92) {
-        extra = Math.floor(randInt(320, 780) * posBoost * 1.12);
+        extra = Math.floor(randInt(320, 780) * posBoost * 1.12 * 3.45);
         notes.push(`жирный лот **${formatDelta(extra)}**.`);
       } else {
-        extra = Math.floor(randInt(580, 1280) * posBoost * 1.12);
+        extra = Math.floor(randInt(580, 1280) * posBoost * 1.12 * 3.45);
         notes.push(`крупный куш **${formatDelta(extra)}**.`);
       }
     } else if (jobId === "courier") {

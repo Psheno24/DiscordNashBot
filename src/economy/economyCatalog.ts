@@ -110,7 +110,8 @@ export interface ApartmentDef {
 }
 
 export const APARTMENT_MODELS: ApartmentDef[] = [
-  { id: "apt_2m", label: "Студия (эконом)", priceRub: 2_000_000, prestigeDelta: 4_000, monthlyUtilityRub: 10_000 },
+  /** Первая собственность: достижимость с тир-2 + арендой за несколько месяцев (MVP баланса). */
+  { id: "apt_2m", label: "Комната (первое жильё)", priceRub: 550_000, prestigeDelta: 1_200, monthlyUtilityRub: 3_500 },
   { id: "apt_5m", label: "Однушка", priceRub: 5_000_000, prestigeDelta: 11_000, monthlyUtilityRub: 14_000 },
   { id: "apt_12m", label: "Двушка", priceRub: 12_000_000, prestigeDelta: 28_000, monthlyUtilityRub: 18_000 },
   { id: "apt_25m", label: "Улучшенная", priceRub: 25_000_000, prestigeDelta: 62_000, monthlyUtilityRub: 22_000 },
