@@ -1188,9 +1188,9 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
       .setTitle(`Ставка: ${ev.title}`)
       .setDescription("Выберите победителя (только для админов).");
 
-    const row = new ActionRowBuilder<ButtonBuilder>();
+    const winnersRow = new ActionRowBuilder<ButtonBuilder>();
     for (const opt of ev.options.slice(0, 3)) {
-      row.addComponents(
+      winnersRow.addComponents(
         new ButtonBuilder()
           .setCustomId(`${ADMIN_BET_CHOOSE_PREFIX}${ev.id}:${opt.id}`)
           .setLabel(`Победитель: ${opt.label}`)
@@ -1198,7 +1198,7 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
           .setDisabled(!canAdminResolveOrCancel(ev)),
       );
     }
-    row.addComponents(
+    const adminRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${ADMIN_BET_EDIT_PREFIX}${ev.id}`)
         .setLabel("Редактировать")
@@ -1214,7 +1214,8 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
     await replyOrUpdateEphemeral(interaction, {
       embeds: [embed],
       components: [
-        row,
+        winnersRow,
+        adminRow,
         new ActionRowBuilder<ButtonBuilder>().addComponents(
           new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_BETS).setLabel("Назад").setStyle(ButtonStyle.Secondary),
         ),
