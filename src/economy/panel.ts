@@ -2039,12 +2039,14 @@ function buildSwitchJobConfirmRows(newJobId: JobId): ActionRowBuilder<ButtonBuil
         .setCustomId(`${ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX}${newJobId}`)
         .setLabel("Да, устроиться сюда")
         .setStyle(ButtonStyle.Danger),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}${newJobId}`)
         .setLabel("Назад")
         .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
     ),
-    buildMenuRow(),
   ];
 }
 
@@ -2117,14 +2119,18 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
         .setLabel("Выбрать")
         .setStyle(ButtonStyle.Primary)
         .setDisabled(selectDisabled),
-      new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(`${ECON_WORK_BUTTON_JOB_DETAIL_PREFIX}${jobId}`)
         .setLabel("Подробнее")
         .setStyle(ButtonStyle.Secondary),
     ),
   );
-  rows.push(buildMenuRow());
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+  );
   return rows;
 }
 
