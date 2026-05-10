@@ -1,14 +1,6 @@
+import { mskCalendarDayKey } from "../time/msk.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { getEconomyUser, patchEconomyUser, type FocusPreset } from "./userStore.js";
-
-function dayKey(ts: number): string {
-  // UTC day key; для локального можно будет поменять позже
-  const d = new Date(ts);
-  const y = d.getUTCFullYear();
-  const m = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-}
 
 function focusShares(f: FocusPreset): { psShare: number; rubShare: number } {
   if (f === "role") return { psShare: 1.0, rubShare: 0.0 };
@@ -73,7 +65,7 @@ export function applyVoiceEarnings(args: {
   if (minutes <= 0) return { psAdded: 0, rubAdded: 0, minutesCounted: 0 };
 
   const u = getEconomyUser(guildId, userId);
-  const key = dayKey(now);
+  const key = mskCalendarDayKey(now);
   const already = u.voiceDay === key ? (u.voiceMinutesToday ?? 0) : 0;
 
   const { psShare, rubShare } = focusShares(u.focus);

@@ -14,6 +14,7 @@ import {
 } from "discord.js";
 import { randomUUID } from "node:crypto";
 import { economyFeedChannelId } from "../config.js";
+import { MSK_OFFSET_MS } from "../time/msk.js";
 import { appendFeedEvent } from "../economy/feedStore.js";
 import { ensureEconomyFeedPanel } from "../economy/panel.js";
 import { getEconomyUser, patchEconomyUser } from "../economy/userStore.js";
@@ -275,7 +276,6 @@ async function deleteBetFeedMessage(client: Client, ev: BetEvent): Promise<void>
 
 /** DD-MM HH:MM по МСК для подстановки в модалку редактирования. */
 function formatCloseAtMskForModal(closesAt: number): string {
-  const MSK_OFFSET_MS = 3 * 60 * 60 * 1000;
   const d = new Date(closesAt + MSK_OFFSET_MS);
   const dd = String(d.getUTCDate()).padStart(2, "0");
   const mo = String(d.getUTCMonth() + 1).padStart(2, "0");
@@ -401,7 +401,6 @@ function parseCloseAt(raw: string, now = Date.now()): number | undefined {
   const t = raw.trim().replace(/\u00a0/g, " ").replace(/\s+/g, " ");
   if (!t) return undefined;
 
-  const MSK_OFFSET_MS = 3 * 60 * 60 * 1000;
   const nowMsk = new Date(now + MSK_OFFSET_MS);
   const defaultYear = nowMsk.getUTCFullYear();
 
