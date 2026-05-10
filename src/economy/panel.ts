@@ -44,6 +44,7 @@ import {
   TIER3_SIDE_GIG_CD_MS,
   tier3PatchWhenJobChanges,
   tier3PromotionRank,
+  TIER3_PROMOTION_EVERY_DAYS,
   type Tier3JobDef,
   type Tier3JobId,
 } from "./tier3Jobs.js";
@@ -132,6 +133,8 @@ const ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX = "econ:work:switchOk:";
 
 const ECON_WORK_BUTTON_TIER2 = "econ:work:tier2";
 const ECON_WORK_BUTTON_TIER3 = "econ:work:tier3";
+const ECON_WORK_BUTTON_JOB_DETAIL_PREFIX = "econ:work:jobDetail:";
+const ECON_WORK_BUTTON_JOB_DETAIL_CLOSE_PREFIX = "econ:work:jobDetailClose:";
 const ECON_TIER3_SIDE = "econ:work:t3:side";
 const ECON_TIER3_BOSS = "econ:work:t3:boss";
 const ECON_IP_AD_OPEN = "econ:work:ip:adOpen";
@@ -610,6 +613,59 @@ function isWorkJobId(s: string): s is JobId {
   return (WORK_JOB_IDS as readonly string[]).includes(s);
 }
 
+/** Строка в списке вакансий тира (краткая особенность). */
+function jobOpeningLine(jobId: JobId): string {
+  switch (jobId) {
+    case "courier":
+      return "**Курьер** — фиксированная ставка за смену";
+    case "waiter":
+      return "**Официант** — выплата за смену **случайная**";
+    case "watchman":
+      return "**Ночной сторож** — **фикс** за смену при **самом длинном КД** (24 ч)";
+    case "dispatcher":
+      return "**Диспетчер** — **фикс** + редкая премия, **длинный** КД между сменами";
+    case "assembler":
+      return "**Сборщик** — **фикс**, редкий штраф, **премия каждые 7 смен**";
+    case "expediter":
+      return "**Экспедитор** — **случайная** выплата, **короткий** КД";
+    case "officeAnalyst":
+      return "**Офис · аналитик** — **ежедневный оклад** (МСК) + смены, **Связь** и **Совещание**";
+    case "shadowFixer":
+      return "**Схемы · посредник** — **случайная** выплата за смену, **ежедневного оклада нет**";
+    case "soleProp":
+      return "**ИП · услуги** — **ежедневный оклад** от баланса бизнеса, **реклама** / **персонал** / **контроль**";
+    default:
+      return `**${jobId}**`;
+  }
+}
+
+/** Одна строка «суть» в карточке работы (без длинного описания). */
+function jobCardSummaryLine(jobId: JobId): string {
+  const def = getAnyJobDef(jobId);
+  switch (jobId) {
+    case "courier":
+      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ за смену · КД **3** ч (вел **2** ч, авто **2**–**1** ч по классу)`;
+    case "waiter":
+      return "**Случайная** выплата за смену · КД **5** ч";
+    case "watchman":
+      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ · КД **24** ч`;
+    case "dispatcher":
+      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ · **2%** шанс премии **345–656** ₽ · КД **14** ч`;
+    case "assembler":
+      return `**Фикс** **${fmt(def.basePayoutRub)}** ₽ · **3%** штраф **138–414** ₽ · премия **${fmt(1_794)}** ₽ каждые **7** смен · КД **8** ч`;
+    case "expediter":
+      return `**Случайная** выплата (к сумме добавляется **+${fmt(4_312)}** ₽) · КД **3** ч`;
+    case "officeAnalyst":
+      return "**Ежедневный оклад** МСК (**13 200** ₽ × усиление ранга) + смена **2 100** ₽ + надбавки · КД смены **12** ч";
+    case "shadowFixer":
+      return "**Случайная** выплата за смену · КД **3,5** ч · **Связь** даёт **10–30%** ориентира офиса";
+    case "soleProp":
+      return "**Ежедневный оклад** МСК от капитала на бизнесе + множители; **реклама** / **персонал** / **контроль**";
+    default:
+      return def.title;
+  }
+}
+
 function formatCooldown(msLeft: number): string {
   const sec = Math.max(0, Math.floor(msLeft / 1000));
   const d = Math.floor(sec / 86400);
@@ -641,7 +697,7 @@ const JOBS_STARTER: JobDef[] = [
     description:
       [
         "**КД смены:** 3 ч без вела; с **арендой электровела** — 2 ч; с **авто** — по классу авто (**от 2 ч до 1 ч**).",
-        `Нужны **телефон** и **симка**. С **баланса сим** — **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ за **30 суток** «онлайн» (при первой смене после перерыва); внутри оплаченного периода смены **без** доп. списаний с сим. **Основной счёт не трогается.**`,
+        `Нужны **телефон** и **симка**. С **баланса сим** — **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ за **тариф** на **30** суток (при первой смене после перерыва); внутри оплаченного периода смены **без** доп. списаний с сим. **Основной счёт не трогается.**`,
         "**Электровел** — посуточная аренда (если **нет** своего авто).",
       ].join("\n"),
   },
@@ -765,7 +821,7 @@ function formatDelta(n: number): string {
   return `${sign}${Math.abs(n).toLocaleString("ru-RU")} ₽`;
 }
 
-/** Ориентир «ночного пассива» офиса того же ранга — для бонусов 10–30% у тир-3. */
+/** Ориентир ежедневного оклада офиса того же ранга — для бонусов 10–30% у тир-3. */
 function tier3ReferencePassiveRubFromStreak(streakDays: number): number {
   const office = getTier3JobDef("officeAnalyst");
   const rank = tier3PromotionRank(streakDays);
@@ -877,7 +933,7 @@ function courierWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: numbe
     lines.push(`**Сим-карта:** **тариф 30 суток** оплачен до <t:${lt}:F> — смены в этот период **без** доп. списаний с баланса сим.`);
   } else {
     lines.push(
-      `**Сим-карта:** тариф **не оплачен** — при следующем выходе на смену с баланса сим спишется **${fee.toLocaleString("ru-RU")}** ₽ и продлится **30 суток** онлайн.`,
+      `**Сим-карта:** тариф **не оплачен** — при следующем выходе на смену с баланса сим спишется **${fee.toLocaleString("ru-RU")}** ₽ и продлится **тариф** на **30** суток.`,
     );
   }
   const bals = u.simBalanceRub ?? 0;
@@ -902,14 +958,14 @@ function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
     return "Оплата за смену: **без фикса** — сильный разброс (до **~−1k…+4k ₽** и выше при ранге; ранг и стрик усиливают **плюсовые** ветки).";
   }
   if (jobId === "soleProp") {
-    return "Доход: **только ночной пассив** МСК от баланса бизнеса (**реклама** / **персонал** / **контроль** — отдельно).";
+    return "Доход: **ежедневный оклад** (полночь МСК) от баланса бизнеса (**реклама** / **персонал** / **контроль** — отдельно).";
   }
   return `Оплата за смену: **${baseRub} ₽**`;
 }
 
 function jobPayoutShortForMenu(jobId: JobId, baseRub: number): string {
   if (jobUsesVariablePayout(jobId)) return "без фикса (рандом)";
-  if (jobId === "soleProp") return "пассив ночью";
+  if (jobId === "soleProp") return "ежедневный оклад";
   return `${baseRub} ₽`;
 }
 
@@ -1465,13 +1521,23 @@ function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: num
   return { ok: false, msLeft: next - now };
 }
 
+const WORK_SECTION_INTRO = [
+  "Выберите профессию и после перерыва (**КД**) нажимайте **«Смена»** — рубли идут на **основной счёт** (или сумма **случайная**, если так устроена роль).",
+  "Навыки открывают **т2** и **т3**. Для них нужно **жильё**: аренда с запасом срока или своя квартира в магазине терминала.",
+  "",
+  "**Нужно:**",
+  "• **Начальные (т1)** — без порога навыков.",
+  "• **С навыком (т2)** — навыки по вакансии + жильё.",
+  "• **Продвинутые (т3)** — высокий уровень **всех трёх** навыков + жильё.",
+].join("\n");
+
 function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   if (!u.jobId) {
     return new EmbedBuilder()
       .setColor(PANEL_COLOR)
       .setTitle("Работа")
-      .setDescription(["Текущая работа: **не выбрана**", "", "Выберите раздел ниже."].join("\n"))
+      .setDescription([WORK_SECTION_INTRO, "", "Текущая работа: **не выбрана**.", "", "Выберите уровень ниже."].join("\n"))
       .setFooter({ text: `Запросил: ${member.user.tag}` });
   }
   const def = getAnyJobDef(u.jobId);
@@ -1482,7 +1548,7 @@ function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
     u.jobId === "soleProp"
       ? ([
           `Текущая работа: **${def.title}**`,
-          `Доход: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}** · смен **нет** (только пассив и действия бизнеса).`,
+          `Доход: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}** — действия бизнеса и **ежедневный оклад** (МСК).`,
         ] as string[])
       : [
           `Текущая работа: **${def.title}**`,
@@ -1492,7 +1558,7 @@ function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Работа")
-    .setDescription([...lines, "", "Сверху — смена и «моя работа», ниже — каталог профессий."].join("\n"))
+    .setDescription([WORK_SECTION_INTRO, "", ...lines, "", "Ниже — **Моя работа**, смена и каталог по уровням."].join("\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -1501,9 +1567,9 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
   if (!u.jobId) {
     return [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Без навыка (начальные)").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком (тир 2)").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER3).setLabel("Тир 3").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Начальные (т1)").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком (т2)").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER3).setLabel("Продвинутые (т3)").setStyle(ButtonStyle.Secondary),
       ),
       buildMenuRow(),
     ];
@@ -1526,9 +1592,9 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
   rows.push(shiftRow);
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Без навыка (начальные)").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком (тир 2)").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER3).setLabel("Тир 3").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Начальные (т1)").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком (т2)").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER3).setLabel("Продвинутые (т3)").setStyle(ButtonStyle.Secondary),
     ),
   );
   rows.push(
@@ -1560,42 +1626,24 @@ function formatJobTierReqLine(def: JobDef): string {
 }
 
 function buildStarterJobsEmbed(member: GuildMember): EmbedBuilder {
-  const lines: string[] = [];
-  for (const d of JOBS_STARTER) {
-    const cdh = cdHoursLabel(d.baseCooldownMs);
-    const pay = jobPayoutShortForMenu(d.id, d.basePayoutRub);
-    let s = `**${d.title}** — ${pay}, КД **${cdh} ч**.`;
-    if (d.id === "courier") {
-      s += ` С баланса сим: **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ на **30 суток** онлайн при необходимости; внутри оплаченного периода без доп. списаний с сим.`;
-    } else if (d.id === "waiter") {
-      s += " Оклад **без фикса** (рандом прибыли/убытка).";
-    } else {
-      s += " Стабильный **фикс**.";
-    }
-    lines.push(s);
-  }
+  const lines = JOBS_STARTER.map((d) => jobOpeningLine(d.id));
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Начальные профессии (тир 1)")
-    .setDescription(["Сводка по всем работам тира; **подробно** — в карточке профессии.", "", ...lines].join("\n\n"))
+    .setTitle("Начальные (т1)")
+    .setDescription(["Кратко по каждой роли; **Подробнее** — в карточке профессии.", "", ...lines].join("\n\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
 function buildTier2JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
-  const lines: string[] = [];
-  for (const d of JOBS_TIER2) {
-    const cdh = cdHoursLabel(d.baseCooldownMs);
-    const pay = jobPayoutShortForMenu(d.id, d.basePayoutRub);
-    lines.push(`**${d.title}** — ${pay}, КД **${cdh} ч**. Требования: ${formatJobTierReqLine(d)}`);
-  }
+  const lines = JOBS_TIER2.map((d) => `${jobOpeningLine(d.id)} · ${formatJobTierReqLine(d)}`);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Профессии (тир 2)")
+    .setTitle("С навыком (т2)")
     .setDescription(
       [
-        "**Жильё обязательно:** аренда с запасом срока или своя квартира — **до** устройства на тир 2+.",
+        "**Жильё обязательно:** аренда с запасом срока или своя квартира — **до** устройства на т2+.",
         "",
-        "Сводка по всем работам тира; **подробно** — в карточке профессии.",
+        "Кратко по каждой роли; **Подробнее** — в карточке профессии.",
         "",
         ...lines,
       ].join("\n\n"),
@@ -1612,6 +1660,98 @@ function buildStarterJobsRows(): ActionRowBuilder<ButtonBuilder>[] {
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+function buildJobDetailBody(jobId: JobId): string {
+  const def = getAnyJobDef(jobId);
+  switch (jobId) {
+    case "courier":
+      return [
+        "**КД:** **3** ч пешком · **2** ч с арендой электровела · с авто: **2** / **1,8** / **1,6** / **1,35** / **1,15** / **1** ч (от подержанного к топ-сегменту).",
+        `**Смена:** **+${fmt(1_628)}** ₽ на основной счёт.`,
+        `**Сим:** тариф **${fmt(COURIER_SIM_MONTHLY_FEE_RUB)}** ₽ с **баланса сим** на **30** суток — списывается при **первой** смене после окончания оплаченного периода; основной счёт **не** используется.`,
+      ].join("\n\n");
+    case "waiter":
+      return [
+        "**КД:** **5** ч.",
+        "**Смена:** случайная ветка, затем к сумме **+1 200** ₽ и множитель **×1,38** (итог обычно **~1,5–3 000** ₽, редко выше или ниже).",
+        "**Шансы веток (до +1200 и ×1,38):** **6%** тяжёлый минус **−45…−95** · **14%** слабый вечер **−12…+38** · **32%** норма **+52…+118** · **28%** хорошо **+98…+178** · **14%** отлично **+155…+268** · **6%** «золотой» **+235…+380**.",
+      ].join("\n\n");
+    case "watchman":
+      return ["**КД:** **24** ч.", `**Смена:** фикс **+${fmt(1_904)}** ₽, без модификаторов.`].join("\n\n");
+    case "dispatcher":
+      return [
+        "**КД:** **14** ч.",
+        `**Смена:** фикс **+${fmt(9_833)}** ₽ · **2%** шанс премии **+345…+656** ₽.`,
+        "**Навыки:** коммуникация **28+**, дисциплина **20+** · нужно **жильё**.",
+      ].join("\n\n");
+    case "assembler":
+      return [
+        "**КД:** **8** ч.",
+        `**Смена:** фикс **+${fmt(5_796)}** ₽ · **3%** штраф **−138…−414** ₽ · каждая **7-я** смена на этой работе: премия **+${fmt(1_794)}** ₽.`,
+        "**Навыки:** дисциплина **28+**, логистика **20+** · нужно **жильё**.",
+      ].join("\n\n");
+    case "expediter":
+      return [
+        "**КД:** **3** ч.",
+        "**Смена:** случайная надбавка, затем **+4 312** ₽ к ней (итог чаще **~4,5–9** тыс. ₽, возможны штрафы и «жирные» дни).",
+        "**Шансы:** **8%** убыток **−104…−276** · **25%** **+86…+190** · **35%** **+207…+380** · **22%** **+328…+552** · **10%** **+483…+828** (всё до прибавки **4 312**).",
+        "**Навыки:** логистика **28+**, коммуникация **20+** · нужно **жильё**.",
+      ].join("\n\n");
+    case "officeAnalyst": {
+      const basePass = getTier3JobDef("officeAnalyst").passiveBaseRub;
+      return [
+        `**Ежедневный оклад (полночь МСК):** **${fmt(basePass)}** ₽ × (**1** + **8%** × **ранг**). Ранг растёт каждые **${TIER3_PROMOTION_EVERY_DAYS}** календарных дней стрика (макс. ранг **15**). Пример: ранг **0** → **${fmt(basePass)}** ₽/день; ранг **3** → **${fmt(Math.floor(basePass * (1 + 0.08 * 3)))}** ₽/день.`,
+        "**КД смены:** **12** ч.",
+        "**Смена:** **2 100** ₽ + **150** ₽ × ранг + до **450** ₽ (**30** ₽ за каждые **5** дней стрика, не больше **450**) · **1,5%** штраф **−63…−175** ₽.",
+        "**Связь** и **Совещание** (КД **24** ч каждое): **floor(оклад_ориентир × p)**, где **p** случайно **10–30%**, ориентир = тот же **13 200**×(**1**+**8%**×ранг). Пример при ранге **0**: ориентир **13 200** → бонус **~1 320…3 960** ₽.",
+        "**Навыки:** коммуникация **30+**, логистика **28+**, дисциплина **35+** · **жильё**.",
+      ].join("\n\n");
+    }
+    case "shadowFixer":
+      return [
+        "**Ежедневного оклада нет.**",
+        "**КД смены:** **3,5** ч.",
+        "**Смена:** случайная; «удача» усиливается от **ранга** и **стрика** (коэффициент **posBoost** в коде: **1** + **2,5%**×ранг + до **+15%** от дней стрика).",
+        "**Шансы:** **10%** сильный минус (до порядка **−1 000** ₽ и ниже) · **28%** мелкий плюс · **34%** средний · **20%** крупный · **8%** очень крупный (после множителей **×3,45** и **×1,12** к ветке).",
+        "**Связь:** как у офиса — **10–30%** ориентира ежедневного оклада **13 200**×(**1**+**8%**×ранг) на основной счёт, КД **24** ч.",
+        "**Куратор:** **42%** **+5…10** дней к стрику · **36%** **+2…4** дня · **22%** без эффекта · КД **24** ч.",
+        "**Навыки:** коммуникация **42+**, логистика **38+**, дисциплина **48+** · **жильё**.",
+      ].join("\n\n");
+    case "soleProp":
+      return [
+        "**Ежедневный оклад (полночь МСК):** считается от **баланса бизнеса** (отдельно от личного счёта, потолок **500 000 000** ₽).",
+        "**Идея формулы:** `floor((520 + капитал × 0,0175) × (1 + 8%×ранг) × …)`** — дальше множители **престижа** (до **~+55%** на высоком престиже), **риска** −2…+2 (**+6%** к множителю за шаг, плюс случайный разброс при риске **≥1**), **эффективности** (**0,3…1**) и **временного** множителя (**1…1,35**).",
+        "**Пример (риск 0, без временного буста, эффективность 1):** при **0** ₽ на бизнесе и ранге **0** базовая часть **~520** ₽/день; при **500 000** ₽ на бизнесе **~520 + 8 750** — точное значение см. строку «ориентир» в панели ИП.",
+        "**Реклама:** **10 000…лимит** ₽ с бизнеса; лимит **125 000** + **40 000** × ранг; шанс провала растёт с долей от лимита; КД **24** ч.",
+        "**Персонал:** КД **7** дней — временный множитель, сдвиг эффективности или без эффекта (вероятности в коде: **32%** / **15%** / **15%** / **10%** / остальное нейтрально).",
+        "**Контроль:** отметка раз в **24** ч; пропуски отметок снижают эффективность; серии отметок могут её восстанавливать.",
+        "**Навыки:** коммуникация **55+**, логистика **52+**, дисциплина **60+** · **жильё**.",
+      ].join("\n\n");
+    default:
+      return def.title;
+  }
+}
+
+function buildJobDetailEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
+  const def = getAnyJobDef(jobId);
+  return new EmbedBuilder()
+    .setColor(PROFILE_COLOR)
+    .setTitle(`${def.title} — подробно`)
+    .setDescription(buildJobDetailBody(jobId))
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildJobDetailRows(jobId: JobId): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_WORK_BUTTON_JOB_DETAIL_CLOSE_PREFIX}${jobId}`)
+        .setLabel("Назад")
+        .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
     ),
   ];
@@ -1650,13 +1790,15 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   }
 
   const shiftLine =
-    jobId === "soleProp" ? "Смены **нет** — только пассив ночью и кнопки бизнеса." : `КД смены: **${cdHoursLabel(cd)} ч**`;
+    jobId === "soleProp"
+      ? "Доход: **ежедневный оклад** (МСК) и действия бизнеса (кнопки в панели)."
+      : `КД смены: **${cdHoursLabel(cd)} ч**`;
   return new EmbedBuilder()
     .setColor(PROFILE_COLOR)
     .setTitle(`${def.title}`)
     .setDescription(
       [
-        def.description,
+        jobCardSummaryLine(jobId),
         "",
         jobPayoutEmbedLine(jobId, def.basePayoutRub),
         shiftLine,
@@ -1682,13 +1824,13 @@ function workCatalogBackButtonId(jobId: JobId): string {
   return ECON_WORK_BUTTON_STARTERS;
 }
 
-/** Ориентир ночного пассива ИП при разных вложениях (риск 0 — без рандом-джиттера). */
+/** Ориентир ежедневного оклада ИП при разных вложениях (риск 0 — без рандом-джиттера). */
 function solePropPassiveExampleLines(u: ReturnType<typeof getEconomyUser>): string[] {
   const sdef = getTier3JobDef("soleProp");
   const streak = u.jobMskDayStreak ?? 0;
   const caps = [0, 100_000, 250_000, 500_000, 1_000_000, 2_000_000, 5_000_000];
   const out: string[] = [
-    "**Ориентир пассива при разном балансе бизнеса** (ночь МСК, ползунок риска **0** — без случайного джиттера):",
+    "**Ориентир ежедневного оклада** при разном балансе бизнеса (полночь МСК, ползунок риска **0** — без случайного джиттера):",
   ];
   for (const cap of caps) {
     const night = computeTier3PassiveRub({
@@ -1701,10 +1843,10 @@ function solePropPassiveExampleLines(u: ReturnType<typeof getEconomyUser>): stri
       solePropPassiveEffMult: u.solePropPassiveEffMult ?? 1,
       solePropPassiveTempMult: u.solePropPassiveTempMult ?? 1,
     });
-    out.push(`• **${fmt(cap)}** ₽ → **~${fmt(night)}**/ночь · **~${fmt(night * 30)}**/30 сут`);
+    out.push(`• **${fmt(cap)}** ₽ → **~${fmt(night)}**/день · **~${fmt(night * 30)}**/30 сут`);
   }
   out.push(
-    `Считано с вашими **престижем**, множителями и **рангом ${tier3PromotionRank(streak)}**; строка «оценка пассива» выше — с **вашим** текущим риском.`,
+    `Считано с вашими **престижем**, множителями и **рангом ${tier3PromotionRank(streak)}**; строка «оценка оклада» выше — с **вашим** текущим риском.`,
   );
   return out;
 }
@@ -1717,11 +1859,11 @@ function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, no
   const rankTitle = tier3RankTitle(jobId as Tier3JobId, rank);
   lines.push(`**Должность:** **${rankTitle}** (ранг **${rank}**) · стрик МСК: **${u.jobMskDayStreak ?? 0}** дн.`);
   if (def.archetype === "legal") {
-    lines.push(`Пассив в полночь МСК — **основной** доход; смены — дополнение.`);
+    lines.push(`Ежедневный оклад (полночь МСК) — **основной** доход; смены — дополнение.`);
     const ref = tier3ReferencePassiveRubFromStreak(u.jobMskDayStreak ?? 0);
-    lines.push(`Ориентир «дневного пассива» для бонусов: **~${fmt(ref)}** ₽.`);
+    lines.push(`Ориентир ежедневного оклада для бонусов: **~${fmt(ref)}** ₽.`);
   } else if (def.archetype === "illegal") {
-    lines.push(`Пассива **нет**; смены + мелкие действия **24 ч** КД каждое.`);
+    lines.push(`Ежедневного оклада **нет**; смены + мелкие действия **24 ч** КД каждое.`);
   } else {
     const sdef = getTier3JobDef("soleProp");
     const passEst = computeTier3PassiveRub({
@@ -1734,9 +1876,9 @@ function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, no
       solePropPassiveEffMult: u.solePropPassiveEffMult ?? 1,
       solePropPassiveTempMult: u.solePropPassiveTempMult ?? 1,
     });
-    lines.push(`Баланс бизнеса: **${fmt(u.solePropCapitalRub ?? 0)}** ₽ · оценка пассива/ночь: **~${fmt(passEst)}** ₽.`);
+    lines.push(`Баланс бизнеса: **${fmt(u.solePropCapitalRub ?? 0)}** ₽ · оценка оклада (сутки): **~${fmt(passEst)}** ₽.`);
     lines.push(
-      `Эффективность пассива: **×${(u.solePropPassiveEffMult ?? 1).toFixed(1)}** · временный множ.: **×${(u.solePropPassiveTempMult ?? 1).toFixed(2)}**${
+      `Эффективность оклада: **×${(u.solePropPassiveEffMult ?? 1).toFixed(1)}** · временный множ.: **×${(u.solePropPassiveTempMult ?? 1).toFixed(2)}**${
         u.solePropPassiveTempUntilMs && now < u.solePropPassiveTempUntilMs
           ? ` до <t:${Math.floor(u.solePropPassiveTempUntilMs / 1000)}:R>`
           : ""
@@ -1761,22 +1903,19 @@ function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, no
 }
 
 function buildTier3JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
-  const lines: string[] = [];
-  for (const d of JOBS_TIER3) {
+  const lines = JOBS_TIER3.map((d) => {
     const jd = jobDefFromTier3(d);
-    const cdh = cdHoursLabel(d.baseCooldownMs);
-    const pay = jobPayoutShortForMenu(jd.id, jd.basePayoutRub);
-    lines.push(`**${d.title}** — ${pay}, КД смены **${cdh} ч**. Требования: ${formatJobTierReqLine(jd)}`);
-  }
+    return `${jobOpeningLine(jd.id)} · ${formatJobTierReqLine(jd)}`;
+  });
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Профессии (тир 3)")
+    .setTitle("Продвинутые (т3)")
     .setDescription(
       [
-        "**Легал** — основной доход **пассивом** в полночь МСК; **связь** и **совещание** (КД **24 ч**) дают **10–30%** от ориентира пассива.",
-        "**Нелегал** — короткий КД смены и рандом; **связь** + **куратор** (КД **24 ч**) — мелкий ₽ и шанс ускорить стаж к повышению.",
-        "**ИП** — **только пассив** ночью от баланса бизнеса; **реклама**, **персонал** (7 дн.), **контроль** (сутки), пополнение/вывод.",
-        "**Жильё обязательно** для любой работы тир 3 (как и тир 2).",
+        "**Офис** — **ежедневный оклад** (МСК) + смены; **Связь** и **Совещание** (КД **24 ч**) дают **10–30%** ориентира оклада офиса.",
+        "**Схемы** — короткий КД и **случайная** выплата за смену; **Связь** (те же **10–30%**) + **Куратор** (ускорение стрика).",
+        "**ИП** — **ежедневный оклад** от баланса бизнеса; **реклама**, **персонал** (**7** дн.), **контроль** (**24** ч), переводы.",
+        "**Жильё обязательно** (как для т2).",
         "",
         ...lines,
       ].join("\n\n"),
@@ -1870,6 +2009,11 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
   const now = Date.now();
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
 
+  const jobDetailBtn = new ButtonBuilder()
+    .setCustomId(`${ECON_WORK_BUTTON_JOB_DETAIL_PREFIX}${jobId}`)
+    .setLabel("Подробнее")
+    .setStyle(ButtonStyle.Secondary);
+
   if (u.jobId === jobId) {
     const state = canWorkNow(u, jobId, now);
     if (jobId === "soleProp") {
@@ -1880,6 +2024,7 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
             .setLabel("Уволиться")
             .setStyle(ButtonStyle.Danger)
             .setDisabled(!state.ok),
+          jobDetailBtn,
         ),
       );
     } else {
@@ -1895,6 +2040,7 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
             .setLabel("Уволиться")
             .setStyle(ButtonStyle.Danger)
             .setDisabled(!state.ok),
+          jobDetailBtn,
         ),
       );
     }
@@ -1927,6 +2073,10 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
         .setStyle(ButtonStyle.Primary)
         .setDisabled(selectDisabled),
       new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`${ECON_WORK_BUTTON_JOB_DETAIL_PREFIX}${jobId}`)
+        .setLabel("Подробнее")
+        .setStyle(ButtonStyle.Secondary),
     ),
   );
   rows.push(buildMenuRow());
@@ -1942,7 +2092,7 @@ function buildCurrentJobEmbed(
     return new EmbedBuilder()
       .setColor(PANEL_COLOR)
       .setTitle("Работа")
-      .setDescription("Работа не выбрана. Перейдите в «Без навыка (начальные)» и выберите профессию.")
+      .setDescription("Работа не выбрана. Откройте **Начальные (т1)** или другой уровень и выберите профессию.")
       .setFooter({ text: `Запросил: ${member.user.tag}` });
   }
   const def = getAnyJobDef(u.jobId);
@@ -1956,7 +2106,7 @@ function buildCurrentJobEmbed(
           `Текущая работа: **${def.title}**`,
           `Опыт смен на этой работе: **${exp}**`,
           jobPayoutEmbedLine(u.jobId, def.basePayoutRub),
-          "Смены **нет** — доход только **пассивом** в полночь МСК и действиями бизнеса.",
+          "Доход: **ежедневный оклад** (МСК) и действия бизнеса.",
         ]
       : [
           `Текущая работа: **${def.title}**`,
@@ -2008,6 +2158,11 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
 
   const state = canWorkNow(u, u.jobId, now);
   const backId = workCatalogBackButtonId(u.jobId);
+  const curJobId = u.jobId;
+  const myJobDetailBtn = new ButtonBuilder()
+    .setCustomId(`${ECON_WORK_BUTTON_JOB_DETAIL_PREFIX}${curJobId}`)
+    .setLabel("Подробнее")
+    .setStyle(ButtonStyle.Secondary);
   if (u.jobId === "soleProp") {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -2016,6 +2171,7 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
           .setLabel("Уволиться")
           .setStyle(ButtonStyle.Danger)
           .setDisabled(!state.ok),
+        myJobDetailBtn,
       ),
     );
   } else {
@@ -2027,6 +2183,7 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
           .setLabel("Уволиться")
           .setStyle(ButtonStyle.Danger)
           .setDisabled(!state.ok),
+        myJobDetailBtn,
       ),
     );
   }
@@ -2317,6 +2474,8 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     cid.startsWith(ECON_WORK_BUTTON_JOB_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_TAKE_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX) ||
+    cid.startsWith(ECON_WORK_BUTTON_JOB_DETAIL_PREFIX) ||
+    cid.startsWith(ECON_WORK_BUTTON_JOB_DETAIL_CLOSE_PREFIX) ||
     cid.startsWith("econ:shop") ||
     cid.startsWith("econ:housing:") ||
     cid.startsWith(ECON_SKILL_BUTTON_PREFIX);
@@ -3040,7 +3199,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         tier3SideGigReadyAt: now + TIER3_SIDE_GIG_CD_MS,
       });
       await replyOrUpdate(interaction, {
-        embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [`Связь: **${formatDelta(bonus)}** на счёт (10–30% ориентира пассива).`] })],
+        embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [`Связь: **${formatDelta(bonus)}** на счёт (10–30% ориентира ежедневного оклада).`] })],
         components: buildCurrentJobRows(member),
       });
       return true;
@@ -3059,7 +3218,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
           tier3BossReadyAt: now + TIER3_BOSS_CD_MS,
         });
         await replyOrUpdate(interaction, {
-          embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [`Совещание: **${formatDelta(bonus)}** на счёт (10–30% ориентира пассива).`] })],
+          embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [`Совещание: **${formatDelta(bonus)}** на счёт (10–30% ориентира ежедневного оклада).`] })],
           components: buildCurrentJobRows(member),
         });
         return true;
@@ -3090,6 +3249,33 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
 
     await interaction.reply({ content: "Действие не распознано.", flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id.startsWith(ECON_WORK_BUTTON_JOB_DETAIL_PREFIX)) {
+    const raw = id.slice(ECON_WORK_BUTTON_JOB_DETAIL_PREFIX.length);
+    if (!isWorkJobId(raw)) {
+      await interaction.reply({ content: "Неизвестная профессия.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [buildJobDetailEmbed(member, raw)], components: buildJobDetailRows(raw) });
+    return true;
+  }
+
+  if (id.startsWith(ECON_WORK_BUTTON_JOB_DETAIL_CLOSE_PREFIX)) {
+    const raw = id.slice(ECON_WORK_BUTTON_JOB_DETAIL_CLOSE_PREFIX.length);
+    if (!isWorkJobId(raw)) {
+      await interaction.reply({ content: "Неизвестная профессия.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const uClose = getEconomyUser(member.guild.id, member.id);
+    if (uClose.jobId === raw) {
+      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+    } else {
+      const defC = getAnyJobDef(raw);
+      const reqC = meetsJobReq(uClose, defC);
+      await replyOrUpdate(interaction, { embeds: [buildJobInfoEmbed(member, raw)], components: buildJobInfoRows(member, raw, reqC.ok) });
+    }
     return true;
   }
 
@@ -3268,7 +3454,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
 
     if (jobId === "soleProp") {
-      await interaction.reply({ content: "На **ИП** смен **нет** — доход только пассивом и кнопками бизнеса.", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "На **ИП** смен **нет** — доход **ежедневным окладом** и действиями бизнеса.", flags: MessageFlags.Ephemeral });
       return true;
     }
 
@@ -3284,7 +3470,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       const onlineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
       if (onlineDue && (u.simBalanceRub ?? 0) < COURIER_SIM_MONTHLY_FEE_RUB) {
         await interaction.reply({
-          content: `На балансе сим нужно **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ за **30 суток** онлайн (пополните в магазине).`,
+          content: `На балансе сим нужно **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ за **тариф** на **30** суток (пополните в магазине).`,
           flags: MessageFlags.Ephemeral,
         });
         return true;

@@ -16,7 +16,7 @@ import {
 import { tier3RankTitle } from "./tier3RankTitles.js";
 
 /**
- * Полночь по МСК: стрик календарных дней на тир-3 работе и ночной пассив (по архетипу).
+ * Полночь по МСК: стрик календарных дней на тир-3 работе и ежедневный оклад (по архетипу).
  * Идемпотентно по полю `economyLastMskYmd` на пользователя.
  */
 export async function processEconomyMskMidnightTick(client: Client): Promise<void> {
@@ -76,7 +76,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
           guildId: guild.id,
           type: "job:passive",
           actorUserId: userId,
-          text: `${mention}: пассив **${def.title}** — **+${Math.floor(passive)}** ₽ (стрик **${streakOut.nextStreak}** дн., **${tier3RankTitle(jobId as Tier3JobId, rankAfter)}**).`,
+          text: `${mention}: ежедневный оклад **${def.title}** — **+${Math.floor(passive)}** ₽ (стрик **${streakOut.nextStreak}** дн., **${tier3RankTitle(jobId as Tier3JobId, rankAfter)}**).`,
         });
       }
 

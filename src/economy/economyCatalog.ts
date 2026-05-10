@@ -125,7 +125,7 @@ export function getApartmentDef(id: string | undefined): ApartmentDef | undefine
   return APARTMENT_MODELS.find((a) => a.id === id);
 }
 
-/** Множитель дохода ИП от престижа (пассив и смена). */
+/** Множитель дохода ИП от престижа (ежедневный оклад и смена). */
 export function solePropPrestigeIncomeMult(prestige: number): number {
   const p = Math.max(0, prestige);
   return 1 + Math.min(0.55, Math.sqrt(p) / 850);
