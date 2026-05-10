@@ -76,7 +76,6 @@ import { drawSimNumberFromPool, releaseSimNumberToPool } from "./simPoolStore.js
 import { mskTodayYmd } from "./mskCalendar.js";
 import {
   isTier12JobId,
-  tier12CareerDetailBlock,
   tier12CareerEmbedLines,
   tier12RankFlatBonusRub,
   tier12RankFromShifts,
@@ -964,14 +963,12 @@ function jobUsesVariablePayout(jobId: JobId): boolean {
   return jobId === "waiter" || jobId === "expediter" || jobId === "shadowFixer";
 }
 
-const TIER12_PAYOUT_HINT = " Плюс **карьерная** надбавка (ранг **0…4**).";
-
 function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
   if (jobId === "waiter") {
-    return `Оплата за смену: **без фикса** — чаще **~1,5–2,1k ₽**; редко **минус** на счёт (**~5%** тяжёлых смен).${TIER12_PAYOUT_HINT}`;
+    return "Оплата за смену: **без фикса** — чаще **~1,5–2,1k ₽**; редко **минус** на счёт (**~5%** тяжёлых смен).";
   }
   if (jobId === "expediter") {
-    return `Оплата за смену: **без фикса** — в среднем **~3–3,5k ₽** за смену при активной игре; **~12%** веток могут дать **убыток**, иначе **~2,6–7k ₽**.${TIER12_PAYOUT_HINT}`;
+    return "Оплата за смену: **без фикса** — в среднем **~3–3,5k ₽** за смену при активной игре; **~12%** веток могут дать **убыток**, иначе **~2,6–7k ₽**.";
   }
   if (jobId === "shadowFixer") {
     return "Оплата за смену: **без фикса** — сильный разброс (до **~−1k…+4k ₽** и выше при ранге; ранг и стрик усиливают **плюсовые** ветки).";
@@ -979,11 +976,7 @@ function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
   if (jobId === "soleProp") {
     return "Доход: **ежедневный оклад** (полночь МСК) от баланса бизнеса (**реклама** / **персонал** / **контроль** — отдельно).";
   }
-  const baseLine = `Оплата за смену: **${baseRub} ₽**`;
-  if (isTier12JobId(jobId)) {
-    return `${baseLine}${TIER12_PAYOUT_HINT}`;
-  }
-  return baseLine;
+  return `Оплата за смену: **${baseRub} ₽**`;
 }
 
 function jobPayoutShortForMenu(jobId: JobId, baseRub: number): string {
@@ -1781,9 +1774,6 @@ function buildJobDetailBody(jobId: JobId): string {
       break;
     default:
       main = def.title;
-  }
-  if (isTier12JobId(jobId)) {
-    return `${main}\n\n${tier12CareerDetailBlock(def.baseCooldownMs)}`;
   }
   return main;
 }

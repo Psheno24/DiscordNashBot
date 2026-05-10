@@ -65,29 +65,16 @@ export function tier12ShiftsForNextRank(totalShifts: number, baseCooldownMs: num
   return (rank + 1) * spr;
 }
 
-export function tier12CareerDetailBlock(baseCooldownMs: number): string {
-  const spr = tier12ShiftsPerRank(baseCooldownMs);
-  const perDay = Math.max(1, Math.ceil(MS_PER_DAY / Math.max(1, baseCooldownMs)));
-  return [
-    "**Карьера (т1–т2):** счётчик **смен на этой профессии** сохраняется после **увольнения**.",
-    `**Шаг ранга:** **${perDay}** смен ≈ **24** ч при штатном КД → за **${TIER12_MONTH_EQUIV_DAYS}** таких «дней» нужно **${spr}** смен на **этой** работе (**⌈24 ч / КД⌉ × ${TIER12_MONTH_EQUIV_DAYS}**). У **доставки** КД для формулы всегда **3** ч из вакансии (аренда авто ускоряет смены, но **не** ускоряет карьеру).`,
-    `**Должности:** ранги **0–${TIER12_MAX_RANK}** (**${TIER12_MAX_RANK + 1}** ступеней), дальше — только макс. надбавка.`,
-    `**Надбавка к сумме смены:** **ранг × ${BONUS_STEP_TIER1_RUB}** ₽ (тир **1**) или **× ${BONUS_STEP_TIER2_RUB}** ₽ (тир **2**); при ранге **0** надбавки нет.`,
-  ].join("\n\n");
-}
-
-/** Строки для эмбеда: должность, прогресс, надбавка при текущем ранге (по числу смен `shiftsTotal`). */
+/** Две строки для эмбеда: должность и прогресс смен; надбавка от ранга. */
 export function tier12CareerEmbedLines(jobId: Tier12JobId, shiftsTotal: number, baseCooldownMs: number): string[] {
-  const spr = tier12ShiftsPerRank(baseCooldownMs);
   const rank = tier12RankFromShifts(shiftsTotal, baseCooldownMs);
   const title = tier12RankTitle(jobId, rank);
   const bonus = tier12RankFlatBonusRub(jobId, rank);
   const nextAt = tier12ShiftsForNextRank(shiftsTotal, baseCooldownMs);
-  const cdH = baseCooldownMs / (60 * 60 * 1000);
-  const cdLabel = Number.isInteger(cdH) ? String(cdH) : String(cdH).replace(".", ",");
-  const prog =
+  const progress =
     nextAt == null
-      ? `Карьера: **${title}** (ранг **${rank}**, **макс.**) · смен на профессии: **${shiftsTotal}** · надбавка к смене: **+${bonus}** ₽ · шаг: **${spr}** смен (**${cdLabel}** ч КД в вакансии).`
-      : `Карьера: **${title}** (ранг **${rank}**) · смен **${shiftsTotal}** / **${nextAt}** до следующей · надбавка к смене: **+${bonus}** ₽ · шаг: **${spr}** смен (**${cdLabel}** ч КД).`;
-  return [prog];
+      ? `**${title}** (ранг **${rank}**, **макс.**) · смен **${shiftsTotal}**`
+      : `**${title}** (ранг **${rank}**) · смен **${shiftsTotal}** / **${nextAt}** до следующей`;
+  const bonusLine = `**Надбавка от ранга:** **+${bonus}** ₽`;
+  return [progress, bonusLine];
 }
