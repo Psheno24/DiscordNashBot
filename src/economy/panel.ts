@@ -72,7 +72,6 @@ import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub } from ".
 import { tier3RankTitle } from "./tier3RankTitles.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
-import { drawSimNumberFromPool, releaseSimNumberToPool } from "./simPoolStore.js";
 import { mskTodayYmd } from "./mskCalendar.js";
 import {
   isTier12JobId,
@@ -955,12 +954,23 @@ function rollSolePropStaffOutcome(u: EconomyUser, now: number): { patch: Partial
   return { patch, detail: "Персонал без заметных изменений." };
 }
 
-function rollNewSimDigits(): string {
-  if (Math.random() < 0.28) {
-    const fromPool = drawSimNumberFromPool();
-    if (fromPool) return fromPool;
+/** Равномерно среди **10 000…99 999**, исключая номера, уже выданные кому-либо на сервере. */
+function rollNewSimDigits(guildId: string): string {
+  const taken = new Set<string>();
+  for (const { user } of listEconomyUsers(guildId)) {
+    const n = user.courierSimNumber;
+    if (n && /^\d{5}$/.test(n)) taken.add(n);
   }
-  return String(randInt(10000, 99999));
+  const freeCount = 90_000 - taken.size;
+  if (freeCount <= 0) return String(randInt(10_000, 99_999));
+  let k = Math.floor(Math.random() * freeCount);
+  for (let v = 10_000; v <= 99_999; v++) {
+    const s = String(v);
+    if (taken.has(s)) continue;
+    if (k === 0) return s;
+    k--;
+  }
+  return String(randInt(10_000, 99_999));
 }
 
 function hasActiveBikeRental(u: ReturnType<typeof getEconomyUser>, now: number): boolean {
@@ -1490,8 +1500,8 @@ function buildShopSimEmbed(member: GuildMember): EmbedBuilder {
     hasSim
       ? "**Замена номера** — новый случайный 5-значный номер (**" +
         SHOP_SIM_NEW_PRICE_RUB +
-        " ₽**). Текущий баланс симки **не меняется**. Старый номер может снова попасть в продажу."
-      : "**Первая симка** — случайный 5-значный номер (**" +
+        " ₽**), **равновероятно** среди свободных на сервере. Текущий баланс симки **не меняется**."
+      : "**Первая симка** — номер **10 000…99 999**, **равновероятно** среди свободных на сервере (**" +
         SHOP_SIM_NEW_PRICE_RUB +
         " ₽**), на баланс симки **+" +
         SHOP_SIM_START_BALANCE_RUB +
@@ -3053,8 +3063,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     const old = u.courierSimNumber;
-    if (old) releaseSimNumberToPool(old);
-    const next = rollNewSimDigits();
+    const next = rollNewSimDigits(member.guild.id);
     const replacing = Boolean(old);
     patchEconomyUser(member.guild.id, member.id, {
       rubles: u.rubles - SHOP_SIM_NEW_PRICE_RUB,
