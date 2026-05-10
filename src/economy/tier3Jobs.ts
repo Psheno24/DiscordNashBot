@@ -34,10 +34,10 @@ export const JOBS_TIER3: Tier3JobDef[] = [
     id: "officeAnalyst",
     title: "Офис · аналитик",
     baseCooldownMs: 12 * 60 * 60 * 1000,
-    basePayoutRub: 2_200,
+    basePayoutRub: 380,
     description: [
-      "**Легальный** тир-3: оклад за смену + **пассив в полночь МСК**, стаж **30 дней** → должность (**ранг**) и сильнее пассив.",
-      "**Подработка** (крупная премия, реже) и **начальник** (удача по КД) — в «Моя работа».",
+      "**Легальный** тир-3: основной доход — **пассив в полночь МСК**; смены дают скромный оклад. Стаж **30 дней** → ранг и сильнее пассив.",
+      "**Отчёт** и **совещание** (КД **24 ч** каждое) — небольшой бонус **10–30%** от «дневного пассива»-ориентира.",
     ].join("\n"),
     reqSkills: { communication: 30, logistics: 28, discipline: 35 },
     archetype: "legal",
@@ -49,8 +49,8 @@ export const JOBS_TIER3: Tier3JobDef[] = [
     baseCooldownMs: 3.5 * 60 * 60 * 1000,
     basePayoutRub: 0,
     description: [
-      "**Нелегальный** тир-3: **короткий КД**, доход **рандом** (тяжёлый минус возможен, высокий потолок при удаче).",
-      "**Пассива нет.** Стаж МСК и ранг усиливают **удачные** ветки.",
+      "**Нелегальный** тир-3: **короткий КД** смены, доход **рандом** (тяжёлый минус возможен, высокий потолок при удаче).",
+      "**Пассива нет.** **Связь** и **куратор** (КД **24 ч** каждое): мелкий бонус к ₽ и шанс ускорить стаж к **повышению**.",
     ].join("\n"),
     reqSkills: { communication: 42, logistics: 38, discipline: 48 },
     archetype: "illegal",
@@ -60,10 +60,10 @@ export const JOBS_TIER3: Tier3JobDef[] = [
     id: "soleProp",
     title: "ИП · услуги",
     baseCooldownMs: 8 * 60 * 60 * 1000,
-    basePayoutRub: 420,
+    basePayoutRub: 0,
     description: [
-      "**ИП** тир-3: **вложения** в оборот (до **500 000 000** ₽), **престиж** и **риск** влияют на **ночной пассив**; при **риске ≥ 1** к ночи добавляется лёгкий разброс.",
-      "Смена: фикс + доля от оборота + ранг + **престиж**; при увольнении **капитал возвращается**.",
+      "**ИП** тир-3: доход **только пассивом** в полночь МСК от **баланса бизнеса** (до **500 000 000** ₽); **престиж** слегка усиливает пассив.",
+      "**Реклама** (риск/доход с баланса бизнеса, лимит суммы растёт с рангом), **персонал** (КД **7 дн.**), **контроль** (КД **сутки**). Пополнение и вывод баланса бизнеса — кнопками **в бизнес** / **на счёт**.",
     ].join("\n"),
     reqSkills: { communication: 55, logistics: 52, discipline: 60 },
     archetype: "ip",
@@ -84,8 +84,11 @@ export function tier3PromotionRank(streakDays: number): number {
   return Math.min(TIER3_MAX_PROMOTION_RANK, Math.floor(Math.max(0, streakDays) / TIER3_PROMOTION_EVERY_DAYS));
 }
 
-export const TIER3_SIDE_GIG_CD_MS = 72 * 60 * 60 * 1000;
-export const TIER3_BOSS_CD_MS = 7 * 24 * 60 * 60 * 1000;
+export const TIER3_SIDE_GIG_CD_MS = 24 * 60 * 60 * 1000;
+export const TIER3_BOSS_CD_MS = 24 * 60 * 60 * 1000;
+export const SOLE_PROP_STAFF_CD_MS = 7 * 24 * 60 * 60 * 1000;
+export const SOLE_PROP_AD_CD_MS = 24 * 60 * 60 * 1000;
+export const SOLE_PROP_CONTROL_CD_MS = 24 * 60 * 60 * 1000;
 export const SOLE_PROP_CAP_MAX = 500_000_000;
 export const SOLE_PROP_RISK_MIN = -2;
 export const SOLE_PROP_RISK_MAX = 2;
@@ -109,6 +112,8 @@ export function computeTier3PassiveRub(input: {
   solePropCapitalRub: number;
   solePropRiskDial: number;
   prestigePoints?: number;
+  solePropPassiveEffMult?: number;
+  solePropPassiveTempMult?: number;
 }): number {
   const rank = tier3PromotionRank(input.streakDays);
   const mult = passiveMultFromRank(rank);
@@ -128,7 +133,9 @@ export function computeTier3PassiveRub(input: {
   if (dial >= 1) {
     riskJitter += (randInt(-10, 10) / 100) * dial;
   }
-  return Math.max(0, Math.floor(base * mult * riskJitter * prestigeMult));
+  const effM = Math.min(1, Math.max(0.3, input.solePropPassiveEffMult ?? 1));
+  const tmpM = Math.min(1.35, Math.max(1, input.solePropPassiveTempMult ?? 1));
+  return Math.max(0, Math.floor(base * mult * riskJitter * prestigeMult * effM * tmpM));
 }
 
 export type Tier3StreakTickResult = {
@@ -170,6 +177,16 @@ export function tier3PatchWhenJobChanges(prevUser: EconomyUser, nextJobId: JobId
     if (cap > 0) patch.rubles = prevUser.rubles + cap;
     patch.solePropCapitalRub = undefined;
     patch.solePropRiskDial = undefined;
+    patch.solePropControlMskYmd = undefined;
+    patch.solePropMissedControlStreak = undefined;
+    patch.solePropControlConsecDays = undefined;
+    patch.solePropPassiveEffMult = undefined;
+    patch.solePropPassiveTempMult = undefined;
+    patch.solePropPassiveTempUntilMs = undefined;
+    patch.solePropAdvertReadyAt = undefined;
+    patch.solePropStaffReadyAt = undefined;
+    patch.solePropControlReadyAt = undefined;
+    patch.lastWorkAt = undefined;
   }
 
   const leavingTier3Slot = Boolean(prev && isTier3JobId(prev) && prev !== nextJobId);
@@ -187,6 +204,10 @@ export function tier3PatchWhenJobChanges(prevUser: EconomyUser, nextJobId: JobId
     patch.jobMskDayStreak = 0;
     patch.economyLastMskYmd = undefined;
     patch.jobMskStreakAnchorJobId = undefined;
+  }
+
+  if (nextJobId === "soleProp" && prev !== "soleProp") {
+    patch.lastWorkAt = undefined;
   }
 
   return patch;

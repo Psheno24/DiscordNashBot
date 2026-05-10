@@ -27,16 +27,19 @@ import {
   listEconomyUsers,
   patchEconomyUser,
   type FocusPreset,
+  type EconomyUser,
   type JobId,
   type SkillId,
 } from "./userStore.js";
 import {
+  computeTier3PassiveRub,
   getTier3JobDef,
   isTier3JobId,
   JOBS_TIER3,
+  SOLE_PROP_AD_CD_MS,
   SOLE_PROP_CAP_MAX,
-  SOLE_PROP_RISK_MAX,
-  SOLE_PROP_RISK_MIN,
+  SOLE_PROP_CONTROL_CD_MS,
+  SOLE_PROP_STAFF_CD_MS,
   TIER3_BOSS_CD_MS,
   TIER3_SIDE_GIG_CD_MS,
   tier3PatchWhenJobChanges,
@@ -57,11 +60,11 @@ import {
   HOUSING_RENT_PERIOD_MS,
   HOUSING_RENT_PRESTIGE_ONE_TIME,
   PHONE_MODELS,
-  solePropPrestigeIncomeMult,
 } from "./economyCatalog.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
 import { drawSimNumberFromPool, releaseSimNumberToPool } from "./simPoolStore.js";
+import { mskTodayYmd } from "./mskCalendar.js";
 
 export const ECON_BUTTON_MENU = "econ:menu";
 export const ECON_BUTTON_PROFILE = "econ:profile";
@@ -112,18 +115,18 @@ const ECON_WORK_BUTTON_TIER2 = "econ:work:tier2";
 const ECON_WORK_BUTTON_TIER3 = "econ:work:tier3";
 const ECON_TIER3_SIDE = "econ:work:t3:side";
 const ECON_TIER3_BOSS = "econ:work:t3:boss";
-const ECON_TIER3_IP_INVEST_5K = "econ:work:t3:ip5k";
-const ECON_TIER3_IP_INVEST_25K = "econ:work:t3:ip25k";
-const IP_INVEST_AMOUNTS: Record<string, number> = {
-  [ECON_TIER3_IP_INVEST_5K]: 5_000,
-  [ECON_TIER3_IP_INVEST_25K]: 25_000,
-};
-const ECON_TIER3_IP_RISK_DOWN = "econ:work:t3:riskDn";
-const ECON_TIER3_IP_RISK_UP = "econ:work:t3:riskUp";
+const ECON_IP_AD_OPEN = "econ:work:ip:adOpen";
+const ECON_IP_STAFF = "econ:work:ip:staff";
+const ECON_IP_CONTROL = "econ:work:ip:control";
+const ECON_IP_DEP_OPEN = "econ:work:ip:depOpen";
+const ECON_IP_WD_OPEN = "econ:work:ip:wdOpen";
 const ECON_PLAYERS_BUTTON_TOP_PS = "econ:players:topPs";
 const ECON_PLAYERS_BUTTON_TOP_RUB = "econ:players:topRub";
 
 const ECON_MODAL_SIM_TOPUP = "modal:econ:simTopup";
+const ECON_MODAL_IP_AD = "modal:econ:ipAd";
+const ECON_MODAL_IP_DEP = "modal:econ:ipDep";
+const ECON_MODAL_IP_WD = "modal:econ:ipWd";
 
 export const ECON_FEED_BUTTON_ARCHIVE = "econFeed:archive";
 const ECON_FEED_BUTTON_PAGE_PREFIX = "econFeed:page:";
@@ -721,6 +724,83 @@ function formatDelta(n: number): string {
   return `${sign}${Math.abs(n).toLocaleString("ru-RU")} ₽`;
 }
 
+/** Ориентир «ночного пассива» офиса того же ранга — для бонусов 10–30% у тир-3. */
+function tier3ReferencePassiveRubFromStreak(streakDays: number): number {
+  const office = getTier3JobDef("officeAnalyst");
+  const rank = tier3PromotionRank(streakDays);
+  return Math.floor(office.passiveBaseRub * (1 + 0.08 * rank));
+}
+
+function solePropAdMaxRub(streakDays: number): number {
+  const rank = tier3PromotionRank(streakDays);
+  return Math.min(SOLE_PROP_CAP_MAX, 50_000 + rank * 15_000);
+}
+
+function rubFromTier3MetaPercent(streakDays: number): number {
+  const ref = tier3ReferencePassiveRubFromStreak(streakDays);
+  const p = 0.1 + Math.random() * 0.2;
+  return Math.max(0, Math.floor(ref * p));
+}
+
+function solePropAdvertOutcome(
+  bizBal: number,
+  amount: number,
+  maxAd: number,
+): { ok: boolean; delta: number; detail: string } {
+  if (amount < 10_000 || amount > maxAd || amount > bizBal) {
+    return { ok: false, delta: 0, detail: "Сумма вне диапазона или больше баланса бизнеса." };
+  }
+  const frac = maxAd > 0 ? amount / maxAd : 1;
+  const failP = Math.min(0.92, 0.22 + 0.58 * Math.pow(frac, 1.15));
+  if (Math.random() < failP) {
+    const lossMult = 0.7 + Math.random() * 0.3;
+    const loss = Math.min(bizBal, Math.floor(amount * lossMult));
+    return { ok: false, delta: -loss, detail: `Реклама не зашла: **${formatDelta(-loss)}** с баланса бизнеса.` };
+  }
+  const gainPct = 0.07 + 0.38 * (1 - frac);
+  const jitter = 0.88 + Math.random() * 0.28;
+  const gain = Math.floor(amount * gainPct * jitter);
+  return { ok: true, delta: gain, detail: `Реклама сработала: **+${fmt(gain)}** ₽ на баланс бизнеса.` };
+}
+
+function rollSolePropStaffOutcome(u: EconomyUser, now: number): { patch: Partial<EconomyUser>; detail: string } {
+  const eff0 = u.solePropPassiveEffMult ?? 1;
+  const patch: Partial<EconomyUser> = { solePropStaffReadyAt: now + SOLE_PROP_STAFF_CD_MS };
+  const r = Math.random();
+  if (r < 0.32) {
+    const mult = Math.round((1.1 + Math.random() * 0.2) * 100) / 100;
+    const w = [0.35, 0.28, 0.2, 0.12, 0.05];
+    let acc = 0;
+    const roll = Math.random();
+    let days = 5;
+    for (let i = 0; i < w.length; i++) {
+      acc += w[i];
+      if (roll < acc) {
+        days = i + 1;
+        break;
+      }
+    }
+    patch.solePropPassiveTempMult = mult;
+    patch.solePropPassiveTempUntilMs = now + days * 86400000;
+    return { patch, detail: `Слаженнее: временный множ. **×${mult.toFixed(2)}** на **${days}** дн.` };
+  }
+  if (r < 0.47) {
+    patch.solePropPassiveEffMult = 1;
+    return { patch, detail: "Новый набор: эффективность выровнена к **×1.0**." };
+  }
+  if (r < 0.62) {
+    const ne = Math.round(Math.min(1, Math.max(0.3, eff0 - 0.1)) * 10) / 10;
+    patch.solePropPassiveEffMult = ne;
+    return { patch, detail: `Текучка: эффективность **×${ne.toFixed(1)}**.` };
+  }
+  if (r < 0.72) {
+    patch.solePropPassiveTempMult = 1;
+    patch.solePropPassiveTempUntilMs = undefined;
+    return { patch, detail: "Разлад: временный буст снят." };
+  }
+  return { patch, detail: "Персонал без заметных изменений." };
+}
+
 function rollNewSimDigits(): string {
   if (Math.random() < 0.28) {
     const fromPool = drawSimNumberFromPool();
@@ -781,14 +861,14 @@ function jobPayoutEmbedLine(jobId: JobId, baseRub: number): string {
     return "Оплата за смену: **без фикса** — сильный разброс (до **−280…+1200 ₽**; ранг и стрик усиливают **плюсовые** ветки).";
   }
   if (jobId === "soleProp") {
-    return "Оплата за смену: **фикс + оборот** — база **420** ₽ + доля от вложенного капитала; ранг по стажу добавляет стабильный бонус; **престиж** множит итог.";
+    return "Доход: **только ночной пассив** МСК от баланса бизнеса (**реклама** / **персонал** / **контроль** — отдельно).";
   }
   return `Оплата за смену: **${baseRub} ₽**`;
 }
 
 function jobPayoutShortForMenu(jobId: JobId, baseRub: number): string {
   if (jobUsesVariablePayout(jobId)) return "без фикса (рандом)";
-  if (jobId === "soleProp") return `~${baseRub}+ ₽`;
+  if (jobId === "soleProp") return "пассив ночью";
   return `${baseRub} ₽`;
 }
 
@@ -1116,11 +1196,17 @@ function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
   const now = Date.now();
   const state = canWorkNow(u, u.jobId, now);
   const cd = u.jobId === "courier" ? effectiveCourierCooldownMs(u, now) : def.baseCooldownMs;
-  const lines = [
-    `Текущая работа: **${def.title}**`,
-    `Оплата за смену: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}** · КД: **${cdHoursLabel(cd)} ч**`,
-    state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
-  ];
+  const lines =
+    u.jobId === "soleProp"
+      ? ([
+          `Текущая работа: **${def.title}**`,
+          `Доход: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}** · смен **нет** (только пассив и действия бизнеса).`,
+        ] as string[])
+      : [
+          `Текущая работа: **${def.title}**`,
+          `Оплата за смену: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}** · КД: **${cdHoursLabel(cd)} ч**`,
+          state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
+        ];
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Работа")
@@ -1264,6 +1350,8 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
     extra.push(req.ok ? "Требования: **выполнены**." : `Требования: **не выполнены**.\n- ${req.missing.join("\n- ")}`);
   }
 
+  const shiftLine =
+    jobId === "soleProp" ? "Смены **нет** — только пассив ночью и кнопки бизнеса." : `КД смены: **${cdHoursLabel(cd)} ч**`;
   return new EmbedBuilder()
     .setColor(PROFILE_COLOR)
     .setTitle(`${def.title}`)
@@ -1272,7 +1360,7 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
         def.description,
         "",
         jobPayoutEmbedLine(jobId, def.basePayoutRub),
-        `КД смены: **${cdHoursLabel(cd)} ч**`,
+        shiftLine,
         ...(extra.length ? ["", ...extra] : []),
         "",
         u.jobId === jobId ? "Статус: **это ваша текущая работа**." : "Статус: **не выбрана**.",
@@ -1302,17 +1390,44 @@ function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, no
   const lines: string[] = [];
   lines.push(`**Должность (ранг):** **${rank}** · стрик МСК: **${u.jobMskDayStreak ?? 0}** дн.`);
   if (def.archetype === "legal") {
-    lines.push(`Пассив в полночь МСК: **~${def.passiveBaseRub}** ₽ базы × множитель ранга (см. тик ленты).`);
+    lines.push(`Пассив в полночь МСК — **основной** доход; смены — дополнение.`);
+    const ref = tier3ReferencePassiveRubFromStreak(u.jobMskDayStreak ?? 0);
+    lines.push(`Ориентир «дневного пассива» для бонусов: **~${fmt(ref)}** ₽.`);
   } else if (def.archetype === "illegal") {
-    lines.push(`Пассива **нет**; стрик и ранг **слегка** поднимают удачные смены.`);
+    lines.push(`Пассива **нет**; смены + мелкие действия **24 ч** КД каждое.`);
   } else {
-    lines.push(`В обороте ИП: **${fmt(u.solePropCapitalRub ?? 0)}** ₽ / **${SOLE_PROP_CAP_MAX}** max · риск **${u.solePropRiskDial ?? 0}** (**${SOLE_PROP_RISK_MIN}**…**${SOLE_PROP_RISK_MAX}**).`);
+    const sdef = getTier3JobDef("soleProp");
+    const passEst = computeTier3PassiveRub({
+      jobId: "soleProp",
+      def: sdef,
+      streakDays: u.jobMskDayStreak ?? 0,
+      solePropCapitalRub: u.solePropCapitalRub ?? 0,
+      solePropRiskDial: u.solePropRiskDial ?? 0,
+      prestigePoints: u.prestigePoints ?? 0,
+      solePropPassiveEffMult: u.solePropPassiveEffMult ?? 1,
+      solePropPassiveTempMult: u.solePropPassiveTempMult ?? 1,
+    });
+    lines.push(`Баланс бизнеса: **${fmt(u.solePropCapitalRub ?? 0)}** ₽ · оценка пассива/ночь: **~${fmt(passEst)}** ₽.`);
+    lines.push(
+      `Эффективность пассива: **×${(u.solePropPassiveEffMult ?? 1).toFixed(1)}** · временный множ.: **×${(u.solePropPassiveTempMult ?? 1).toFixed(2)}**${
+        u.solePropPassiveTempUntilMs && now < u.solePropPassiveTempUntilMs
+          ? ` до <t:${Math.floor(u.solePropPassiveTempUntilMs / 1000)}:R>`
+          : ""
+      }.`,
+    );
+    const adL = (u.solePropAdvertReadyAt ?? 0) - now;
+    const stL = (u.solePropStaffReadyAt ?? 0) - now;
+    const ctL = (u.solePropControlReadyAt ?? 0) - now;
+    lines.push(adL > 0 ? `Реклама: через **${formatCooldown(adL)}**.` : `Реклама: **доступна**.`);
+    lines.push(stL > 0 ? `Персонал: через **${formatCooldown(stL)}**.` : `Персонал: **доступен**.`);
+    lines.push(ctL > 0 ? `Контроль: через **${formatCooldown(ctL)}**.` : `Контроль: **доступен**.`);
+    return lines;
   }
   const sideLeft = (u.tier3SideGigReadyAt ?? 0) - now;
   const bossLeft = (u.tier3BossReadyAt ?? 0) - now;
-  lines.push(sideLeft > 0 ? `Подработка: через **${formatCooldown(sideLeft)}**.` : `Подработка: **доступна**.`);
-  const bossLabel = def.archetype === "illegal" ? "Куратор" : "Начальник";
-  lines.push(bossLeft > 0 ? `${bossLabel}: через **${formatCooldown(bossLeft)}**.` : `${bossLabel}: **доступен**.`);
+  lines.push(sideLeft > 0 ? `Связь: через **${formatCooldown(sideLeft)}**.` : `Связь: **доступна**.`);
+  const bossLabel = def.archetype === "illegal" ? "Куратор" : "Совещание";
+  lines.push(bossLeft > 0 ? `${bossLabel}: через **${formatCooldown(bossLeft)}**.` : `${bossLabel}: **доступно**.`);
   return lines;
 }
 
@@ -1322,16 +1437,16 @@ function buildTier3JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
     const jd = jobDefFromTier3(d);
     const cdh = cdHoursLabel(d.baseCooldownMs);
     const pay = jobPayoutShortForMenu(jd.id, jd.basePayoutRub);
-    lines.push(`**${d.title}** — ${pay}, КД **${cdh} ч**. Требования: ${formatJobTierReqLine(jd)}`);
+    lines.push(`**${d.title}** — ${pay}, КД смены **${cdh} ч**. Требования: ${formatJobTierReqLine(jd)}`);
   }
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Профессии (тир 3)")
     .setDescription(
       [
-        "**Легал** — пассив в полночь МСК, стаж 30 дней → ранг и больше пассива.",
-        "**Нелегал** — короткий КД и сильный рандом, пассива почти нет.",
-        "**ИП** — вложения и «риск» крутят ночной пассив.",
+        "**Легал** — основной доход **пассивом** в полночь МСК; **связь** и **совещание** (КД **24 ч**) дают **10–30%** от ориентира пассива.",
+        "**Нелегал** — короткий КД смены и рандом; **связь** + **куратор** (КД **24 ч**) — мелкий ₽ и шанс ускорить стаж к повышению.",
+        "**ИП** — **только пассив** ночью от баланса бизнеса; **реклама**, **персонал** (7 дн.), **контроль** (сутки), пополнение/вывод.",
         "",
         ...lines,
       ].join("\n\n"),
@@ -1356,54 +1471,40 @@ function buildTier3ActionRows(member: GuildMember, jobId: JobId): ActionRowBuild
   const u = getEconomyUser(member.guild.id, member.id);
   const now = Date.now();
   const def = getTier3JobDef(jobId as Tier3JobId);
+
+  if (def.archetype === "ip") {
+    const adR = !u.solePropAdvertReadyAt || now >= u.solePropAdvertReadyAt;
+    const stR = !u.solePropStaffReadyAt || now >= u.solePropStaffReadyAt;
+    const ctR = !u.solePropControlReadyAt || now >= u.solePropControlReadyAt;
+    return [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_IP_AD_OPEN).setLabel("Реклама").setStyle(ButtonStyle.Primary).setDisabled(!adR),
+        new ButtonBuilder().setCustomId(ECON_IP_STAFF).setLabel("Персонал").setStyle(ButtonStyle.Secondary).setDisabled(!stR),
+        new ButtonBuilder().setCustomId(ECON_IP_CONTROL).setLabel("Контроль").setStyle(ButtonStyle.Secondary).setDisabled(!ctR),
+      ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_IP_DEP_OPEN).setLabel("В бизнес…").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_IP_WD_OPEN).setLabel("На счёт…").setStyle(ButtonStyle.Secondary).setDisabled((u.solePropCapitalRub ?? 0) < 1),
+      ),
+    ];
+  }
+
   const sideReady = !u.tier3SideGigReadyAt || now >= u.tier3SideGigReadyAt;
   const bossReady = !u.tier3BossReadyAt || now >= u.tier3BossReadyAt;
-
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  rows.push(
+  return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
+        new ButtonBuilder()
         .setCustomId(ECON_TIER3_SIDE)
-        .setLabel("Подработка (премия)")
+        .setLabel("Связь")
         .setStyle(ButtonStyle.Primary)
         .setDisabled(!sideReady),
       new ButtonBuilder()
         .setCustomId(ECON_TIER3_BOSS)
-        .setLabel(def.archetype === "illegal" ? "Куратор" : "Начальник")
+        .setLabel(def.archetype === "illegal" ? "Куратор" : "Совещание")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(!bossReady),
     ),
-  );
-
-  if (def.archetype === "ip") {
-    const cap = u.solePropCapitalRub ?? 0;
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(ECON_TIER3_IP_INVEST_5K)
-          .setLabel("Вложить 5 000 ₽")
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(u.rubles < 5_000 || cap >= SOLE_PROP_CAP_MAX),
-        new ButtonBuilder()
-          .setCustomId(ECON_TIER3_IP_INVEST_25K)
-          .setLabel("Вложить 25 000 ₽")
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(u.rubles < 25_000 || cap >= SOLE_PROP_CAP_MAX),
-        new ButtonBuilder()
-          .setCustomId(ECON_TIER3_IP_RISK_DOWN)
-          .setLabel("Риск −")
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled((u.solePropRiskDial ?? 0) <= SOLE_PROP_RISK_MIN),
-        new ButtonBuilder()
-          .setCustomId(ECON_TIER3_IP_RISK_UP)
-          .setLabel("Риск +")
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled((u.solePropRiskDial ?? 0) >= SOLE_PROP_RISK_MAX),
-      ),
-    );
-  }
-
-  return rows;
+  ];
 }
 
 function buildSwitchJobConfirmEmbed(member: GuildMember, newJobId: JobId): EmbedBuilder {
@@ -1441,20 +1542,32 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
 
   if (u.jobId === jobId) {
     const state = canWorkNow(u, jobId, now);
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(ECON_WORK_BUTTON_SHIFT)
-          .setLabel("Выйти на смену")
-          .setStyle(ButtonStyle.Success)
-          .setDisabled(!state.ok),
-        new ButtonBuilder()
-          .setCustomId(ECON_WORK_BUTTON_QUIT)
-          .setLabel("Уволиться")
-          .setStyle(ButtonStyle.Danger)
-          .setDisabled(!state.ok),
-      ),
-    );
+    if (jobId === "soleProp") {
+      rows.push(
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(ECON_WORK_BUTTON_QUIT)
+            .setLabel("Уволиться")
+            .setStyle(ButtonStyle.Danger)
+            .setDisabled(!state.ok),
+        ),
+      );
+    } else {
+      rows.push(
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(ECON_WORK_BUTTON_SHIFT)
+            .setLabel("Выйти на смену")
+            .setStyle(ButtonStyle.Success)
+            .setDisabled(!state.ok),
+          new ButtonBuilder()
+            .setCustomId(ECON_WORK_BUTTON_QUIT)
+            .setLabel("Уволиться")
+            .setStyle(ButtonStyle.Danger)
+            .setDisabled(!state.ok),
+        ),
+      );
+    }
     if (jobId === "courier" && !hasOwnedCourierCar(u) && !hasActiveBikeRental(u, now)) {
       rows.push(buildCourierBikeRow(member));
     }
@@ -1505,13 +1618,21 @@ function buildCurrentJobEmbed(
   const cd = u.jobId === "courier" ? effectiveCourierCooldownMs(u, now) : def.baseCooldownMs;
   const state = canWorkNow(u, u.jobId, now);
   const exp = getJobExp(u, u.jobId);
-  const lines = [
-    `Текущая работа: **${def.title}**`,
-    `Опыт смен на этой работе: **${exp}**`,
-    jobPayoutEmbedLine(u.jobId, def.basePayoutRub),
-    `КД смены: **${cdHoursLabel(cd)} ч**`,
-    state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
-  ];
+  const lines =
+    u.jobId === "soleProp"
+      ? [
+          `Текущая работа: **${def.title}**`,
+          `Опыт смен на этой работе: **${exp}**`,
+          jobPayoutEmbedLine(u.jobId, def.basePayoutRub),
+          "Смены **нет** — доход только **пассивом** в полночь МСК и действиями бизнеса.",
+        ]
+      : [
+          `Текущая работа: **${def.title}**`,
+          `Опыт смен на этой работе: **${exp}**`,
+          jobPayoutEmbedLine(u.jobId, def.basePayoutRub),
+          `КД смены: **${cdHoursLabel(cd)} ч**`,
+          state.ok ? "Смена: **доступна сейчас**." : `Смена: через **${formatCooldown(state.msLeft)}**.`,
+        ];
   const t3 = tier3StatusLines(u, u.jobId, now);
   if (t3.length) {
     lines.push("");
@@ -1555,16 +1676,28 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
 
   const state = canWorkNow(u, u.jobId, now);
   const backId = workCatalogBackButtonId(u.jobId);
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_SHIFT).setLabel("Выйти на смену").setStyle(ButtonStyle.Success).setDisabled(!state.ok),
-      new ButtonBuilder()
-        .setCustomId(ECON_WORK_BUTTON_QUIT)
-        .setLabel("Уволиться")
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(!state.ok),
-    ),
-  );
+  if (u.jobId === "soleProp") {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ECON_WORK_BUTTON_QUIT)
+          .setLabel("Уволиться")
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(!state.ok),
+      ),
+    );
+  } else {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_SHIFT).setLabel("Выйти на смену").setStyle(ButtonStyle.Success).setDisabled(!state.ok),
+        new ButtonBuilder()
+          .setCustomId(ECON_WORK_BUTTON_QUIT)
+          .setLabel("Уволиться")
+          .setStyle(ButtonStyle.Danger)
+          .setDisabled(!state.ok),
+      ),
+    );
+  }
   if (u.jobId === "courier" && !hasOwnedCourierCar(u) && !hasActiveBikeRental(u, now)) {
     rows.push(buildCourierBikeRow(member));
   }
@@ -1813,10 +1946,11 @@ function isEconomyButton(id: string): boolean {
       ECON_WORK_BUTTON_TIER3,
       ECON_TIER3_SIDE,
       ECON_TIER3_BOSS,
-      ECON_TIER3_IP_INVEST_5K,
-      ECON_TIER3_IP_INVEST_25K,
-      ECON_TIER3_IP_RISK_DOWN,
-      ECON_TIER3_IP_RISK_UP,
+      ECON_IP_AD_OPEN,
+      ECON_IP_STAFF,
+      ECON_IP_CONTROL,
+      ECON_IP_DEP_OPEN,
+      ECON_IP_WD_OPEN,
       ECON_WORK_BUTTON_SHIFT,
       ECON_WORK_BUTTON_MY_JOB,
       ECON_WORK_BUTTON_QUIT,
@@ -2282,13 +2416,100 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (
-    id === ECON_TIER3_SIDE ||
-    id === ECON_TIER3_BOSS ||
-    id === ECON_TIER3_IP_INVEST_5K ||
-    id === ECON_TIER3_IP_INVEST_25K ||
-    id === ECON_TIER3_IP_RISK_DOWN ||
-    id === ECON_TIER3_IP_RISK_UP
+    id === ECON_IP_AD_OPEN ||
+    id === ECON_IP_DEP_OPEN ||
+    id === ECON_IP_WD_OPEN ||
+    id === ECON_IP_STAFF ||
+    id === ECON_IP_CONTROL
   ) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    const now = Date.now();
+    if (u.jobId !== "soleProp") {
+      await interaction.reply({ content: "Эти действия доступны только на работе **ИП**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (id === ECON_IP_AD_OPEN) {
+      const maxAd = solePropAdMaxRub(u.jobMskDayStreak ?? 0);
+      const modal = new ModalBuilder().setCustomId(ECON_MODAL_IP_AD).setTitle(`Реклама (10k–${fmt(maxAd)} ₽ с бизнеса)`);
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("amount")
+            .setLabel("Сумма кампании с баланса бизнеса, ₽")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMinLength(4)
+            .setMaxLength(12),
+        ),
+      );
+      await interaction.showModal(modal);
+      return true;
+    }
+    if (id === ECON_IP_DEP_OPEN) {
+      const modal = new ModalBuilder().setCustomId(ECON_MODAL_IP_DEP).setTitle("На баланс бизнеса");
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("amount")
+            .setLabel("Сумма со счёта → в бизнес, ₽")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMinLength(1)
+            .setMaxLength(12),
+        ),
+      );
+      await interaction.showModal(modal);
+      return true;
+    }
+    if (id === ECON_IP_WD_OPEN) {
+      const modal = new ModalBuilder().setCustomId(ECON_MODAL_IP_WD).setTitle("Вывод из бизнеса");
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("amount")
+            .setLabel("Сумма на основной счёт, ₽")
+            .setStyle(TextInputStyle.Short)
+            .setRequired(true)
+            .setMinLength(1)
+            .setMaxLength(12),
+        ),
+      );
+      await interaction.showModal(modal);
+      return true;
+    }
+    if (id === ECON_IP_STAFF) {
+      if (u.solePropStaffReadyAt && now < u.solePropStaffReadyAt) {
+        await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+        return true;
+      }
+      const { patch, detail } = rollSolePropStaffOutcome(u, now);
+      patchEconomyUser(member.guild.id, member.id, patch);
+      await replyOrUpdate(interaction, {
+        embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [detail] })],
+        components: buildCurrentJobRows(member),
+      });
+      return true;
+    }
+    if (id === ECON_IP_CONTROL) {
+      if (u.solePropControlReadyAt && now < u.solePropControlReadyAt) {
+        await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
+        return true;
+      }
+      patchEconomyUser(member.guild.id, member.id, {
+        solePropControlMskYmd: mskTodayYmd(now),
+        solePropControlReadyAt: now + SOLE_PROP_CONTROL_CD_MS,
+      });
+      await replyOrUpdate(interaction, {
+        embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: ["Контроль отмечен на сегодня (МСК)."] })],
+        components: buildCurrentJobRows(member),
+      });
+      return true;
+    }
+    await interaction.reply({ content: "Действие не распознано.", flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id === ECON_TIER3_SIDE || id === ECON_TIER3_BOSS) {
     const u = getEconomyUser(member.guild.id, member.id);
     const now = Date.now();
     if (!u.jobId || !isTier3JobId(u.jobId)) {
@@ -2297,27 +2518,29 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     const jobId = u.jobId;
     const def3 = getTier3JobDef(jobId as Tier3JobId);
+    if (def3.archetype === "ip") {
+      await interaction.reply({
+        content: "На **ИП** нет этих кнопок — **реклама**, **персонал**, **контроль** и переводы **в бизнес / на счёт**.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
 
     if (id === ECON_TIER3_SIDE) {
       if (u.tier3SideGigReadyAt && now < u.tier3SideGigReadyAt) {
         await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
         return true;
       }
-      const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
-      const bonus = randInt(480, 920) + rank * 40;
+      const streak = u.jobMskDayStreak ?? 0;
+      const bonus = rubFromTier3MetaPercent(streak);
       patchEconomyUser(member.guild.id, member.id, {
         rubles: u.rubles + bonus,
         tier3SideGigReadyAt: now + TIER3_SIDE_GIG_CD_MS,
       });
-      appendFeedEvent({
-        ts: now,
-        guildId: member.guild.id,
-        type: "job:shift",
-        actorUserId: member.id,
-        text: `${member.toString()}: подработка **${def3.title}** (**+${bonus}** ₽).`,
+      await replyOrUpdate(interaction, {
+        embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [`Связь: **${formatDelta(bonus)}** на счёт (10–30% ориентира пассива).`] })],
+        components: buildCurrentJobRows(member),
       });
-      await ensureEconomyFeedPanel(interaction.client);
-      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
       return true;
     }
 
@@ -2326,83 +2549,41 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
         return true;
       }
+      if (def3.archetype === "legal") {
+        const streak = u.jobMskDayStreak ?? 0;
+        const bonus = rubFromTier3MetaPercent(streak);
+        patchEconomyUser(member.guild.id, member.id, {
+          rubles: u.rubles + bonus,
+          tier3BossReadyAt: now + TIER3_BOSS_CD_MS,
+        });
+        await replyOrUpdate(interaction, {
+          embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [`Совещание: **${formatDelta(bonus)}** на счёт (10–30% ориентира пассива).`] })],
+          components: buildCurrentJobRows(member),
+        });
+        return true;
+      }
       const streak = u.jobMskDayStreak ?? 0;
       const r = Math.random();
       let delta = 0;
       let detail: string;
-      if (r < 0.35) {
-        delta = randInt(5, 8);
-        detail =
-          def3.archetype === "illegal"
-            ? `Куратор доволен: **+${delta}** дн. к стрику (быстрее к следующей должности).`
-            : `Начальник доволен: **+${delta}** дн. к стрику (быстрее к следующей должности).`;
-      } else if (r < 0.75) {
-        detail = def3.archetype === "illegal" ? "Куратор нейтрален — **без изменений**." : "Начальник нейтрален — **без изменений**.";
+      if (r < 0.42) {
+        delta = randInt(5, 10);
+        detail = `Куратор даёт ход: **+${delta}** дн. к стрику (быстрее к следующему рангу).`;
+      } else if (r < 0.78) {
+        delta = randInt(2, 4);
+        detail = `Куратор подталкивает: **+${delta}** дн. к стрику.`;
       } else {
-        delta = -randInt(2, 6);
-        detail =
-          def3.archetype === "illegal"
-            ? `Куратор недоволен: **${delta}** дн. к стрику (откат прогресса).`
-            : `Начальник недоволен: **${delta}** дн. к стрику (откат прогресса).`;
+        detail = "Куратор на связи — **без изменений** по стрику.";
       }
-      const nextStreak = Math.max(0, streak + delta);
+      const nextStreak = streak + delta;
       patchEconomyUser(member.guild.id, member.id, {
         jobMskDayStreak: nextStreak,
         tier3BossReadyAt: now + TIER3_BOSS_CD_MS,
       });
-      appendFeedEvent({
-        ts: now,
-        guildId: member.guild.id,
-        type: "job:shift",
-        actorUserId: member.id,
-        text: `${member.toString()}: ${def3.archetype === "illegal" ? "куратор" : "начальник"} (**${def3.title}**): стрик **${streak}** → **${nextStreak}** дн.`,
-      });
-      await ensureEconomyFeedPanel(interaction.client);
       await replyOrUpdate(interaction, {
         embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [detail] })],
         components: buildCurrentJobRows(member),
       });
-      return true;
-    }
-
-    if (
-      jobId !== "soleProp" &&
-      (id === ECON_TIER3_IP_INVEST_5K ||
-        id === ECON_TIER3_IP_INVEST_25K ||
-        id === ECON_TIER3_IP_RISK_DOWN ||
-        id === ECON_TIER3_IP_RISK_UP)
-    ) {
-      await interaction.reply({ content: "Кнопки вложений только на работе **ИП**.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-
-    if (id === ECON_TIER3_IP_INVEST_5K || id === ECON_TIER3_IP_INVEST_25K) {
-      const amt = IP_INVEST_AMOUNTS[id];
-      if (!amt) {
-        await interaction.reply({ content: "Неизвестная сумма вложения.", flags: MessageFlags.Ephemeral });
-        return true;
-      }
-      const cap = u.solePropCapitalRub ?? 0;
-      const room = Math.max(0, SOLE_PROP_CAP_MAX - cap);
-      const take = Math.min(amt, room, u.rubles);
-      if (take <= 0) {
-        await interaction.reply({ content: "Недостаточно ₽ или достигнут **максимум** капитала в обороте.", flags: MessageFlags.Ephemeral });
-        return true;
-      }
-      patchEconomyUser(member.guild.id, member.id, {
-        rubles: u.rubles - take,
-        solePropCapitalRub: cap + take,
-      });
-      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
-      return true;
-    }
-
-    if (id === ECON_TIER3_IP_RISK_DOWN || id === ECON_TIER3_IP_RISK_UP) {
-      const curDial = u.solePropRiskDial ?? 0;
-      const nextDial = id === ECON_TIER3_IP_RISK_DOWN ? curDial - 1 : curDial + 1;
-      const clamped = Math.min(SOLE_PROP_RISK_MAX, Math.max(SOLE_PROP_RISK_MIN, nextDial));
-      patchEconomyUser(member.guild.id, member.id, { solePropRiskDial: clamped });
-      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
       return true;
     }
 
@@ -2568,6 +2749,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
 
+    if (jobId === "soleProp") {
+      await interaction.reply({ content: "На **ИП** смен **нет** — доход только пассивом и кнопками бизнеса.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
     if (jobId === "courier") {
       if (!u.hasPhone) {
         await interaction.reply({ content: "Купите **телефон** в магазине терминала.", flags: MessageFlags.Ephemeral });
@@ -2687,16 +2873,6 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       } else {
         extra = Math.floor(randInt(580, 1280) * posBoost * 1.12);
         notes.push(`крупный куш **${formatDelta(extra)}**.`);
-      }
-    } else if (jobId === "soleProp") {
-      const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
-      const cap = u.solePropCapitalRub ?? 0;
-      const prestigeMult = solePropPrestigeIncomeMult(u.prestigePoints ?? 0);
-      base = Math.floor((def.basePayoutRub + Math.floor(Math.sqrt(cap + 1) * 6) + rank * 28) * prestigeMult);
-      if (chance(0.04)) {
-        const loss = randInt(25, 70);
-        extra -= loss;
-        notes.push(`внеплановый расход **${formatDelta(-loss)}**`);
       }
     } else if (jobId === "courier") {
       // фикс в base
@@ -2881,6 +3057,85 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
     await interaction.reply({
       embeds: [buildShopSimEmbed(mem)],
       components: buildShopSimRows(mem),
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  if (modalId === ECON_MODAL_IP_AD || modalId === ECON_MODAL_IP_DEP || modalId === ECON_MODAL_IP_WD) {
+    if (!interaction.inGuild() || !interaction.guildId || !interaction.member) {
+      await interaction.reply({ content: "Эта форма работает только на сервере.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const mem = interaction.member as GuildMember;
+    if (mem.user.bot) {
+      await interaction.reply({ content: "Ботам экономика не положена.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const u = getEconomyUser(mem.guild.id, mem.id);
+    if (u.jobId !== "soleProp") {
+      await interaction.reply({ content: "Формы **ИП** доступны только на работе **ИП**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const rawIn = interaction.fields.getTextInputValue("amount").trim().replace(/\s/g, "").replace(",", ".");
+    const amount = Math.floor(Number(rawIn));
+    if (!Number.isFinite(amount) || amount < 1) {
+      await interaction.reply({ content: "Введите целое число **от 1 ₽**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const now = Date.now();
+    if (modalId === ECON_MODAL_IP_AD) {
+      if (u.solePropAdvertReadyAt && now < u.solePropAdvertReadyAt) {
+        await interaction.reply({ content: "Реклама ещё на перезарядке.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const maxAd = solePropAdMaxRub(u.jobMskDayStreak ?? 0);
+      const biz = u.solePropCapitalRub ?? 0;
+      const out = solePropAdvertOutcome(biz, amount, maxAd);
+      if (!out.ok && out.delta === 0) {
+        await interaction.reply({ content: out.detail, flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      const nextBiz = Math.max(0, biz + out.delta);
+      patchEconomyUser(mem.guild.id, mem.id, {
+        solePropCapitalRub: nextBiz,
+        solePropAdvertReadyAt: now + SOLE_PROP_AD_CD_MS,
+      });
+      await interaction.reply({
+        embeds: [buildCurrentJobEmbed(mem, { tier3ActionNotes: [out.detail] })],
+        components: buildCurrentJobRows(mem),
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    if (modalId === ECON_MODAL_IP_DEP) {
+      if (u.rubles < amount) {
+        await interaction.reply({ content: `На счёте только **${fmt(u.rubles)}** ₽.`, flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      patchEconomyUser(mem.guild.id, mem.id, {
+        rubles: u.rubles - amount,
+        solePropCapitalRub: (u.solePropCapitalRub ?? 0) + amount,
+      });
+      await interaction.reply({
+        embeds: [buildCurrentJobEmbed(mem, { tier3ActionNotes: [`На баланс бизнеса переведено **${fmt(amount)}** ₽.`] })],
+        components: buildCurrentJobRows(mem),
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    const bizW = u.solePropCapitalRub ?? 0;
+    if (amount > bizW) {
+      await interaction.reply({ content: `В бизнесе только **${fmt(bizW)}** ₽.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    patchEconomyUser(mem.guild.id, mem.id, {
+      rubles: u.rubles + amount,
+      solePropCapitalRub: bizW - amount,
+    });
+    await interaction.reply({
+      embeds: [buildCurrentJobEmbed(mem, { tier3ActionNotes: [`На основной счёт выведено **${fmt(amount)}** ₽.`] })],
+      components: buildCurrentJobRows(mem),
       flags: MessageFlags.Ephemeral,
     });
     return true;

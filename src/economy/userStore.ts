@@ -108,10 +108,31 @@ export interface EconomyUser {
   /** До какого unix ms доступен «разговор с начальником» (тир-3). */
   tier3BossReadyAt?: number;
 
-  /** Капитал в «обороте» ИП (₽), не на основном счёте; при уходе с soleProp возвращается. */
+  /**
+   * Баланс бизнеса ИП (₽): реклама, пополнения/вывод; ночной пассив считается от него.
+   * При уходе с soleProp возвращается на основной счёт.
+   */
   solePropCapitalRub?: number;
-  /** Ползунок риска ИП (−2…+2), влияет на ночной пассив. */
+  /** Ползунок риска ИП (−2…+2), влияет на ночной пассив (скрытый UI, по умолчанию 0). */
   solePropRiskDial?: number;
+  /** Последний МСК-день, когда нажали «Контроль» (YYYY-MM-DD). */
+  solePropControlMskYmd?: string;
+  /** Подряд МСК-дней без «Контроля» (для шанса просадки). */
+  solePropMissedControlStreak?: number;
+  /** Подряд МСК-дней с контролем (для восстановления множителя). */
+  solePropControlConsecDays?: number;
+  /** Множитель эффективности ночного пассива ИП (0.3…1.0). */
+  solePropPassiveEffMult?: number;
+  /** Временный множитель пассива после «Персонал» (1.0…1.3). */
+  solePropPassiveTempMult?: number;
+  /** До какого unix ms действует временный множитель. */
+  solePropPassiveTempUntilMs?: number;
+  /** КД «Реклама» ИП. */
+  solePropAdvertReadyAt?: number;
+  /** КД «Персонал» ИП. */
+  solePropStaffReadyAt?: number;
+  /** КД «Контроль» ИП. */
+  solePropControlReadyAt?: number;
 }
 
 interface StoreShape {
@@ -191,6 +212,37 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   if (Number.isFinite((u as any)?.solePropRiskDial)) {
     solePropRiskDial = Math.min(2, Math.max(-2, Math.floor((u as any).solePropRiskDial)));
   }
+
+  const solePropControlMskYmd =
+    typeof (u as any)?.solePropControlMskYmd === "string" && /^\d{4}-\d{2}-\d{2}$/.test((u as any).solePropControlMskYmd)
+      ? (u as any).solePropControlMskYmd
+      : undefined;
+  const solePropMissedControlStreak = Number.isFinite((u as any)?.solePropMissedControlStreak)
+    ? Math.max(0, Math.floor((u as any).solePropMissedControlStreak))
+    : undefined;
+  const solePropControlConsecDays = Number.isFinite((u as any)?.solePropControlConsecDays)
+    ? Math.max(0, Math.floor((u as any).solePropControlConsecDays))
+    : undefined;
+  let solePropPassiveEffMult: number | undefined;
+  if (Number.isFinite((u as any)?.solePropPassiveEffMult)) {
+    solePropPassiveEffMult = Math.min(1, Math.max(0.3, Math.round((u as any).solePropPassiveEffMult * 10) / 10));
+  }
+  let solePropPassiveTempMult: number | undefined;
+  if (Number.isFinite((u as any)?.solePropPassiveTempMult)) {
+    solePropPassiveTempMult = Math.min(1.35, Math.max(1, Math.round((u as any).solePropPassiveTempMult * 100) / 100));
+  }
+  const solePropPassiveTempUntilMs = Number.isFinite((u as any)?.solePropPassiveTempUntilMs)
+    ? Math.max(0, Math.floor((u as any).solePropPassiveTempUntilMs))
+    : undefined;
+  const solePropAdvertReadyAt = Number.isFinite((u as any)?.solePropAdvertReadyAt)
+    ? Math.max(0, Math.floor((u as any).solePropAdvertReadyAt))
+    : undefined;
+  const solePropStaffReadyAt = Number.isFinite((u as any)?.solePropStaffReadyAt)
+    ? Math.max(0, Math.floor((u as any).solePropStaffReadyAt))
+    : undefined;
+  const solePropControlReadyAt = Number.isFinite((u as any)?.solePropControlReadyAt)
+    ? Math.max(0, Math.floor((u as any).solePropControlReadyAt))
+    : undefined;
 
   const legacySimShifts = Number.isFinite((u as any)?.courierSimShiftsLeft) ? Math.max(0, Math.floor((u as any).courierSimShiftsLeft)) : 0;
   const legacyBikeShifts = Number.isFinite((u as any)?.courierBikeShiftsLeft) ? Math.max(0, Math.floor((u as any).courierBikeShiftsLeft)) : 0;
@@ -287,6 +339,15 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     tier3BossReadyAt,
     solePropCapitalRub,
     solePropRiskDial,
+    solePropControlMskYmd,
+    solePropMissedControlStreak,
+    solePropControlConsecDays,
+    solePropPassiveEffMult,
+    solePropPassiveTempMult,
+    solePropPassiveTempUntilMs,
+    solePropAdvertReadyAt,
+    solePropStaffReadyAt,
+    solePropControlReadyAt,
   };
 
   return out;

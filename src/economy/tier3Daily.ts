@@ -3,6 +3,7 @@ import { appendFeedEvent } from "./feedStore.js";
 import { processHousingMskMidnightForUser } from "./economyHousing.js";
 import { msUntilNextMskMidnight } from "./mskCalendar.js";
 import { getEconomyUser, listEconomyUsers, patchEconomyUser } from "./userStore.js";
+import { solePropMidnightPatch } from "./tier3SolePropMsk.js";
 import {
   computeTier3PassiveRub,
   computeTier3StreakAfterMskDay,
@@ -25,7 +26,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
       processHousingMskMidnightForUser(guild.id, userId, today, now);
     }
     for (const { userId } of entries) {
-      const u = getEconomyUser(guild.id, userId);
+      let u = getEconomyUser(guild.id, userId);
       if (u.economyLastMskYmd === today) continue;
       if (!u.jobId || !isTier3JobId(u.jobId)) continue;
 
@@ -39,6 +40,9 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
         prevAnchorJobId: u.jobMskStreakAnchorJobId,
       });
 
+      const solePropMskPatch = jobId === "soleProp" ? solePropMidnightPatch(u, today, now) : {};
+      u = { ...u, ...solePropMskPatch };
+
       const rankBefore = tier3PromotionRank(u.jobMskDayStreak ?? 0);
       const passive = computeTier3PassiveRub({
         jobId,
@@ -47,6 +51,8 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
         solePropCapitalRub: u.solePropCapitalRub ?? 0,
         solePropRiskDial: u.solePropRiskDial ?? 0,
         prestigePoints: u.prestigePoints ?? 0,
+        solePropPassiveEffMult: u.solePropPassiveEffMult,
+        solePropPassiveTempMult: u.solePropPassiveTempMult,
       });
       const rankAfter = tier3PromotionRank(streakOut.nextStreak);
 
@@ -56,6 +62,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
         jobMskDayStreak: streakOut.nextStreak,
         jobMskStreakAnchorJobId: streakOut.nextAnchorJobId,
         rubles: rublesNext,
+        ...solePropMskPatch,
       });
 
       const member = await guild.members.fetch(userId).catch(() => null);
