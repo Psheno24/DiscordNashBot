@@ -16,14 +16,21 @@ export function isTier12JobId(id: JobId): id is Tier12JobId {
   return (TIER12_JOB_IDS as readonly string[]).includes(id);
 }
 
-/** Надбавка **за единицу ранга** (ранг 0 → 0, ранг 3 → 3×step). */
-const BONUS_STEP_TIER1_RUB = 110;
-const BONUS_STEP_TIER2_RUB = 155;
-
 const TIER1: ReadonlySet<JobId> = new Set<Tier12JobId>(["courier", "waiter", "watchman"]);
 
 function tier12Tier(jobId: Tier12JobId): 1 | 2 {
   return TIER1.has(jobId) ? 1 : 2;
+}
+
+/** Множитель к выплате за смену по рангу (ранг **0** → **×1**). Тир 1: до **+20%**, тир 2: до **+25%**. */
+export function tier12RankIncomeMult(jobId: Tier12JobId, rank: number): number {
+  const r = Math.min(TIER12_MAX_RANK, Math.max(0, rank));
+  if (tier12Tier(jobId) === 1) {
+    const add = [0, 0.05, 0.1, 0.15, 0.2][r] ?? 0;
+    return 1 + add;
+  }
+  const add = [0, 0.06, 0.12, 0.18, 0.25][r] ?? 0;
+  return 1 + add;
 }
 
 /** Смен за один «ранг»: ⌈24ч / штатное КД⌉ × 30 (штатное КД вакансии; у доставки **не** учитывается укороченный КД от авто/вела). */
@@ -35,12 +42,6 @@ export function tier12ShiftsPerRank(baseCooldownMs: number): number {
 export function tier12RankFromShifts(totalShifts: number, baseCooldownMs: number): number {
   const spr = tier12ShiftsPerRank(baseCooldownMs);
   return Math.min(TIER12_MAX_RANK, Math.floor(Math.max(0, totalShifts) / spr));
-}
-
-export function tier12RankFlatBonusRub(jobId: Tier12JobId, rank: number): number {
-  if (rank <= 0) return 0;
-  const step = tier12Tier(jobId) === 1 ? BONUS_STEP_TIER1_RUB : BONUS_STEP_TIER2_RUB;
-  return rank * step;
 }
 
 const TITLES: Record<Tier12JobId, [string, string, string, string, string]> = {
@@ -69,12 +70,12 @@ export function tier12ShiftsForNextRank(totalShifts: number, baseCooldownMs: num
 export function tier12CareerEmbedLines(jobId: Tier12JobId, shiftsTotal: number, baseCooldownMs: number): string[] {
   const rank = tier12RankFromShifts(shiftsTotal, baseCooldownMs);
   const title = tier12RankTitle(jobId, rank);
-  const bonus = tier12RankFlatBonusRub(jobId, rank);
+  const mult = tier12RankIncomeMult(jobId, rank);
   const nextAt = tier12ShiftsForNextRank(shiftsTotal, baseCooldownMs);
   const progress =
     nextAt == null
       ? `**${title}** (ранг **${rank}**, **макс.**) · смен **${shiftsTotal}**`
       : `**${title}** (ранг **${rank}**) · смен **${shiftsTotal}** / **${nextAt}** до следующей`;
-  const bonusLine = `**Надбавка от ранга:** **+${bonus}** ₽`;
+  const bonusLine = `**Множитель от ранга к выплате:** **×${mult.toFixed(2)}**`;
   return [progress, bonusLine];
 }

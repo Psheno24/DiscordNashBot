@@ -62,6 +62,11 @@ export interface EconomyUser {
   /** Последний выход на смену по каждой профессии — КД считается от смены на **этой** работе. */
   lastWorkAtByJob?: Partial<Record<JobId, number>>;
 
+  /** МСК-дата (YYYY-MM-DD), для которой считается `workShiftsToday` (антиспам доставка/склад/офис). */
+  workShiftMskYmd?: string;
+  /** Счётчик смен за текущие МСК-сутки для антифарма (только доставка / склад / офис тир-3). */
+  workShiftsToday?: number;
+
   /** Куплен телефон в магазине (нужен на доставке). */
   hasPhone?: boolean;
   /** Модель телефона (влияет на престиж при покупке/апгрейде). */
@@ -293,6 +298,14 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     ? Math.max(0, Math.floor((u as any).solePropControlReadyAt))
     : undefined;
 
+  const workShiftMskYmd =
+    typeof (u as any)?.workShiftMskYmd === "string" && /^\d{4}-\d{2}-\d{2}$/.test((u as any).workShiftMskYmd)
+      ? (u as any).workShiftMskYmd
+      : undefined;
+  const workShiftsToday = Number.isFinite((u as any)?.workShiftsToday)
+    ? Math.max(0, Math.floor((u as any).workShiftsToday))
+    : undefined;
+
   const legacySimShifts = Number.isFinite((u as any)?.courierSimShiftsLeft) ? Math.max(0, Math.floor((u as any).courierSimShiftsLeft)) : 0;
   const legacyBikeShifts = Number.isFinite((u as any)?.courierBikeShiftsLeft) ? Math.max(0, Math.floor((u as any).courierBikeShiftsLeft)) : 0;
 
@@ -429,6 +442,8 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     solePropAdvertReadyAt,
     solePropStaffReadyAt,
     solePropControlReadyAt,
+    workShiftMskYmd,
+    workShiftsToday,
   };
 
   return out;

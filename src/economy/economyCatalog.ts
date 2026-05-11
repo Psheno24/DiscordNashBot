@@ -28,7 +28,7 @@ export function getPhoneDef(id: string | undefined): PhoneDef | undefined {
   return PHONE_MODELS.find((p) => p.id === id);
 }
 
-export type CarModelId = "car_used" | "car_500k" | "car_1m" | "car_3m" | "car_5m" | "car_10m";
+export type CarModelId = "car_scooter" | "car_used" | "car_500k" | "car_1m" | "car_3m" | "car_5m" | "car_10m";
 
 export interface CarDef {
   id: CarModelId;
@@ -43,6 +43,14 @@ export interface CarDef {
 const H = 60 * 60 * 1000;
 
 export const CAR_MODELS: CarDef[] = [
+  {
+    id: "car_scooter",
+    label: "Скутер",
+    priceRub: 80_000,
+    prestigeDelta: 40,
+    speedKmh: 55,
+    courierShiftCdMs: Math.round(2.5 * H),
+  },
   { id: "car_used", label: "Подержанный", priceRub: 300_000, prestigeDelta: 0, speedKmh: 90, courierShiftCdMs: 2 * H },
   { id: "car_500k", label: "Класс 500 тыс.", priceRub: 500_000, prestigeDelta: 120, speedKmh: 110, courierShiftCdMs: Math.round(1.8 * H) },
   { id: "car_1m", label: "Миллионник", priceRub: 1_000_000, prestigeDelta: 320, speedKmh: 130, courierShiftCdMs: Math.round(1.6 * H) },
@@ -99,7 +107,7 @@ export const HOUSING_RENT_PRESTIGE_ONE_TIME = 1_000;
 /** Доля цены квартиры, возвращаемая при продаже (остальное — «потери на сделке»). */
 export const APARTMENT_SELL_REFUND_RATE = 0.45;
 
-export type ApartmentId = "apt_2m" | "apt_5m" | "apt_12m" | "apt_25m" | "apt_45m" | "apt_70m" | "apt_100m";
+export type ApartmentId = "apt_2m" | "apt_1m" | "apt_5m" | "apt_12m" | "apt_25m" | "apt_45m" | "apt_70m" | "apt_100m";
 
 export interface ApartmentDef {
   id: ApartmentId;
@@ -112,6 +120,7 @@ export interface ApartmentDef {
 export const APARTMENT_MODELS: ApartmentDef[] = [
   /** Первая собственность: достижимость с тир-2 + арендой за несколько месяцев (MVP баланса). */
   { id: "apt_2m", label: "Комната (первое жильё)", priceRub: 550_000, prestigeDelta: 1_200, monthlyUtilityRub: 3_500 },
+  { id: "apt_1m", label: "Студия", priceRub: 1_000_000, prestigeDelta: 4_500, monthlyUtilityRub: 9_000 },
   { id: "apt_5m", label: "Однушка", priceRub: 5_000_000, prestigeDelta: 11_000, monthlyUtilityRub: 14_000 },
   { id: "apt_12m", label: "Двушка", priceRub: 12_000_000, prestigeDelta: 28_000, monthlyUtilityRub: 18_000 },
   { id: "apt_25m", label: "Улучшенная", priceRub: 25_000_000, prestigeDelta: 62_000, monthlyUtilityRub: 22_000 },

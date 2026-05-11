@@ -33,24 +33,24 @@ export const JOBS_TIER3: Tier3JobDef[] = [
   {
     id: "officeAnalyst",
     title: "Офис · аналитик",
-    baseCooldownMs: 12 * 60 * 60 * 1000,
-    basePayoutRub: 2_100,
+    baseCooldownMs: 4 * 60 * 60 * 1000,
+    basePayoutRub: 50_000,
     description: [
       "**Легальный** тир-3: основной доход — **ежедневный оклад** (зачисление полночь МСК); смены — заметное дополнение. Стаж **30 дней** → ранг и **выше оклад**.",
-      "**Смена:** стабильный оклад + надбавки; **3%** шанс **служебного штрафа** (риск ниже, чем у «Схем» или **развлекательного центра**, но есть).",
+      "**Смена:** **45–55k** ₽ плюс надбавки от ранга/стрика; **3%** шанс **служебного штрафа**. После **5** смен за МСК-сутки выплата за смену снижается (**антифарм**).",
       "**Отчёт** и **совещание** (КД **24 ч** каждое) — бонус **10–30%** от ориентира **ежедневного оклада**.",
     ].join("\n"),
     reqSkills: { communication: 30, logistics: 28, discipline: 35 },
     archetype: "legal",
-    passiveBaseRub: 13_200,
+    passiveBaseRub: 70_000,
   },
   {
     id: "shadowFixer",
     title: "Схемы · посредник",
-    baseCooldownMs: 3.5 * 60 * 60 * 1000,
+    baseCooldownMs: 12 * 60 * 60 * 1000,
     basePayoutRub: 0,
     description: [
-      "**Нелегальный** тир-3: **короткий КД** смены, доход **рандом** (тяжёлый минус возможен, высокий потолок при удаче).",
+      "**Нелегальный** тир-3: **рандом** по смене (тяжёлый минус возможен, высокий потолок при удаче). КД **12 ч**.",
       "**Ежедневного оклада нет.** **Связь** и **куратор** (КД **24 ч** каждое): мелкий бонус к ₽ и шанс ускорить стаж к **повышению**.",
     ].join("\n"),
     reqSkills: { communication: 42, logistics: 38, discipline: 48 },
@@ -68,7 +68,7 @@ export const JOBS_TIER3: Tier3JobDef[] = [
     ].join("\n"),
     reqSkills: { communication: 55, logistics: 52, discipline: 60 },
     archetype: "ip",
-    passiveBaseRub: 520,
+    passiveBaseRub: 45_000,
   },
 ];
 
@@ -129,8 +129,8 @@ export function computeTier3PassiveRub(input: {
   const cap = Math.max(0, Math.min(SOLE_PROP_CAP_MAX, input.solePropCapitalRub));
   const dial = Math.min(SOLE_PROP_RISK_MAX, Math.max(SOLE_PROP_RISK_MIN, input.solePropRiskDial));
   const prestigeMult = solePropPrestigeIncomeMult(input.prestigePoints ?? 0);
-  /** ₽ за единицу капитала на балансе бизнеса (MVP: ощутимый рост с вложений). */
-  const solePropCapPerRubNight = 0.0175;
+  /** ₽ за единицу капитала на балансе бизнеса. */
+  const solePropCapPerRubNight = 0.0045;
   const base = input.def.passiveBaseRub + cap * solePropCapPerRubNight;
   let riskJitter = 1 + dial * 0.06;
   if (dial >= 1) {
