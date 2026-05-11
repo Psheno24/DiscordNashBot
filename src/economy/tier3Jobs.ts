@@ -189,7 +189,7 @@ export function tier3PatchWhenJobChanges(prevUser: EconomyUser, nextJobId: JobId
     patch.solePropAdvertReadyAt = undefined;
     patch.solePropStaffReadyAt = undefined;
     patch.solePropControlReadyAt = undefined;
-    patch.lastWorkAt = undefined;
+    patch.lastWorkAtByJob = {};
   }
 
   const leavingTier3Slot = Boolean(prev && isTier3JobId(prev) && prev !== nextJobId);
@@ -210,7 +210,7 @@ export function tier3PatchWhenJobChanges(prevUser: EconomyUser, nextJobId: JobId
   }
 
   if (nextJobId === "soleProp" && prev !== "soleProp") {
-    patch.lastWorkAt = undefined;
+    patch.lastWorkAtByJob = {};
   }
 
   return patch;

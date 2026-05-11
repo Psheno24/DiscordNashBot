@@ -53,7 +53,7 @@ export function economyUserClearTier2PlusJobPatch(u: EconomyUser): Partial<Econo
   return {
     jobId: undefined,
     jobChosenAt: undefined,
-    lastWorkAt: undefined,
+    lastWorkAtByJob: undefined,
     ...tier3PatchWhenJobChanges(u, undefined),
   };
 }

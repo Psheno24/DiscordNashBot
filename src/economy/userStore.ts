@@ -59,8 +59,8 @@ export interface EconomyUser {
 
   jobId?: JobId;
   jobChosenAt?: number;
-  /** Последний выход на смену (unix ms) */
-  lastWorkAt?: number;
+  /** Последний выход на смену по каждой профессии — КД считается от смены на **этой** работе. */
+  lastWorkAtByJob?: Partial<Record<JobId, number>>;
 
   /** Куплен телефон в магазине (нужен на доставке). */
   hasPhone?: boolean;
@@ -194,6 +194,30 @@ function normalizeHousingKind(v: unknown): HousingKind | undefined {
 function normalizeHousingRentPlan(v: unknown): HousingRentPlan | undefined {
   if (v === "day" || v === "week" || v === "month") return v;
   return undefined;
+}
+
+function normalizeLastWorkAtByJob(
+  rawMap: unknown,
+  legacyLastWorkAt: number | undefined,
+  legacyJobId: JobId | undefined,
+): Partial<Record<JobId, number>> | undefined {
+  const out: Partial<Record<JobId, number>> = {};
+  if (rawMap && typeof rawMap === "object") {
+    for (const id of PERSISTED_JOB_IDS) {
+      const v = (rawMap as Record<string, unknown>)[id];
+      if (Number.isFinite(v) && (v as number) > 0) out[id] = Math.max(0, Math.floor(v as number));
+    }
+  }
+  if (legacyLastWorkAt != null && legacyLastWorkAt > 0 && legacyJobId) {
+    out[legacyJobId] = Math.max(out[legacyJobId] ?? 0, legacyLastWorkAt);
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+/** Unix ms последней смены на указанной работе (для КД между сменами). */
+export function lastWorkAtForJob(u: EconomyUser, jobId: JobId): number {
+  const t = u.lastWorkAtByJob?.[jobId];
+  return Number.isFinite(t) && (t as number) > 0 ? Math.floor(t as number) : 0;
 }
 
 function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?: string): EconomyUser {
@@ -351,18 +375,20 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     housingRentTotalPaidRub = paidGuess;
   }
 
+  const parsedJobId =
+    typeof u?.jobId === "string" && (PERSISTED_JOB_IDS as readonly string[]).includes(u.jobId) ? (u.jobId as JobId) : undefined;
+  const legacyLastWorkAt = Number.isFinite((u as any)?.lastWorkAt) ? Math.max(0, Math.floor((u as any).lastWorkAt)) : undefined;
+  const lastWorkAtByJob = normalizeLastWorkAtByJob((u as any)?.lastWorkAtByJob, legacyLastWorkAt, parsedJobId);
+
   const out: EconomyUser = {
     psTotal: Math.max(0, Math.floor(u?.psTotal ?? 0)),
     rubles: Math.max(0, Math.round((Number.isFinite(Number(u?.rubles)) ? Number(u!.rubles) : 0) * 100) / 100),
     focus: (u?.focus ?? "balance") as FocusPreset,
     voiceDay: typeof u?.voiceDay === "string" ? u.voiceDay : undefined,
     voiceMinutesToday: Number.isFinite(u?.voiceMinutesToday) ? Math.max(0, Math.floor(u!.voiceMinutesToday!)) : undefined,
-    jobId:
-      typeof u?.jobId === "string" && (PERSISTED_JOB_IDS as readonly string[]).includes(u.jobId)
-        ? (u.jobId as JobId)
-        : undefined,
+    jobId: parsedJobId,
     jobChosenAt: Number.isFinite(u?.jobChosenAt) ? Math.max(0, Math.floor(u!.jobChosenAt!)) : undefined,
-    lastWorkAt: Number.isFinite(u?.lastWorkAt) ? Math.max(0, Math.floor(u!.lastWorkAt!)) : undefined,
+    lastWorkAtByJob,
     hasPhone,
     phoneModelId,
     prestigePoints,

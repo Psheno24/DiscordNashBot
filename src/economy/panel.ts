@@ -24,6 +24,7 @@ import {
 import {
   ECONOMY_SKILL_MAX,
   getEconomyUser,
+  lastWorkAtForJob,
   listEconomyUsers,
   patchEconomyUser,
   type FocusPreset,
@@ -1583,7 +1584,7 @@ function effectiveCourierCooldownMs(u: ReturnType<typeof getEconomyUser>, now: n
 function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): { ok: boolean; msLeft: number } {
   const def = getAnyJobDef(jobId);
   const cd = jobId === "courier" ? effectiveCourierCooldownMs(u, now) : def.baseCooldownMs;
-  const last = u.lastWorkAt ?? 0;
+  const last = lastWorkAtForJob(u, jobId);
   const next = last + cd;
   if (now >= next) return { ok: true, msLeft: 0 };
   return { ok: false, msLeft: next - now };
@@ -3517,7 +3518,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     patchEconomyUser(member.guild.id, member.id, {
       jobId: undefined,
       jobChosenAt: undefined,
-      lastWorkAt: undefined,
+      lastWorkAtByJob: undefined,
       ...tier3PatchWhenJobChanges(uQuit, undefined),
     });
     await replyOrUpdate(interaction, { embeds: [buildWorkMenuEmbed(member)], components: buildWorkMenuRows(member) });
@@ -3690,7 +3691,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       rubles: rublesNext,
       simBalanceRub: simBalNext,
       courierPhonePaidUntilMs: phoneUntilNext,
-      lastWorkAt: now,
+      lastWorkAtByJob: { ...(u.lastWorkAtByJob ?? {}), [jobId]: now },
       jobExp: { ...(u.jobExp ?? {}), [jobId]: expAfter },
     };
     patchEconomyUser(guildId, member.id, patch);
