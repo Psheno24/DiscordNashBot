@@ -994,10 +994,8 @@ function hasOwnedCourierCar(u: ReturnType<typeof getEconomyUser>): boolean {
   return Boolean(u.ownedCarId && getCarDef(u.ownedCarId));
 }
 
-/** Строки для доставки: авто / вел, месячный тариф сим, баланс сим — только при текущей работе «доставка». */
-function courierWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
-  if (u.jobId !== "courier") return [];
-  const fee = COURIER_SIM_MONTHLY_FEE_RUB;
+/** Транспорт доставки/склада: авто или вел (с датой окончания аренды вела). Без привязки к jobId — только состояние игрока. */
+function courierTransportExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
   const lines: string[] = [];
   const car = getCarDef(u.ownedCarId);
   if (car) {
@@ -1008,12 +1006,19 @@ function courierWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: numbe
   } else {
     lines.push("**Электровелосипед:** аренда **не активна** (или купите **авто** в магазине).");
   }
+  return lines;
+}
+
+/** Тариф сим и баланс сим (для доставки и подсказки в других ролях). */
+function courierSimExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
+  const fee = COURIER_SIM_MONTHLY_FEE_RUB;
+  const lines: string[] = [];
   if (u.courierPhonePaidUntilMs && now < u.courierPhonePaidUntilMs) {
     const lt = Math.floor(u.courierPhonePaidUntilMs / 1000);
     lines.push(`**Сим-карта:** **тариф 30 суток** оплачен до <t:${lt}:F> — смены в этот период **без** доп. списаний с баланса сим.`);
   } else {
     lines.push(
-      `**Сим-карта:** тариф **не оплачен** — при следующем выходе на смену с баланса сим спишется **${fee.toLocaleString("ru-RU")}** ₽ и продлится **тариф** на **30** суток.`,
+      `**Сим-карта:** тариф **не оплачен** — при следующем выходе на смену **доставки** с баланса сим спишется **${fee.toLocaleString("ru-RU")}** ₽ и продлится **тариф** на **30** суток.`,
     );
   }
   const bals = u.simBalanceRub ?? 0;
@@ -1021,6 +1026,11 @@ function courierWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: numbe
     `**Баланс сим:** **${fmt(bals)}** ₽ — пополнение в магазине; **${fee.toLocaleString("ru-RU")}** ₽ с сим за **30 суток** (основной счёт **не** используется).`,
   );
   return lines;
+}
+
+/** Полный блок «транспорт + сим» для карточек доставки и подробностей. */
+function courierWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
+  return [...courierTransportExtrasLines(u, now), ...courierSimExtrasLines(u, now)];
 }
 
 function jobUsesVariablePayout(jobId: JobId): boolean {
@@ -1614,9 +1624,8 @@ function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: num
   return { ok: false, msLeft: next - now };
 }
 
-/** Подсказка КД склада с тем же транспортом, что и у доставки. */
+/** Подсказка КД склада с тем же транспортом, что и у доставки (по текущему инвентарю, без привязки к jobId). */
 function assemblerWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
-  if (u.jobId !== "assembler") return [];
   const cdMs = effectiveAssemblerCooldownMs(u, now);
   const h = (cdMs / 3600000).toFixed(2).replace(/\.?0+$/, "");
   const car = getCarDef(u.ownedCarId);
@@ -1624,7 +1633,11 @@ function assemblerWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: num
     return [`**Склад:** с авто **${car.label}** — КД смены **${h}** ч (**не ниже 1 ч 45 мин**).`];
   }
   if (hasActiveBikeRental(u, now)) {
-    return [`**Склад:** с электровелом — КД смены **${h}** ч.`];
+    const t = Math.floor((u.courierBikeUntilMs ?? 0) / 1000);
+    return [
+      `**Склад:** с электровелом — КД смены **${h}** ч.`,
+      `**Аренда вела** до <t:${t}:F> (<t:${t}:R>).`,
+    ];
   }
   return [`**Склад:** пешком / без вела — КД **${h}** ч; вел или авто ускоряют (магазин).`];
 }
@@ -1773,7 +1786,7 @@ function buildStarterJobsRows(): ActionRowBuilder<ButtonBuilder>[] {
   ];
 }
 
-function buildJobDetailBody(jobId: JobId): string {
+function buildJobDetailBody(member: GuildMember, jobId: JobId): string {
   const def = getAnyJobDef(jobId);
   let main: string;
   switch (jobId) {
@@ -1855,7 +1868,16 @@ function buildJobDetailBody(jobId: JobId): string {
     default:
       main = def.title;
   }
-  return main;
+  const u = getEconomyUser(member.guild.id, member.id);
+  const now = Date.now();
+  const tail: string[] = [];
+  if (jobId === "courier" && u.jobId === "courier") {
+    tail.push("", "**Сейчас у вас:**", ...courierWorkExtrasLines(u, now));
+  }
+  if (jobId === "assembler" && u.jobId === "assembler") {
+    tail.push("", "**Сейчас у вас (склад / КД):**", ...assemblerWorkExtrasLines(u, now));
+  }
+  return [main, ...tail].join("\n\n");
 }
 
 function buildJobDetailEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
@@ -1863,7 +1885,7 @@ function buildJobDetailEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(PROFILE_COLOR)
     .setTitle(`${def.title} — подробно`)
-    .setDescription(buildJobDetailBody(jobId))
+    .setDescription(buildJobDetailBody(member, jobId))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -1911,11 +1933,25 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   const needsHousing = isTier2JobId(jobId) || isTier3PanelJob(jobId);
   if (needsHousing) {
     extra.push("");
-    extra.push(
-      hasTier2PlusHousing(u, now)
-        ? "Жильё: **есть** — требование для **тир 2+** выполнено."
-        : "Жильё: **нет** — для устройства на **тир 2+** сначала **аренда** или **своя квартира** в магазине терминала.",
-    );
+    if (hasTier2PlusHousing(u, now)) {
+      const hk = u.housingKind ?? "none";
+      if (hk === "rent" && u.housingRentNextDueMs != null && now < u.housingRentNextDueMs) {
+        const ht = Math.floor(u.housingRentNextDueMs / 1000);
+        extra.push(
+          `Жильё: **аренда** оплачена до <t:${ht}:F> (<t:${ht}:R>) — требование для **тир 2+** выполнено.`,
+        );
+      } else if (hk === "owned" && u.ownedApartmentId) {
+        extra.push(
+          `Жильё: **своя квартира** (${getApartmentDef(u.ownedApartmentId)?.label ?? "есть"}) — требование для **тир 2+** выполнено.`,
+        );
+      } else {
+        extra.push("Жильё: **есть** — требование для **тир 2+** выполнено.");
+      }
+    } else {
+      extra.push(
+        "Жильё: **нет** — для устройства на **тир 2+** сначала **аренда** или **своя квартира** в магазине терминала.",
+      );
+    }
   }
 
   const shiftLine =
@@ -2175,7 +2211,11 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
         ),
       );
     }
-    if (jobId === "courier" && !hasOwnedCourierCar(u) && !hasActiveBikeRental(u, now)) {
+    if (
+      (jobId === "courier" || jobId === "assembler") &&
+      !hasOwnedCourierCar(u) &&
+      !hasActiveBikeRental(u, now)
+    ) {
       rows.push(buildCourierBikeRow(member));
     }
     if (isTier3PanelJob(jobId)) {
@@ -2546,9 +2586,11 @@ function courierWorkRefreshPayload(member: GuildMember, interaction: ButtonInter
   if (t === "Моя работа") {
     return { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) };
   }
-  const defC = getAnyJobDef("courier");
-  const reqC = meetsJobReq(getEconomyUser(member.guild.id, member.id), defC);
-  return { embeds: [buildJobInfoEmbed(member, "courier")], components: buildJobInfoRows(member, "courier", reqC.ok) };
+  const u = getEconomyUser(member.guild.id, member.id);
+  const jobId: JobId = u.jobId === "assembler" ? "assembler" : "courier";
+  const defJ = getAnyJobDef(jobId);
+  const reqJ = meetsJobReq(u, defJ);
+  return { embeds: [buildJobInfoEmbed(member, jobId)], components: buildJobInfoRows(member, jobId, reqJ.ok) };
 }
 
 function isEconomyButton(id: string): boolean {
@@ -3135,8 +3177,8 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_COURIER_BIKE_1D || id === ECON_COURIER_BIKE_3D || id === ECON_COURIER_BIKE_7D) {
     const u = getEconomyUser(member.guild.id, member.id);
-    if (u.jobId !== "courier") {
-      await interaction.reply({ content: "Аренда вела доступна только на **доставке**.", flags: MessageFlags.Ephemeral });
+    if (u.jobId !== "courier" && u.jobId !== "assembler") {
+      await interaction.reply({ content: "Аренда вела доступна на **доставке** или **складе** (без личного авто).", flags: MessageFlags.Ephemeral });
       return true;
     }
     if (hasOwnedCourierCar(u)) {
