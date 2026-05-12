@@ -16,12 +16,21 @@ import {
   handleEconomyModal,
 } from "./economy/panel.js";
 import { scheduleEconomyMskMidnightTick } from "./economy/tier3Daily.js";
-import { ensureBetsHealth, handleBetButton, handleBetModal, handleNeuroAdminBetFlow, handleNeuroAdminButton } from "./bets/bets.js";
 import {
+  ensureBetsHealth,
+  handleBetButton,
+  handleBetModal,
+  handleMoneyOwnerSlashCommand,
+  handleNeuroAdminBetFlow,
+  handleNeuroAdminButton,
+} from "./bets/bets.js";
+import {
+  giveMoneyCommandName,
   handleLeavePreviewCommand,
   handleWelcomePreviewCommand,
   leavePreviewCommandName,
   registerMemberActivityPreviewCommands,
+  takeMoneyCommandName,
   welcomePreviewCommandName,
 } from "./welcomePreview.js";
 
@@ -61,6 +70,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
       if (interaction.commandName === leavePreviewCommandName) {
         await handleLeavePreviewCommand(interaction);
+        return;
+      }
+      if (interaction.commandName === giveMoneyCommandName || interaction.commandName === takeMoneyCommandName) {
+        await handleMoneyOwnerSlashCommand(interaction);
         return;
       }
     }

@@ -13,6 +13,8 @@ import { embedInfo, embedWarn } from "./theme.js";
 /** Имя слэш-команды (латиница, требование Discord). */
 export const welcomePreviewCommandName = "welcome-preview";
 export const leavePreviewCommandName = "leave-preview";
+export const giveMoneyCommandName = "givemoney";
+export const takeMoneyCommandName = "takemoney";
 
 const welcomeCommand = new SlashCommandBuilder()
   .setName(welcomePreviewCommandName)
@@ -36,12 +38,41 @@ const leaveCommand = new SlashCommandBuilder()
       .setRequired(false),
   );
 
+const giveMoneyCommand = new SlashCommandBuilder()
+  .setName(giveMoneyCommandName)
+  .setDescription("Выдать ₽ из казны (только владелец сервера)")
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .addUserOption((o) => o.setName("member").setDescription("Кому").setRequired(true))
+  .addIntegerOption((o) =>
+    o.setName("amount").setDescription("Сумма ₽").setRequired(true).setMinValue(1),
+  );
+
+const takeMoneyCommand = new SlashCommandBuilder()
+  .setName(takeMoneyCommandName)
+  .setDescription("Забрать ₽ (только владелец сервера)")
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .addUserOption((o) => o.setName("member").setDescription("У кого").setRequired(true))
+  .addIntegerOption((o) =>
+    o.setName("amount").setDescription("Сумма ₽").setRequired(true).setMinValue(1),
+  )
+  .addBooleanOption((o) =>
+    o
+      .setName("to_treasury")
+      .setDescription("Зачислить в казну (Нет = только изъять с баланса)")
+      .setRequired(false),
+  );
+
 export async function registerMemberActivityPreviewCommands(client: Client) {
   const appId = client.user?.id;
   if (!appId) return;
 
   const rest = new REST({ version: "10" }).setToken(discordToken());
-  const body = [welcomeCommand.toJSON(), leaveCommand.toJSON()];
+  const body = [
+    welcomeCommand.toJSON(),
+    leaveCommand.toJSON(),
+    giveMoneyCommand.toJSON(),
+    takeMoneyCommand.toJSON(),
+  ];
 
   for (const guild of client.guilds.cache.values()) {
     try {

@@ -9,6 +9,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
   type ButtonInteraction,
+  type ChatInputCommandInteraction,
   type Client,
   type ModalSubmitInteraction,
 } from "discord.js";
@@ -29,6 +30,7 @@ import {
   NEURO_ADMIN_ECON,
   NEURO_MAIN_ADMIN,
 } from "../neurocontrol/adminHub.js";
+import { giveMoneyCommandName, takeMoneyCommandName } from "../welcomePreview.js";
 import { getBetEvent, listBetEvents, upsertBetEvent, type BetEvent, type PlacedBet } from "./store.js";
 
 export const NEURO_ADMIN_BUTTON_MENU = "neuroAdmin:menu";
@@ -89,10 +91,137 @@ function canAdmin(interaction: ButtonInteraction | ModalSubmitInteraction): bool
   );
 }
 
-async function isGuildOwner(interaction: ButtonInteraction | ModalSubmitInteraction): Promise<boolean> {
+async function isGuildOwner(
+  interaction: ButtonInteraction | ModalSubmitInteraction | ChatInputCommandInteraction,
+): Promise<boolean> {
   if (!interaction.inGuild() || !interaction.guildId) return false;
   const g = interaction.guild ?? (await interaction.client.guilds.fetch(interaction.guildId).catch(() => null));
   return Boolean(g && g.ownerId === interaction.user.id);
+}
+
+async function grantRublesFromTreasury(
+  client: Client,
+  guildId: string,
+  actorUserId: string,
+  actorDisplay: string,
+  targetUserId: string,
+  amount: number,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const spend = trySpendTreasuryRub(guildId, amount);
+  if (!spend.ok) {
+    const bal = spend.balance.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+    return { ok: false, message: `В казне недостаточно средств. Сейчас: **${bal}** ₽.` };
+  }
+  const u = getEconomyUser(guildId, targetUserId);
+  patchEconomyUser(guildId, targetUserId, { rubles: u.rubles + amount });
+  appendFeedEvent({
+    ts: Date.now(),
+    guildId,
+    type: "admin:budget",
+    actorUserId,
+    text: `${actorDisplay} выдал <@${targetUserId}> **${amount.toLocaleString("ru-RU")} ₽** из казны.`,
+  });
+  await ensureEconomyFeedPanel(client);
+  return { ok: true };
+}
+
+async function takeRublesFromUser(
+  client: Client,
+  guildId: string,
+  actorUserId: string,
+  actorDisplay: string,
+  targetUserId: string,
+  amount: number,
+  creditTreasury: boolean,
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  const u = getEconomyUser(guildId, targetUserId);
+  const wallet = Math.floor(Number.isFinite(u.rubles) ? u.rubles : 0);
+  if (wallet < amount) {
+    return {
+      ok: false,
+      message: `У пользователя недостаточно ₽. Сейчас на счёте: **${wallet.toLocaleString("ru-RU")}** ₽.`,
+    };
+  }
+  patchEconomyUser(guildId, targetUserId, { rubles: u.rubles - amount });
+  if (creditTreasury) {
+    addToTreasury(guildId, amount);
+  }
+  appendFeedEvent({
+    ts: Date.now(),
+    guildId,
+    type: "admin:budget",
+    actorUserId,
+    text: creditTreasury
+      ? `${actorDisplay} забрал у <@${targetUserId}> **${amount.toLocaleString("ru-RU")} ₽** в казну.`
+      : `${actorDisplay} изъял у <@${targetUserId}> **${amount.toLocaleString("ru-RU")} ₽** (без зачисления в казну).`,
+  });
+  await ensureEconomyFeedPanel(client);
+  return { ok: true };
+}
+
+/** `/givemoney` и `/takemoney` — только владелец сервера. */
+export async function handleMoneyOwnerSlashCommand(interaction: ChatInputCommandInteraction): Promise<boolean> {
+  const name = interaction.commandName;
+  if (name !== giveMoneyCommandName && name !== takeMoneyCommandName) return false;
+
+  if (!interaction.inGuild() || !interaction.guildId) {
+    await interaction.reply({ content: "Команда только на сервере.", flags: MessageFlags.Ephemeral });
+    return true;
+  }
+  if (!(await isGuildOwner(interaction))) {
+    await interaction.reply({
+      content: "Эту команду может использовать только **владелец сервера**.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  const target = interaction.options.getUser("member", true);
+  const amount = interaction.options.getInteger("amount", true);
+  const guildId = interaction.guildId;
+  const actorDisplay = interaction.user.toString();
+
+  if (name === giveMoneyCommandName) {
+    const r = await grantRublesFromTreasury(
+      interaction.client,
+      guildId,
+      interaction.user.id,
+      actorDisplay,
+      target.id,
+      amount,
+    );
+    if (!r.ok) {
+      await interaction.reply({ content: r.message, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await interaction.reply({
+      content: `Выдано **${amount.toLocaleString("ru-RU")}** ₽ пользователю ${target} (из казны).`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  const creditTreasury = interaction.options.getBoolean("to_treasury") ?? true;
+  const r = await takeRublesFromUser(
+    interaction.client,
+    guildId,
+    interaction.user.id,
+    actorDisplay,
+    target.id,
+    amount,
+    creditTreasury,
+  );
+  if (!r.ok) {
+    await interaction.reply({ content: r.message, flags: MessageFlags.Ephemeral });
+    return true;
+  }
+  await interaction.reply({
+    content: creditTreasury
+      ? `Снято **${amount.toLocaleString("ru-RU")}** ₽ с ${target} и зачислено в казну.`
+      : `Снято **${amount.toLocaleString("ru-RU")}** ₽ с ${target} (в казну не зачислено).`,
+    flags: MessageFlags.Ephemeral,
+  });
+  return true;
 }
 
 export async function handleNeuroAdminButton(interaction: ButtonInteraction): Promise<boolean> {
@@ -1061,26 +1190,18 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       return true;
     }
 
-    const spend = trySpendTreasuryRub(guildId, amount);
-    if (!spend.ok) {
-      const bal = spend.balance.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
-      await interaction.reply({
-        content: `В казне недостаточно средств. Сейчас: **${bal}** ₽.`,
-        flags: MessageFlags.Ephemeral,
-      });
+    const rGrant = await grantRublesFromTreasury(
+      interaction.client,
+      guildId,
+      interaction.user.id,
+      interaction.user.toString(),
+      userId,
+      amount,
+    );
+    if (!rGrant.ok) {
+      await interaction.reply({ content: rGrant.message, flags: MessageFlags.Ephemeral });
       return true;
     }
-
-    const u = getEconomyUser(guildId, userId);
-    patchEconomyUser(guildId, userId, { rubles: u.rubles + amount });
-    appendFeedEvent({
-      ts: Date.now(),
-      guildId,
-      type: "admin:budget",
-      actorUserId: interaction.user.id,
-      text: `${interaction.user.toString()} выдал <@${userId}> **${amount.toLocaleString("ru-RU")} ₽** из казны.`,
-    });
-    await ensureEconomyFeedPanel(interaction.client);
 
     await interaction.reply({
       content: `Выдано ${amount.toLocaleString("ru-RU")} ₽ пользователю <@${userId}> (из казны).`,
@@ -1112,26 +1233,19 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       return true;
     }
 
-    const u = getEconomyUser(guildId, userId);
-    const wallet = Math.floor(Number.isFinite(u.rubles) ? u.rubles : 0);
-    if (wallet < amount) {
-      await interaction.reply({
-        content: `У пользователя недостаточно ₽. Сейчас на счёте: **${wallet.toLocaleString("ru-RU")}** ₽.`,
-        flags: MessageFlags.Ephemeral,
-      });
+    const rTake = await takeRublesFromUser(
+      interaction.client,
+      guildId,
+      interaction.user.id,
+      interaction.user.toString(),
+      userId,
+      amount,
+      true,
+    );
+    if (!rTake.ok) {
+      await interaction.reply({ content: rTake.message, flags: MessageFlags.Ephemeral });
       return true;
     }
-
-    patchEconomyUser(guildId, userId, { rubles: u.rubles - amount });
-    addToTreasury(guildId, amount);
-    appendFeedEvent({
-      ts: Date.now(),
-      guildId,
-      type: "admin:budget",
-      actorUserId: interaction.user.id,
-      text: `${interaction.user.toString()} забрал у <@${userId}> **${amount.toLocaleString("ru-RU")} ₽** в казну.`,
-    });
-    await ensureEconomyFeedPanel(interaction.client);
 
     await interaction.reply({
       content: `Снято ${amount.toLocaleString("ru-RU")} ₽ с <@${userId}> и зачислено в казну.`,
