@@ -80,6 +80,7 @@ import {
   getLegalIncomeTaxPercent,
   getSolePropWeeklyCapitalTaxPercent,
   isLegalTaxableJob,
+  remitShopPurchaseVatToTreasury,
   solePropWithdrawWithFee,
   withholdLegalIncomeTax,
 } from "./taxTreasury.js";
@@ -1288,6 +1289,7 @@ function applyRentPlanPurchase(member: GuildMember, plan: HousingRentPlan): { ok
     housingRentPrestigeGranted: true,
     prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeGain),
   });
+  remitShopPurchaseVatToTreasury(member.guild.id, price);
   return { ok: true };
 }
 
@@ -2933,6 +2935,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       phoneModelId: defP.id,
       prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeDelta),
     });
+    remitShopPurchaseVatToTreasury(member.guild.id, cost);
     await replyOrUpdate(interaction, { embeds: [buildShopPhoneEmbed(member)], components: buildShopPhoneRows(member) });
     return true;
   }
@@ -2971,6 +2974,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeDelta),
       courierBikeUntilMs: undefined,
     });
+    remitShopPurchaseVatToTreasury(member.guild.id, cost);
     await replyOrUpdate(interaction, { embeds: [buildShopCarEmbed(member)], components: buildShopCarRows(member) });
     return true;
   }
@@ -3177,6 +3181,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       housingRentPrestigeGranted: false,
       prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeDelta),
     });
+    remitShopPurchaseVatToTreasury(member.guild.id, cost);
     if (rentRefund > 0) {
       appendFeedEvent({
         ts: now,
@@ -3253,6 +3258,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       courierSimNumber: next,
       simBalanceRub: replacing ? (u.simBalanceRub ?? 0) : SHOP_SIM_START_BALANCE_RUB,
     });
+    remitShopPurchaseVatToTreasury(member.guild.id, SHOP_SIM_NEW_PRICE_RUB);
     await replyOrUpdate(interaction, { embeds: [buildShopSimEmbed(member)], components: buildShopSimRows(member) });
     return true;
   }
@@ -4048,6 +4054,7 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
       rubles: u.rubles - amount,
       simBalanceRub: (u.simBalanceRub ?? 0) + amount,
     });
+    remitShopPurchaseVatToTreasury(mem.guild.id, amount);
     await interaction.reply({
       embeds: [buildShopSimEmbed(mem)],
       components: buildShopSimRows(mem),

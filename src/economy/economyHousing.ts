@@ -8,6 +8,7 @@ import {
   type HousingRentPlan,
 } from "./economyCatalog.js";
 import { getEconomyUser, patchEconomyUser, type EconomyUser } from "./userStore.js";
+import { remitShopPurchaseVatToTreasury } from "./taxTreasury.js";
 import { isTier3JobId, tier3PatchWhenJobChanges } from "./tier3Jobs.js";
 
 /** Пропорциональный возврат ₽ за неиспользованное время текущей оплаченной аренды (для покупки квартиры и т.п.). */
@@ -81,6 +82,7 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
         housingRentTotalPaidRub: (u.housingRentTotalPaidRub ?? 0) + renewRub,
         ...mark,
       });
+      remitShopPurchaseVatToTreasury(guildId, renewRub);
       appendFeedEvent({
         ts: nowMs,
         guildId,
@@ -128,6 +130,7 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
         housingUtilityNextDueMs: u.housingUtilityNextDueMs + HOUSING_CALENDAR_MONTH_MS,
         ...mark,
       });
+      remitShopPurchaseVatToTreasury(guildId, util);
       appendFeedEvent({
         ts: nowMs,
         guildId,

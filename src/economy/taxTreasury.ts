@@ -36,6 +36,22 @@ export function addToTreasury(guildId: string, amountRub: number): void {
   patchGuildConfig(guildId, { treasuryRubles: Math.round((cur + a) * 100) / 100 });
 }
 
+/** НДС с покупок в магазине терминала: доля от суммы чека → казна. */
+export const SHOP_VAT_PERCENT = 22;
+
+export function shopPurchaseVatRub(grossRub: number): number {
+  const g = Math.floor(grossRub);
+  if (g <= 0) return 0;
+  return Math.min(g, Math.floor((g * SHOP_VAT_PERCENT) / 100));
+}
+
+/** Зачисляет НДС в казну; возвращает фактически зачисленный НДС. */
+export function remitShopPurchaseVatToTreasury(guildId: string, grossRub: number): number {
+  const vat = shopPurchaseVatRub(grossRub);
+  if (vat > 0) addToTreasury(guildId, vat);
+  return vat;
+}
+
 /**
  * Удержание подоходного налога с суммы, зачисляемой на личный счёт с легальной работы.
  * Налог идёт в казну страны (настройки гильдии).
