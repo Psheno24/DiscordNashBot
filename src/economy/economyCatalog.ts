@@ -51,7 +51,7 @@ export const CAR_MODELS: CarDef[] = [
     speedKmh: 55,
     courierShiftCdMs: Math.round(2.5 * H),
   },
-  { id: "car_used", label: "Подержанный", priceRub: 300_000, prestigeDelta: 0, speedKmh: 90, courierShiftCdMs: 2 * H },
+  { id: "car_used", label: "Подержанный", priceRub: 300_000, prestigeDelta: 80, speedKmh: 90, courierShiftCdMs: 2 * H },
   { id: "car_500k", label: "Класс 500 тыс.", priceRub: 500_000, prestigeDelta: 120, speedKmh: 110, courierShiftCdMs: Math.round(1.8 * H) },
   { id: "car_1m", label: "Миллионник", priceRub: 1_000_000, prestigeDelta: 320, speedKmh: 130, courierShiftCdMs: Math.round(1.6 * H) },
   { id: "car_3m", label: "Бизнес-класс", priceRub: 3_000_000, prestigeDelta: 900, speedKmh: 160, courierShiftCdMs: Math.round(1.35 * H) },
