@@ -3,6 +3,9 @@ import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from "disc
 /** Совпадает с `NEURO_ADMIN_BUTTON_CREATE_BET` в bets.ts — не переименовывать без синхронизации. */
 export const NEURO_ADMIN_CREATE_BET_ID = "neuroAdmin:createBet";
 
+export const NEURO_ADMIN_BUTTON_GRANT_RUB = "neuroAdmin:grantRub";
+export const NEURO_ADMIN_BUTTON_TAKE_RUB = "neuroAdmin:takeRub";
+
 export const NEURO_MAIN_ADMIN = "neuro:main:admin";
 export const NEURO_MAIN_INFO = "neuro:main:info";
 export const NEURO_ADMIN_ECON = "neuroAdmin:econ";
@@ -29,7 +32,7 @@ export function buildAdminHubEmbed(): EmbedBuilder {
     .setDescription(
       [
         "**Настройки** — каналы бота и налоги (казна страны).",
-        "**Экономика** — список ставок и выдача ₽.",
+        "**Экономика** — список ставок; выдача и изъятие ₽ — только у **владельца сервера**.",
         "",
         "Создать новую ставку — кнопка **«Добавить ставку»** на главной панели нейроконтроля.",
       ].join("\n"),
@@ -49,16 +52,28 @@ export function buildAdminEconEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(HUB_COLOR)
     .setTitle("Экономика (админ)")
-    .setDescription("Управление ставками и выдача рублей. **Назад** — в админ-хаб.");
+    .setDescription(
+      [
+        "Управление ставками для всех админов с правом **Manage Server**.",
+        "**Выдать ₽** и **Забрать ₽** видны и доступны только **владельцу сервера**.",
+        "**Назад** — в админ-хаб.",
+      ].join("\n"),
+    );
 }
 
-/** Ставки / выдача ₽ + возврат в хаб. */
-export function buildAdminEconRows(): ActionRowBuilder<ButtonBuilder>[] {
+/** Ставки; выдача/изъятие ₽ — только если `isGuildOwner`. */
+export function buildAdminEconRows(isGuildOwner: boolean): ActionRowBuilder<ButtonBuilder>[] {
+  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId("neuroAdmin:bets").setLabel("Ставки").setStyle(ButtonStyle.Secondary),
+  );
+  if (isGuildOwner) {
+    row.addComponents(
+      new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_GRANT_RUB).setLabel("Выдать ₽").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_TAKE_RUB).setLabel("Забрать ₽").setStyle(ButtonStyle.Secondary),
+    );
+  }
   return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("neuroAdmin:bets").setLabel("Ставки").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("neuroAdmin:grantRub").setLabel("Выдать ₽").setStyle(ButtonStyle.Secondary),
-    ),
+    row,
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_MAIN_ADMIN).setLabel("Назад").setStyle(ButtonStyle.Secondary),
     ),

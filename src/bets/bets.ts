@@ -17,13 +17,15 @@ import { economyFeedChannelId } from "../config.js";
 import { MSK_OFFSET_MS } from "../time/msk.js";
 import { appendFeedEvent } from "../economy/feedStore.js";
 import { ensureEconomyFeedPanel } from "../economy/panel.js";
-import { trySpendTreasuryRub } from "../economy/taxTreasury.js";
+import { addToTreasury, trySpendTreasuryRub } from "../economy/taxTreasury.js";
 import { getEconomyUser, patchEconomyUser } from "../economy/userStore.js";
 import {
   buildAdminEconEmbed,
   buildAdminEconRows,
   buildAdminHubEmbed,
   buildAdminHubRows,
+  NEURO_ADMIN_BUTTON_GRANT_RUB,
+  NEURO_ADMIN_BUTTON_TAKE_RUB,
   NEURO_ADMIN_ECON,
   NEURO_MAIN_ADMIN,
 } from "../neurocontrol/adminHub.js";
@@ -31,13 +33,13 @@ import { getBetEvent, listBetEvents, upsertBetEvent, type BetEvent, type PlacedB
 
 export const NEURO_ADMIN_BUTTON_MENU = "neuroAdmin:menu";
 export const NEURO_ADMIN_BUTTON_CREATE_BET = "neuroAdmin:createBet";
-export const NEURO_ADMIN_BUTTON_GRANT_RUB = "neuroAdmin:grantRub";
 export const NEURO_ADMIN_BUTTON_BETS = "neuroAdmin:bets";
 
 /** Одна модалка: событие, 2 команды (имя + кэф), ничья (опц.), закрытие. */
 const MODAL_CREATE_BET = "modal:bet:create";
 const MODAL_EDIT_BET_PREFIX = "modal:bet:edit:";
 const MODAL_GRANT_RUB = "modal:econ:grantRub";
+const MODAL_TAKE_RUB = "modal:econ:takeRub";
 
 const BET_BUTTON_OPEN_PREFIX = "bet:open:";
 const BET_MENU_PICK_PREFIX = "bet:menuPick:";
@@ -87,6 +89,12 @@ function canAdmin(interaction: ButtonInteraction | ModalSubmitInteraction): bool
   );
 }
 
+async function isGuildOwner(interaction: ButtonInteraction | ModalSubmitInteraction): Promise<boolean> {
+  if (!interaction.inGuild() || !interaction.guildId) return false;
+  const g = interaction.guild ?? (await interaction.client.guilds.fetch(interaction.guildId).catch(() => null));
+  return Boolean(g && g.ownerId === interaction.user.id);
+}
+
 export async function handleNeuroAdminButton(interaction: ButtonInteraction): Promise<boolean> {
   const id = interaction.customId;
   if (
@@ -96,6 +104,7 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
       NEURO_ADMIN_ECON,
       NEURO_ADMIN_BUTTON_CREATE_BET,
       NEURO_ADMIN_BUTTON_GRANT_RUB,
+      NEURO_ADMIN_BUTTON_TAKE_RUB,
       NEURO_ADMIN_BUTTON_BETS,
     ].includes(id) &&
     !id.startsWith(ADMIN_BET_MANAGE_PREFIX) &&
@@ -122,7 +131,11 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
   }
 
   if (id === NEURO_ADMIN_ECON) {
-    await replyOrUpdateEphemeral(interaction, { embeds: [buildAdminEconEmbed()], components: buildAdminEconRows() });
+    const owner = await isGuildOwner(interaction);
+    await replyOrUpdateEphemeral(interaction, {
+      embeds: [buildAdminEconEmbed()],
+      components: buildAdminEconRows(owner),
+    });
     return true;
   }
 
@@ -206,7 +219,37 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
   }
 
   if (id === NEURO_ADMIN_BUTTON_GRANT_RUB) {
+    if (!(await isGuildOwner(interaction))) {
+      await replyOrUpdateEphemeral(interaction, {
+        content: "Выдать и забрать ₽ может только **владелец сервера**.",
+      });
+      return true;
+    }
     const modal = new ModalBuilder().setCustomId(MODAL_GRANT_RUB).setTitle("Выдать ₽");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("user")
+          .setLabel("Пользователь (mention или ID)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true),
+      ),
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder().setCustomId("amount").setLabel("Сумма ₽").setStyle(TextInputStyle.Short).setRequired(true),
+      ),
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (id === NEURO_ADMIN_BUTTON_TAKE_RUB) {
+    if (!(await isGuildOwner(interaction))) {
+      await replyOrUpdateEphemeral(interaction, {
+        content: "Выдать и забрать ₽ может только **владелец сервера**.",
+      });
+      return true;
+    }
+    const modal = new ModalBuilder().setCustomId(MODAL_TAKE_RUB).setTitle("Забрать ₽");
     modal.addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
@@ -1000,8 +1043,11 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       await interaction.reply({ content: "Нужно запускать на сервере.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (!canAdmin(interaction)) {
-      await interaction.reply({ content: "Недостаточно прав.", flags: MessageFlags.Ephemeral });
+    if (!(await isGuildOwner(interaction))) {
+      await interaction.reply({
+        content: "Выдать ₽ может только **владелец сервера**.",
+        flags: MessageFlags.Ephemeral,
+      });
       return true;
     }
 
@@ -1038,6 +1084,57 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
 
     await interaction.reply({
       content: `Выдано ${amount.toLocaleString("ru-RU")} ₽ пользователю <@${userId}> (из казны).`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  if (id === MODAL_TAKE_RUB) {
+    if (!interaction.inGuild() || !interaction.guildId) {
+      await interaction.reply({ content: "Нужно запускать на сервере.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (!(await isGuildOwner(interaction))) {
+      await interaction.reply({
+        content: "Забрать ₽ может только **владелец сервера**.",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    const guildId = interaction.guildId;
+    const userRaw = interaction.fields.getTextInputValue("user");
+    const amountRaw = interaction.fields.getTextInputValue("amount");
+    const userId = parseUserId(userRaw);
+    const amount = Number.parseInt(amountRaw, 10);
+    if (!userId || !Number.isFinite(amount) || amount <= 0) {
+      await interaction.reply({ content: "Некорректный пользователь или сумма.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    const u = getEconomyUser(guildId, userId);
+    const wallet = Math.floor(Number.isFinite(u.rubles) ? u.rubles : 0);
+    if (wallet < amount) {
+      await interaction.reply({
+        content: `У пользователя недостаточно ₽. Сейчас на счёте: **${wallet.toLocaleString("ru-RU")}** ₽.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
+    patchEconomyUser(guildId, userId, { rubles: u.rubles - amount });
+    addToTreasury(guildId, amount);
+    appendFeedEvent({
+      ts: Date.now(),
+      guildId,
+      type: "admin:budget",
+      actorUserId: interaction.user.id,
+      text: `${interaction.user.toString()} забрал у <@${userId}> **${amount.toLocaleString("ru-RU")} ₽** в казну.`,
+    });
+    await ensureEconomyFeedPanel(interaction.client);
+
+    await interaction.reply({
+      content: `Снято ${amount.toLocaleString("ru-RU")} ₽ с <@${userId}> и зачислено в казну.`,
       flags: MessageFlags.Ephemeral,
     });
     return true;
