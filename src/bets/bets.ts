@@ -18,6 +18,14 @@ import { MSK_OFFSET_MS } from "../time/msk.js";
 import { appendFeedEvent } from "../economy/feedStore.js";
 import { ensureEconomyFeedPanel } from "../economy/panel.js";
 import { getEconomyUser, patchEconomyUser } from "../economy/userStore.js";
+import {
+  buildAdminEconEmbed,
+  buildAdminEconRows,
+  buildAdminHubEmbed,
+  buildAdminHubRows,
+  NEURO_ADMIN_ECON,
+  NEURO_MAIN_ADMIN,
+} from "../neurocontrol/adminHub.js";
 import { getBetEvent, listBetEvents, upsertBetEvent, type BetEvent, type PlacedBet } from "./store.js";
 
 export const NEURO_ADMIN_BUTTON_MENU = "neuroAdmin:menu";
@@ -78,27 +86,17 @@ function canAdmin(interaction: ButtonInteraction | ModalSubmitInteraction): bool
   );
 }
 
-function buildAdminMenuEmbed(): EmbedBuilder {
-  return new EmbedBuilder()
-    .setColor(0x0d47a1)
-    .setTitle("Админ-меню: ивенты и экономика")
-    .setDescription(["Создание событий для ленты (ставки/ивенты) и базовые админ-инструменты."].join("\n"));
-}
-
-function buildAdminMenuRows(): ActionRowBuilder<ButtonBuilder>[] {
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_CREATE_BET).setLabel("Создать ставку").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_BETS).setLabel("Ставки").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_GRANT_RUB).setLabel("Выдать ₽").setStyle(ButtonStyle.Secondary),
-    ),
-  ];
-}
-
 export async function handleNeuroAdminButton(interaction: ButtonInteraction): Promise<boolean> {
   const id = interaction.customId;
   if (
-    ![NEURO_ADMIN_BUTTON_MENU, NEURO_ADMIN_BUTTON_CREATE_BET, NEURO_ADMIN_BUTTON_GRANT_RUB, NEURO_ADMIN_BUTTON_BETS].includes(id) &&
+    ![
+      NEURO_ADMIN_BUTTON_MENU,
+      NEURO_MAIN_ADMIN,
+      NEURO_ADMIN_ECON,
+      NEURO_ADMIN_BUTTON_CREATE_BET,
+      NEURO_ADMIN_BUTTON_GRANT_RUB,
+      NEURO_ADMIN_BUTTON_BETS,
+    ].includes(id) &&
     !id.startsWith(ADMIN_BET_MANAGE_PREFIX) &&
     !id.startsWith(ADMIN_BET_CHOOSE_PREFIX) &&
     !id.startsWith(ADMIN_BET_CONFIRM_PREFIX) &&
@@ -117,8 +115,13 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
     return true;
   }
 
-  if (id === NEURO_ADMIN_BUTTON_MENU) {
-    await replyOrUpdateEphemeral(interaction, { embeds: [buildAdminMenuEmbed()], components: buildAdminMenuRows() });
+  if (id === NEURO_ADMIN_BUTTON_MENU || id === NEURO_MAIN_ADMIN) {
+    await replyOrUpdateEphemeral(interaction, { embeds: [buildAdminHubEmbed()], components: buildAdminHubRows() });
+    return true;
+  }
+
+  if (id === NEURO_ADMIN_ECON) {
+    await replyOrUpdateEphemeral(interaction, { embeds: [buildAdminEconEmbed()], components: buildAdminEconRows() });
     return true;
   }
 
@@ -147,7 +150,7 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
     }
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(NEURO_ADMIN_BUTTON_MENU).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(NEURO_MAIN_ADMIN).setLabel("Назад").setStyle(ButtonStyle.Secondary),
       ),
     );
 

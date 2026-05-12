@@ -1,14 +1,19 @@
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { discordToken } from "./config.js";
 import { registerMemberJoin } from "./listeners/memberJoin.js";
+import { ensureNeuroPanel, handleNeuroButton } from "./neurocontrol/panel.js";
 import {
-  ensureNeuroPanel,
-  handleNeuroButton,
-  handleNeuroSettingsButton,
-  handleNeuroSettingsSelect,
-} from "./neurocontrol/panel.js";
+  handleNeuroChannelsSelect,
+  handleNeuroSettingsTreeButton,
+  handleNeuroTaxModalSubmit,
+} from "./neurocontrol/settingsTree.js";
 import { registerVoiceLadder } from "./voice/voiceLadder.js";
-import { ensureEconomyFeedPanel, ensureEconomyTerminalPanel, handleEconomyButton, handleEconomyModal } from "./economy/panel.js";
+import {
+  ensureEconomyFeedPanel,
+  ensureEconomyTerminalPanel,
+  handleEconomyButton,
+  handleEconomyModal,
+} from "./economy/panel.js";
 import { scheduleEconomyMskMidnightTick } from "./economy/tier3Daily.js";
 import { ensureBetsHealth, handleBetButton, handleBetModal, handleNeuroAdminBetFlow, handleNeuroAdminButton } from "./bets/bets.js";
 import {
@@ -59,7 +64,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isButton()) {
       const handled =
         (await handleNeuroButton(interaction)) ||
-        (await handleNeuroSettingsButton(interaction)) ||
+        (await handleNeuroSettingsTreeButton(interaction)) ||
         (await handleEconomyButton(interaction)) ||
         (await handleNeuroAdminButton(interaction)) ||
         (await handleNeuroAdminBetFlow(interaction)) ||
@@ -69,13 +74,21 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
 
     if (interaction.isChannelSelectMenu()) {
-      const handled = await handleNeuroSettingsSelect(interaction);
-      if (!handled) return;
+      const chHandled = await handleNeuroChannelsSelect(interaction);
+      if (chHandled) {
+        await ensureNeuroPanel(interaction.client);
+        await ensureEconomyTerminalPanel(interaction.client);
+        await ensureEconomyFeedPanel(interaction.client);
+      }
+      if (!chHandled) return;
       return;
     }
 
     if (interaction.isModalSubmit()) {
-      const handled = (await handleBetModal(interaction)) || (await handleEconomyModal(interaction));
+      const handled =
+        (await handleNeuroTaxModalSubmit(interaction)) ||
+        (await handleBetModal(interaction)) ||
+        (await handleEconomyModal(interaction));
       if (!handled) return;
       return;
     }

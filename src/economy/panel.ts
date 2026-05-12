@@ -74,6 +74,7 @@ import { tier3RankTitle } from "./tier3RankTitles.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
 import { mskTodayYmd } from "./mskCalendar.js";
+import { addToTreasury, isLegalTaxableJob, solePropWithdrawWithFee, withholdLegalIncomeTax } from "./taxTreasury.js";
 import {
   isTier12JobId,
   tier12CareerEmbedLines,
@@ -3353,12 +3354,25 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       }
       const streak = u.jobMskDayStreak ?? 0;
       const bonus = rubFromTier3MetaPercent(streak);
+      const gid = member.guild.id;
+      let netRub = bonus;
+      let taxRub = 0;
+      if (def3.archetype === "legal") {
+        const w = withholdLegalIncomeTax(gid, bonus);
+        netRub = w.netRub;
+        taxRub = w.taxRub;
+      }
       patchEconomyUser(member.guild.id, member.id, {
-        rubles: u.rubles + bonus,
+        rubles: u.rubles + netRub,
         tier3SideGigReadyAt: now + TIER3_SIDE_GIG_CD_MS,
       });
+      const taxPart = taxRub > 0 ? ` Налог **${fmt(taxRub)}** ₽ → казна.` : "";
       await replyOrUpdate(interaction, {
-        embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [`Связь: **${formatDelta(bonus)}** на счёт (10–30% ориентира ежедневного оклада).`] })],
+        embeds: [
+          buildCurrentJobEmbed(member, {
+            tier3ActionNotes: [`Связь: **${formatDelta(netRub)}** на счёт (10–30% ориентира ежедневного оклада).${taxPart}`],
+          }),
+        ],
         components: buildCurrentJobRows(member),
       });
       return true;
@@ -3372,12 +3386,19 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       if (def3.archetype === "legal") {
         const streak = u.jobMskDayStreak ?? 0;
         const bonus = rubFromTier3MetaPercent(streak);
+        const gid = member.guild.id;
+        const { netRub, taxRub } = withholdLegalIncomeTax(gid, bonus);
         patchEconomyUser(member.guild.id, member.id, {
-          rubles: u.rubles + bonus,
+          rubles: u.rubles + netRub,
           tier3BossReadyAt: now + TIER3_BOSS_CD_MS,
         });
+        const taxPart = taxRub > 0 ? ` Налог **${fmt(taxRub)}** ₽ → казна.` : "";
         await replyOrUpdate(interaction, {
-          embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [`Совещание: **${formatDelta(bonus)}** на счёт (10–30% ориентира ежедневного оклада).`] })],
+          embeds: [
+            buildCurrentJobEmbed(member, {
+              tier3ActionNotes: [`Совещание: **${formatDelta(netRub)}** на счёт (10–30% ориентира ежедневного оклада).${taxPart}`],
+            }),
+          ],
           components: buildCurrentJobRows(member),
         });
         return true;
@@ -3754,7 +3775,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       }
     }
 
-    rublesNext += jobTotal;
+    let payToWallet = jobTotal;
+    if (jobTotal > 0 && isLegalTaxableJob(jobId)) {
+      const { netRub, taxRub } = withholdLegalIncomeTax(guildId, jobTotal);
+      payToWallet = netRub;
+      if (taxRub > 0) notes.push(`налог **${fmt(taxRub)}** ₽ → казна`);
+    }
+    rublesNext += payToWallet;
     rublesNext = Math.max(0, rublesNext);
 
     const patch: any = {
@@ -3772,7 +3799,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       guildId,
       type: "job:shift",
       actorUserId: member.id,
-      text: `${member.toString()} вышел на смену: **${def.title}** (${formatDelta(walletDeltaRub)}).${notes.length ? ` (${notes.join(", ")})` : ""}`,
+      text: `${member.toString()} вышел на смену: **${def.title}** (${formatDelta(walletDeltaRub)} на счёт).${notes.length ? ` (${notes.join(", ")})` : ""}`,
     });
     await ensureEconomyFeedPanel(interaction.client);
     // Показать игроку в его же окне: сколько получил и текущий баланс.
@@ -3989,12 +4016,19 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
       await interaction.reply({ content: `В бизнесе только **${fmt(bizW)}** ₽.`, flags: MessageFlags.Ephemeral });
       return true;
     }
+    const gid = mem.guild.id;
+    const { toPersonalRub, feeToTreasuryRub } = solePropWithdrawWithFee(gid, amount);
+    if (feeToTreasuryRub > 0) addToTreasury(gid, feeToTreasuryRub);
     patchEconomyUser(mem.guild.id, mem.id, {
-      rubles: u.rubles + amount,
+      rubles: u.rubles + toPersonalRub,
       solePropCapitalRub: bizW - amount,
     });
+    const feeLine =
+      feeToTreasuryRub > 0
+        ? ` Комиссия **${fmt(feeToTreasuryRub)}** ₽ → казна; на счёт **${fmt(toPersonalRub)}** ₽.`
+        : ` На счёт **${fmt(toPersonalRub)}** ₽.`;
     await interaction.reply({
-      embeds: [buildCurrentJobEmbed(mem, { tier3ActionNotes: [`На основной счёт выведено **${fmt(amount)}** ₽.`] })],
+      embeds: [buildCurrentJobEmbed(mem, { tier3ActionNotes: [`Вывод с бизнеса **${fmt(amount)}** ₽.${feeLine}`] })],
       components: buildCurrentJobRows(mem),
       flags: MessageFlags.Ephemeral,
     });

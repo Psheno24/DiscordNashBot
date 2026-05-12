@@ -1,35 +1,12 @@
-import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  ChannelSelectMenuBuilder,
-  ChannelType,
-  EmbedBuilder,
-  MessageFlags,
-  PermissionsBitField,
-  type Client,
-  type ButtonInteraction,
-  type ChannelSelectMenuInteraction,
-} from "discord.js";
+import { EmbedBuilder, MessageFlags, type Client, type ButtonInteraction } from "discord.js";
 import { neuroControlChannelId } from "../config.js";
 import { loadNeurocontrol } from "./loadConfig.js";
 import type { NeuroRoleEntry, NeurocontrolFile } from "./types.js";
 import { getPanelMessageId, setPanelMessageId } from "./panelStore.js";
-import { getGuildConfig, patchGuildConfig } from "../guildConfig/store.js";
-import { ensureEconomyFeedPanel, ensureEconomyTerminalPanel } from "../economy/panel.js";
-import { NEURO_ADMIN_BUTTON_MENU } from "../bets/bets.js";
-
-export const NEURO_BUTTON_ROLES = "neuro:roles";
-export const NEURO_BUTTON_SETTINGS = "neuro:settings";
-
-const NEURO_SELECT_WELCOME = "neuro:cfg:welcome";
-const NEURO_SELECT_NEUROCONTROL = "neuro:cfg:neurocontrol";
-const NEURO_SELECT_ECONOMY_TERMINAL = "neuro:cfg:economyTerminal";
-const NEURO_SELECT_ECONOMY_FEED = "neuro:cfg:economyFeed";
+import { buildNeuroMainPanelRows, NEURO_MAIN_INFO } from "./adminHub.js";
 
 const PANEL_COLOR = 0x263238;
 const ROLES_COLOR = 0xb71c1c;
-const SETTINGS_COLOR = 0x0d47a1;
 
 function buildPanelEmbed(cfg: NeurocontrolFile): EmbedBuilder {
   const e = new EmbedBuilder()
@@ -38,24 +15,6 @@ function buildPanelEmbed(cfg: NeurocontrolFile): EmbedBuilder {
     .setDescription(cfg.panel.description);
   if (cfg.panel.footer) e.setFooter({ text: cfg.panel.footer });
   return e;
-}
-
-function buildRolesRows(): ActionRowBuilder<ButtonBuilder>[] {
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId(NEURO_BUTTON_ROLES)
-      .setLabel("Роли")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId(NEURO_BUTTON_SETTINGS)
-      .setLabel("Настройки")
-      .setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder()
-      .setCustomId(NEURO_ADMIN_BUTTON_MENU)
-      .setLabel("Админ")
-      .setStyle(ButtonStyle.Danger),
-  );
-  return [row];
 }
 
 function chunkFields(entries: NeuroRoleEntry[], perEmbed: number): NeuroRoleEntry[][] {
@@ -110,7 +69,7 @@ export async function ensureNeuroPanel(client: Client) {
 
     const payload = {
       embeds: [buildPanelEmbed(cfg)],
-      components: buildRolesRows(),
+      components: buildNeuroMainPanelRows(),
     };
 
     const storedId = getPanelMessageId(chId);
@@ -132,74 +91,9 @@ export async function ensureNeuroPanel(client: Client) {
   }
 }
 
-function canManage(interaction: ButtonInteraction | ChannelSelectMenuInteraction): boolean {
-  return (
-    interaction.inGuild() &&
-    (interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild) ||
-      interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator))
-  );
-}
-
-function fmtChannel(id?: string): string {
-  return id ? `<#${id}>` : "не задан";
-}
-
-function buildSettingsEmbed(guildId: string): EmbedBuilder {
-  const cfg = getGuildConfig(guildId);
-  return new EmbedBuilder()
-    .setColor(SETTINGS_COLOR)
-    .setTitle("Настройки бота (каналы)")
-    .setDescription(
-      [
-        `Канал приветствий: ${fmtChannel(cfg.welcomeChannelId)}`,
-        `Канал контроля (панель): ${fmtChannel(cfg.neuroControlChannelId)}`,
-        `Канал экономики (терминал): ${fmtChannel(cfg.economyTerminalChannelId)}`,
-        `Канал экономики (лента): ${fmtChannel(cfg.economyFeedChannelId)}`,
-        "",
-        "Выбери новый канал в селекте — настройка сохранится сразу.",
-      ].join("\n"),
-    );
-}
-
-function buildSettingsRows(): ActionRowBuilder<ChannelSelectMenuBuilder>[] {
-  return [
-    new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
-      new ChannelSelectMenuBuilder()
-        .setCustomId(NEURO_SELECT_WELCOME)
-        .setPlaceholder("Выбрать канал приветствий")
-        .setChannelTypes(ChannelType.GuildText)
-        .setMinValues(1)
-        .setMaxValues(1),
-    ),
-    new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
-      new ChannelSelectMenuBuilder()
-        .setCustomId(NEURO_SELECT_NEUROCONTROL)
-        .setPlaceholder("Выбрать канал контроля (панель)")
-        .setChannelTypes(ChannelType.GuildText)
-        .setMinValues(1)
-        .setMaxValues(1),
-    ),
-    new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
-      new ChannelSelectMenuBuilder()
-        .setCustomId(NEURO_SELECT_ECONOMY_TERMINAL)
-        .setPlaceholder("Выбрать канал экономики (терминал)")
-        .setChannelTypes(ChannelType.GuildText)
-        .setMinValues(1)
-        .setMaxValues(1),
-    ),
-    new ActionRowBuilder<ChannelSelectMenuBuilder>().addComponents(
-      new ChannelSelectMenuBuilder()
-        .setCustomId(NEURO_SELECT_ECONOMY_FEED)
-        .setPlaceholder("Выбрать канал экономики (лента)")
-        .setChannelTypes(ChannelType.GuildText)
-        .setMinValues(1)
-        .setMaxValues(1),
-    ),
-  ];
-}
-
+/** Кнопка «Инфо» — справочник ролей из neurocontrol.json. */
 export async function handleNeuroButton(interaction: ButtonInteraction): Promise<boolean> {
-  if (interaction.customId !== NEURO_BUTTON_ROLES) return false;
+  if (interaction.customId !== NEURO_MAIN_INFO) return false;
 
   let cfg: ReturnType<typeof loadNeurocontrol>;
   try {
@@ -214,74 +108,5 @@ export async function handleNeuroButton(interaction: ButtonInteraction): Promise
 
   const embeds = buildRoleEmbeds(cfg.roles);
   await interaction.reply({ embeds, flags: MessageFlags.Ephemeral });
-  return true;
-}
-
-export async function handleNeuroSettingsButton(interaction: ButtonInteraction): Promise<boolean> {
-  if (interaction.customId !== NEURO_BUTTON_SETTINGS) return false;
-  if (!interaction.inGuild() || !interaction.guildId) {
-    await interaction.reply({ content: "Настройки доступны только на сервере.", flags: MessageFlags.Ephemeral });
-    return true;
-  }
-  if (!canManage(interaction)) {
-    await interaction.reply({ content: "Недостаточно прав (нужно Manage Server).", flags: MessageFlags.Ephemeral });
-    return true;
-  }
-
-  await interaction.reply({
-    embeds: [buildSettingsEmbed(interaction.guildId)],
-    components: buildSettingsRows(),
-    flags: MessageFlags.Ephemeral,
-  });
-  return true;
-}
-
-export async function handleNeuroSettingsSelect(interaction: ChannelSelectMenuInteraction): Promise<boolean> {
-  if (
-    ![
-      NEURO_SELECT_WELCOME,
-      NEURO_SELECT_NEUROCONTROL,
-      NEURO_SELECT_ECONOMY_TERMINAL,
-      NEURO_SELECT_ECONOMY_FEED,
-    ].includes(interaction.customId)
-  ) {
-    return false;
-  }
-  if (!interaction.inGuild() || !interaction.guildId) {
-    await interaction.reply({ content: "Настройки доступны только на сервере.", flags: MessageFlags.Ephemeral });
-    return true;
-  }
-  if (!canManage(interaction)) {
-    await interaction.reply({ content: "Недостаточно прав (нужно Manage Server).", flags: MessageFlags.Ephemeral });
-    return true;
-  }
-
-  const picked = interaction.values[0];
-  // На всякий: оставим только текстовые каналы.
-  const ch = await interaction.guild?.channels.fetch(picked).catch(() => null);
-  if (!ch || ch.type !== ChannelType.GuildText) {
-    await interaction.reply({ content: "Нужен текстовый канал сервера.", flags: MessageFlags.Ephemeral });
-    return true;
-  }
-
-  if (interaction.customId === NEURO_SELECT_WELCOME) {
-    patchGuildConfig(interaction.guildId, { welcomeChannelId: picked });
-  } else if (interaction.customId === NEURO_SELECT_NEUROCONTROL) {
-    patchGuildConfig(interaction.guildId, { neuroControlChannelId: picked });
-  } else if (interaction.customId === NEURO_SELECT_ECONOMY_TERMINAL) {
-    patchGuildConfig(interaction.guildId, { economyTerminalChannelId: picked });
-  } else if (interaction.customId === NEURO_SELECT_ECONOMY_FEED) {
-    patchGuildConfig(interaction.guildId, { economyFeedChannelId: picked });
-  }
-
-  // Сразу выставляем/обновляем панели в новых каналах, без перезапуска бота.
-  await ensureNeuroPanel(interaction.client);
-  await ensureEconomyTerminalPanel(interaction.client);
-  await ensureEconomyFeedPanel(interaction.client);
-
-  await interaction.update({
-    embeds: [buildSettingsEmbed(interaction.guildId)],
-    components: buildSettingsRows(),
-  });
   return true;
 }
