@@ -17,6 +17,7 @@ import { economyFeedChannelId } from "../config.js";
 import { MSK_OFFSET_MS } from "../time/msk.js";
 import { appendFeedEvent } from "../economy/feedStore.js";
 import { ensureEconomyFeedPanel } from "../economy/panel.js";
+import { trySpendTreasuryRub } from "../economy/taxTreasury.js";
 import { getEconomyUser, patchEconomyUser } from "../economy/userStore.js";
 import {
   buildAdminEconEmbed,
@@ -1014,6 +1015,16 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       return true;
     }
 
+    const spend = trySpendTreasuryRub(guildId, amount);
+    if (!spend.ok) {
+      const bal = spend.balance.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+      await interaction.reply({
+        content: `В казне недостаточно средств. Сейчас: **${bal}** ₽.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+
     const u = getEconomyUser(guildId, userId);
     patchEconomyUser(guildId, userId, { rubles: u.rubles + amount });
     appendFeedEvent({
@@ -1021,11 +1032,14 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       guildId,
       type: "admin:budget",
       actorUserId: interaction.user.id,
-      text: `${interaction.user.toString()} выдал <@${userId}> **${amount.toLocaleString("ru-RU")} ₽**.`,
+      text: `${interaction.user.toString()} выдал <@${userId}> **${amount.toLocaleString("ru-RU")} ₽** из казны.`,
     });
     await ensureEconomyFeedPanel(interaction.client);
 
-    await interaction.reply({ content: `Выдано ${amount.toLocaleString("ru-RU")} ₽ пользователю <@${userId}>.`, flags: MessageFlags.Ephemeral });
+    await interaction.reply({
+      content: `Выдано ${amount.toLocaleString("ru-RU")} ₽ пользователю <@${userId}> (из казны).`,
+      flags: MessageFlags.Ephemeral,
+    });
     return true;
   }
 

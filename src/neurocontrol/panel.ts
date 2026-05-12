@@ -1,5 +1,6 @@
 import { EmbedBuilder, MessageFlags, type Client, type ButtonInteraction } from "discord.js";
 import { neuroControlChannelId } from "../config.js";
+import { getGuildConfig } from "../guildConfig/store.js";
 import { loadNeurocontrol } from "./loadConfig.js";
 import type { NeuroRoleEntry, NeurocontrolFile } from "./types.js";
 import { getPanelMessageId, setPanelMessageId } from "./panelStore.js";
@@ -8,11 +9,14 @@ import { buildNeuroMainPanelRows, NEURO_MAIN_INFO } from "./adminHub.js";
 const PANEL_COLOR = 0x263238;
 const ROLES_COLOR = 0xb71c1c;
 
-function buildPanelEmbed(cfg: NeurocontrolFile): EmbedBuilder {
-  const e = new EmbedBuilder()
-    .setColor(PANEL_COLOR)
-    .setTitle(cfg.panel.title)
-    .setDescription(cfg.panel.description);
+function fmtTreasuryRub(n: number): string {
+  return Math.floor(Math.max(0, n)).toLocaleString("ru-RU");
+}
+
+function buildPanelEmbed(cfg: NeurocontrolFile, guildId: string): EmbedBuilder {
+  const treasury = getGuildConfig(guildId).treasuryRubles ?? 0;
+  const desc = `Диспетчерский пункт ИИ Управления.\n\n**Казна:** **${fmtTreasuryRub(treasury)}** ₽`;
+  const e = new EmbedBuilder().setColor(PANEL_COLOR).setTitle(cfg.panel.title).setDescription(desc);
   if (cfg.panel.footer) e.setFooter({ text: cfg.panel.footer });
   return e;
 }
@@ -68,7 +72,7 @@ export async function ensureNeuroPanel(client: Client) {
     }
 
     const payload = {
-      embeds: [buildPanelEmbed(cfg)],
+      embeds: [buildPanelEmbed(cfg, guild.id)],
       components: buildNeuroMainPanelRows(),
     };
 
@@ -88,6 +92,31 @@ export async function ensureNeuroPanel(client: Client) {
 
     const sent = await ch.send(payload);
     setPanelMessageId(chId, sent.id);
+  }
+}
+
+/** Обновить только закреплённое сообщение панели для одного сервера (казна и т.д.). */
+export async function refreshNeuroPanelGuild(client: Client, guildId: string): Promise<void> {
+  const chId = neuroControlChannelId(guildId);
+  if (!chId) return;
+  let cfg: NeurocontrolFile;
+  try {
+    cfg = loadNeurocontrol();
+  } catch {
+    return;
+  }
+  const ch = await client.channels.fetch(chId).catch(() => null);
+  if (!ch?.isTextBased() || ch.isDMBased() || !ch.isSendable()) return;
+  const payload = {
+    embeds: [buildPanelEmbed(cfg, guildId)],
+    components: buildNeuroMainPanelRows(),
+  };
+  const storedId = getPanelMessageId(chId);
+  if (!storedId) return;
+  const msg = await ch.messages.fetch(storedId).catch(() => null);
+  const botId = client.user?.id;
+  if (msg && botId && msg.author.id === botId) {
+    await msg.edit(payload).catch(() => null);
   }
 }
 

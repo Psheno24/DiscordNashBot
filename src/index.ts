@@ -1,7 +1,8 @@
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { discordToken } from "./config.js";
 import { registerMemberJoin } from "./listeners/memberJoin.js";
-import { ensureNeuroPanel, handleNeuroButton } from "./neurocontrol/panel.js";
+import { setOnTreasuryMutated } from "./economy/taxTreasury.js";
+import { ensureNeuroPanel, handleNeuroButton, refreshNeuroPanelGuild } from "./neurocontrol/panel.js";
 import {
   handleNeuroChannelsSelect,
   handleNeuroSettingsTreeButton,
@@ -36,6 +37,9 @@ const client = new Client({
 client.once(Events.ClientReady, async (c) => {
   console.log(`ИИ Управление на связи: ${c.user.tag}`);
   await registerMemberActivityPreviewCommands(c);
+  setOnTreasuryMutated((gid) => {
+    void refreshNeuroPanelGuild(c, gid);
+  });
   await ensureNeuroPanel(c);
   await ensureEconomyTerminalPanel(c);
   await ensureEconomyFeedPanel(c);

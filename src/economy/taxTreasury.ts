@@ -1,6 +1,13 @@
 import { getGuildConfig, patchGuildConfig } from "../guildConfig/store.js";
 import type { JobId } from "./userStore.js";
 
+let onTreasuryMutated: ((guildId: string) => void) | undefined;
+
+/** Вызывается после изменения `treasuryRubles` (пополнение или списание). */
+export function setOnTreasuryMutated(cb: ((guildId: string) => void) | undefined): void {
+  onTreasuryMutated = cb;
+}
+
 /** Все профессии с «легальным» доходом на личный счёт, кроме нелегала тир-3. */
 export function isLegalTaxableJob(jobId: JobId): boolean {
   return jobId !== "shadowFixer";
@@ -34,6 +41,21 @@ export function addToTreasury(guildId: string, amountRub: number): void {
   if (a <= 0) return;
   const cur = getGuildConfig(guildId).treasuryRubles ?? 0;
   patchGuildConfig(guildId, { treasuryRubles: Math.round((cur + a) * 100) / 100 });
+  onTreasuryMutated?.(guildId);
+}
+
+export type SpendTreasuryResult = { ok: true } | { ok: false; balance: number };
+
+/** Списать целые ₽ из казны (для выдачи админом и т.п.). */
+export function trySpendTreasuryRub(guildId: string, amountRub: number): SpendTreasuryResult {
+  const a = Math.floor(amountRub);
+  const curRaw = getGuildConfig(guildId).treasuryRubles ?? 0;
+  const cur = Number.isFinite(curRaw) ? curRaw : 0;
+  if (a <= 0) return { ok: false, balance: Math.round(cur * 100) / 100 };
+  if (cur < a) return { ok: false, balance: Math.round(cur * 100) / 100 };
+  patchGuildConfig(guildId, { treasuryRubles: Math.round((cur - a) * 100) / 100 });
+  onTreasuryMutated?.(guildId);
+  return { ok: true };
 }
 
 /** НДС с покупок в магазине терминала: доля от суммы чека → казна. */
