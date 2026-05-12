@@ -102,14 +102,12 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
       const mention = member ? member.toString() : `Пользователь ${userId}`;
 
       if (passive > 0) {
-        const taxRub = passive - creditPassive;
-        const taxPart = taxRub > 0 ? ` (налог **${Math.floor(taxRub)}** ₽ → казна)` : "";
         appendFeedEvent({
           ts: Date.now(),
           guildId: guild.id,
           type: "job:passive",
           actorUserId: userId,
-          text: `${mention}: суточный оклад **${def.title}** — **+${Math.floor(creditPassive)}** ₽ на счёт${taxPart} (стрик **${streakOut.nextStreak}** дн., **${tier3RankTitle(jobId as Tier3JobId, rankAfter)}**).`,
+          text: `${mention}: суточный оклад **${def.title}** — **+${Math.floor(creditPassive)}** ₽`,
         });
       }
 
@@ -119,7 +117,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
           guildId: guild.id,
           type: "job:passive",
           actorUserId: userId,
-          text: `${mention}: **повышение** на **${def.title}** — **${tier3RankTitle(jobId as Tier3JobId, rankAfter)}** (каждые 30 дней стажа).`,
+          text: `${mention}: **повышение** на **${def.title}** — **${tier3RankTitle(jobId as Tier3JobId, rankAfter)}**`,
         });
       }
     }

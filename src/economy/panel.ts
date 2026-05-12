@@ -3912,7 +3912,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       guildId,
       type: "job:shift",
       actorUserId: member.id,
-      text: `${member.toString()} вышел на смену: **${def.title}** (${formatDelta(walletDeltaRub)} на счёт).${notes.length ? ` (${notes.join(", ")})` : ""}`,
+      text: `${member.toString()} вышел на смену: **${def.title}** — ${formatDelta(walletDeltaRub)}`,
     });
     await ensureEconomyFeedPanel(interaction.client);
     // Показать игроку в его же окне: сколько получил и текущий баланс.
