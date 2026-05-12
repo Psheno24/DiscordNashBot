@@ -18,7 +18,7 @@ import {
 import { tier3RankTitle } from "./tier3RankTitles.js";
 
 /**
- * Полночь по МСК: стрик календарных дней на тир-3 работе и ежедневный оклад (по архетипу).
+ * Суточный тик: стрик календарных дней на тир-3 работе и суточный пассивный оклад (по архетипу).
  * Идемпотентно по полю `economyLastMskYmd` на пользователя.
  */
 function processWeeklySolePropCapitalTax(guildId: string, todayYmd: string, nowMs: number): void {
@@ -109,7 +109,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
           guildId: guild.id,
           type: "job:passive",
           actorUserId: userId,
-          text: `${mention}: ежедневный оклад **${def.title}** — **+${Math.floor(creditPassive)}** ₽ на счёт${taxPart} (стрик **${streakOut.nextStreak}** дн., **${tier3RankTitle(jobId as Tier3JobId, rankAfter)}**).`,
+          text: `${mention}: суточный оклад **${def.title}** — **+${Math.floor(creditPassive)}** ₽ на счёт${taxPart} (стрик **${streakOut.nextStreak}** дн., **${tier3RankTitle(jobId as Tier3JobId, rankAfter)}**).`,
         });
       }
 
@@ -132,7 +132,7 @@ export function scheduleEconomyMskMidnightTick(client: Client, onTick?: () => Pr
       await processEconomyMskMidnightTick(client);
       if (onTick) await onTick();
     } catch (e) {
-      console.error("economy MSK midnight tick:", e);
+      console.error("economy daily tick:", e);
     }
     scheduleEconomyMskMidnightTick(client, onTick);
   };

@@ -12,9 +12,9 @@ export interface GuildConfig {
   legalIncomeTaxPercent?: number;
   /** Комиссия при выводе с баланса ИП на личный счёт, % (0–100). */
   solePropWithdrawFeePercent?: number;
-  /** Еженедельный налог с баланса бизнеса ИП (понедельник, МСК), % (0–100). */
+  /** Еженедельный налог с баланса бизнеса ИП (календарный понедельник), % (0–100). */
   solePropWeeklyCapitalTaxPercent?: number;
-  /** Дата МСК (YYYY-MM-DD), когда уже начисляли еженедельный налог ИП. */
+  /** Календарная дата (YYYY-MM-DD), когда уже начисляли еженедельный налог ИП. */
   solePropWeeklyTaxLastMskYmd?: string;
 }
 

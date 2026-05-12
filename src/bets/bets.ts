@@ -194,7 +194,7 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
       new ActionRowBuilder<TextInputBuilder>().addComponents(
         new TextInputBuilder()
           .setCustomId("closeAt")
-          .setLabel("Закрытие приёма (МСК)")
+          .setLabel("Закрытие приёма (UTC+3)")
           .setStyle(TextInputStyle.Short)
           .setRequired(true)
           .setPlaceholder("09.05 18:30 или 09-05-2026 18:30"),
@@ -277,7 +277,7 @@ async function deleteBetFeedMessage(client: Client, ev: BetEvent): Promise<void>
   ev.resolvedDeleteFeedMessageAtMs = undefined;
 }
 
-/** DD-MM HH:MM по МСК для подстановки в модалку редактирования. */
+/** DD-MM HH:MM по UTC+3 для подстановки в модалку редактирования. */
 function formatCloseAtMskForModal(closesAt: number): string {
   const d = new Date(closesAt + MSK_OFFSET_MS);
   const dd = String(d.getUTCDate()).padStart(2, "0");
@@ -351,7 +351,7 @@ function showEditBetModal(interaction: ButtonInteraction, ev: BetEvent): Promise
     new ActionRowBuilder<TextInputBuilder>().addComponents(
       new TextInputBuilder()
         .setCustomId("closeAt")
-        .setLabel("Закрытие приёма (МСК)")
+        .setLabel("Закрытие приёма (UTC+3)")
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
         .setMaxLength(30)
@@ -396,7 +396,7 @@ function buildBetRepeatWarningEmbed(ev: BetEvent, userId: string, pickedLabel: s
 }
 
 /**
- * Закрытие приёма по МСК (UTC+3).
+ * Закрытие приёма по UTC+3.
  * Форматы: `DD-MM HH:MM`, `DD.MM HH:MM`, `DD/MM HH:MM`, опционально с годом `DD-MM-YYYY HH:MM`.
  * День и месяц могут быть без ведущего нуля. Год без указания — ближайшее будущее время в этом или следующем календарном году.
  */
@@ -846,7 +846,7 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       if (!t2) lines.push("• **Команда 2:** то же правило, что для первой команды.");
       if (!closesAt)
         lines.push(
-          "• **Закрытие приёма** по МСК: **день-месяц время**, например `09-05 18:30`, `09.05 18:30` или с годом `09-05-2026 18:30`. Время должно быть **в будущем**.",
+          "• **Закрытие приёма** по **UTC+3**: **день-месяц время**, например `09-05 18:30`, `09.05 18:30` или с годом `09-05-2026 18:30`. Время должно быть **в будущем**.",
         );
       if (drawRaw && drawOdds == null) lines.push("• **Ничья:** укажите один коэффициент (например `3,2`) или оставьте поле пустым.");
       await interaction.reply({ content: lines.join("\n"), flags: MessageFlags.Ephemeral });
@@ -944,7 +944,7 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
       if (!t2) lines.push("• **Команда 2:** то же правило, что для первой команды.");
       if (!closesAt)
         lines.push(
-          "• **Закрытие приёма** по МСК: **день-месяц время**, например `09-05 18:30`, `09.05 18:30` или с годом `09-05-2026 18:30`. Время должно быть **в будущем**.",
+          "• **Закрытие приёма** по **UTC+3**: **день-месяц время**, например `09-05 18:30`, `09.05 18:30` или с годом `09-05-2026 18:30`. Время должно быть **в будущем**.",
         );
       if (drawRaw && drawOdds == null) lines.push("• **Ничья:** укажите один коэффициент (например `3,2`) или оставьте поле пустым.");
       await interaction.reply({ content: lines.join("\n"), flags: MessageFlags.Ephemeral });

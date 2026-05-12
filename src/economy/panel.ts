@@ -528,7 +528,7 @@ function buildFocusEmbed(member: GuildMember): EmbedBuilder {
         "— первые **до 3 часов** в голосе за день (0–180 мин) считаются **полностью**;",
         "— следующие **до 6 часов** суммарно за день (180–360 мин) — **вдвое слабее**;",
         "— всё **свыше 6 часов** за день (360+ мин) — **ещё слабее** (примерно **в пять раз** слабее, чем первые три часа).",
-        "_Сутки для этих порогов — **календарный день по московскому времени (МСК, UTC+3)**._",
+        "_Сутки для этих порогов — **один календарный день** экономики._",
         `От этого зависит и скорость роста **${ps}**, и то, сколько **₽** ты получишь за голос — в зависимости от выбранного фокуса.`,
         "",
         `**Твой текущий фокус:** **${focusLabel(u.focus)}**`,
@@ -656,12 +656,12 @@ function jobOpeningLine(jobId: JobId): string {
       return "**Развлекательный центр** · КД **6** ч · **от ~−38k до ~155k** (шансы в **Подробнее**) · **×ранг** т2";
     case "officeAnalyst": {
       const o = getTier3JobDef("officeAnalyst");
-      return `**Офис · аналитик** · оклад МСК **${fmt(o.passiveBaseRub)}** ₽ + смена КД **4** ч · фикс смены **45–55k**+`;
+      return `**Офис · аналитик** · суточный оклад **${fmt(o.passiveBaseRub)}** ₽ + смена КД **4** ч · фикс смены **45–55k**+`;
     }
     case "shadowFixer":
       return "**Схемы · посредник** · КД **12** ч · рандом (шансы в **Подробнее**)";
     case "soleProp":
-      return "**ИП · услуги** · оклад МСК от капитала · смен **нет**";
+      return "**ИП · услуги** · суточный оклад от капитала · смен **нет**";
     default:
       return `**${jobId}**`;
   }
@@ -700,7 +700,7 @@ const JOBS_STARTER: JobDef[] = [
         "**КД смены:** 3 ч без вела; с **арендой электровела** — 2 ч; с **авто** — по классу (**скутер ~2,5 ч** … **топ ~1 ч**).",
         "**Оплата за смену:** случайно **6 500–8 000** ₽. **Расходники:** **500** ₽. **Множитель ранга** тир-1 — в карточке профессии.",
         `Нужны **телефон** и **симка**. С **баланса сим** — **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ за **тариф** на **30** суток (при первой смене после перерыва); внутри оплаченного периода смены **без** доп. списаний с сим. **Основной счёт не трогается.**`,
-        "**Электровел** — посуточная аренда (если **нет** своего авто). Коэффициенты по номеру смены в **МСК-сутки** — в **Подробнее**.",
+        "**Электровел** — посуточная аренда (если **нет** своего авто). Коэффициенты по номеру смены за **текущие календарные сутки** — в **Подробнее**.",
       ].join("\n"),
   },
   {
@@ -764,7 +764,7 @@ const JOBS_TIER2: JobDef[] = [
     basePayoutRub: 16_500,
     description: [
       "**КД:** **3 ч** пешком / вел **2 ч** / с авто (**не ниже 1 ч 45 мин**; транспорт задаётся в магазине).",
-      "**Оплата за смену:** случайно **15 000–18 000** ₽. **Расходники:** **1 500** ₽. **3%** штраф; каждая **7-я** смена — премия **22 000** ₽; **множитель ранга** тир-2 — в карточке. Коэффициенты по номеру смены в **МСК-сутки** — в **Подробнее**.",
+      "**Оплата за смену:** случайно **15 000–18 000** ₽. **Расходники:** **1 500** ₽. **3%** штраф; каждая **7-я** смена — премия **22 000** ₽; **множитель ранга** тир-2 — в карточке. Коэффициенты по номеру смены за **текущие календарные сутки** — в **Подробнее**.",
     ].join("\n"),
     reqSkills: { discipline: 28, logistics: 20 },
   },
@@ -821,16 +821,16 @@ function chance(p: number): boolean {
   return Math.random() < Math.min(1, Math.max(0, p));
 }
 
-/** Коэффициент к выплате за смену по номеру смены в текущие МСК-сутки (доставка / склад / офис т3). */
+/** Коэффициент к выплате за смену по номеру смены за текущие календарные сутки (доставка / склад / офис т3). */
 function shiftSpamMult(shiftIndexToday: number): number {
   if (shiftIndexToday <= 5) return 1;
   if (shiftIndexToday <= 7) return 0.65;
   return 0.35;
 }
 
-function mskDayShiftPayCoeffEmbedBlock(): string {
+function calendarDayShiftPayCoeffEmbedBlock(): string {
   return (
-    "**Коэффициент к выплате за смену** (по порядковому номеру смены в **текущие МСК-сутки**): " +
+    "**Коэффициент к выплате за смену** (по порядковому номеру смены за **текущие календарные сутки**): " +
     "смены **1–5** — **×1**; **6–7** — **×0,65**; с **8-й** и далее — **×0,35**."
   );
 }
@@ -854,7 +854,7 @@ function jobShiftPayEmbedLine(jobId: JobId): string {
     case "shadowFixer":
       return "Оплата за смену: **от −150 000** до **~1 200 000+** ₽ (шансы — в **Подробнее**).";
     case "soleProp":
-      return "Смен **нет**: доход **ежедневным окладом** (МСК) и кнопками **в панели ИП**.";
+      return "Смен **нет**: **суточный оклад** (пассивно) и кнопки **в панели ИП**.";
     default:
       return "Оплата за смену: —";
   }
@@ -879,7 +879,7 @@ function jobTaxEmbedLines(guildId: string, jobId: JobId): string[] {
   const out = [`Подоходный налог с зачисления на личный счёт: **${pct}**%.`];
   if (jobId === "soleProp") {
     const cap = getSolePropWeeklyCapitalTaxPercent(guildId);
-    if (cap > 0) out.push(`Еженедельный налог с капитала бизнеса (пн, МСК): **${cap}**%.`);
+    if (cap > 0) out.push(`Еженедельный налог с капитала бизнеса (**по понедельникам**): **${cap}**%.`);
   }
   return out;
 }
@@ -898,7 +898,7 @@ function tier3CareerEmbedLines(u: ReturnType<typeof getEconomyUser>, jobId: Tier
         `**${title}** (ранг **${rank}**) · стрик **${streak}** дн. · **${daysToNext}** дн. до следующего ранга (**ранг ${rank + 1}**)`,
       );
     }
-    lines.push(`**Множитель ранга к ежедневному окладу:** **×${(1 + 0.08 * rank).toFixed(2)}**`);
+    lines.push(`**Множитель ранга к суточному окладу** (пассивно): **×${(1 + 0.08 * rank).toFixed(2)}**`);
     return lines;
   }
   if (rank >= TIER3_MAX_PROMOTION_RANK) {
@@ -910,7 +910,7 @@ function tier3CareerEmbedLines(u: ReturnType<typeof getEconomyUser>, jobId: Tier
       `**${title}** (ранг **${rank}**) · стрик **${streak}** дн. · **${daysToNext}** дн. до следующего ранга (**${nextTitle}**)`,
     );
   }
-  lines.push(`**Множитель ранга к ежедневному окладу:** **×${(1 + 0.08 * rank).toFixed(2)}**`);
+  lines.push(`**Множитель ранга к суточному окладу** (пассивно): **×${(1 + 0.08 * rank).toFixed(2)}**`);
   if (jobId === "officeAnalyst") {
     lines.push("**Надбавка к выплате за смену:** **+1 000** ₽ × **ранг** и до **500** ₽ за стрик (краткими шагами).");
   } else {
@@ -963,7 +963,7 @@ function formatDelta(n: number): string {
   return `${sign}${Math.abs(n).toLocaleString("ru-RU")} ₽`;
 }
 
-/** Ориентир ежедневного оклада офиса того же ранга — для бонусов 10–30% у тир-3. */
+/** Ориентир суточного оклада офиса того же ранга — для бонусов 10–30% у тир-3. */
 function tier3ReferencePassiveRubFromStreak(streakDays: number): number {
   const office = getTier3JobDef("officeAnalyst");
   const rank = tier3PromotionRank(streakDays);
@@ -1112,7 +1112,7 @@ function jobUsesVariablePayout(jobId: JobId): boolean {
 
 function jobPayoutShortForMenu(jobId: JobId, baseRub: number): string {
   if (jobUsesVariablePayout(jobId)) return "без фикса (рандом)";
-  if (jobId === "soleProp") return "ежедневный оклад";
+  if (jobId === "soleProp") return "суточный оклад";
   return `${baseRub} ₽`;
 }
 
@@ -1318,8 +1318,8 @@ function buildMyRentHomeEmbed(member: GuildMember): EmbedBuilder {
   const curRub = housingRentPlanPriceRub(curPlan);
   const renewLine =
     u.housingRentRenewalPlan != null
-      ? `После окончания текущего срока первое автосписание в полночь МСК: **${rentPlanLabelRu(u.housingRentRenewalPlan)}** (**${fmt(housingRentPlanPriceRub(u.housingRentRenewalPlan))}** ₽).`
-      : `Пакет на **следующий** цикл после текущего срока **не выбран** — в полночь спишется пакет **текущего** цикла: **${rentPlanLabelRu(curPlan)}** (**${fmt(curRub)}** ₽).`;
+      ? `После окончания текущего срока **первое** автосписание **в начале следующего календарного дня**: **${rentPlanLabelRu(u.housingRentRenewalPlan)}** (**${fmt(housingRentPlanPriceRub(u.housingRentRenewalPlan))}** ₽).`
+      : `Пакет на **следующий** цикл после текущего срока **не выбран** — **в начале дня** спишется пакет **текущего** цикла: **${rentPlanLabelRu(curPlan)}** (**${fmt(curRub)}** ₽).`;
   const refundLine =
     due != null && now < due
       ? `Если купите квартиру в магазине, на счёт вернётся **≈ ${fmt(housingRentUnusedRefundRub(u, now))}** ₽ за неиспользованное время.`
@@ -1329,7 +1329,7 @@ function buildMyRentHomeEmbed(member: GuildMember): EmbedBuilder {
     "",
     dueLine,
     "",
-    `**Полночь МСК по текущему циклу:** при наступлении срока спишется **${rentPlanLabelRu(curPlan)}** (**${fmt(curRub)}** ₽), срок сдвинется на следующий период этого пакета.`,
+    `**При наступлении срока** (начало календарного дня) спишется **${rentPlanLabelRu(curPlan)}** (**${fmt(curRub)}** ₽), срок сдвинется на следующий период этого пакета.`,
     "",
     "**Следующий цикл (после оплаченного срока):**",
     renewLine,
@@ -1370,7 +1370,7 @@ function buildMyRentEditEmbed(member: GuildMember): EmbedBuilder {
     "**1. Продлить сейчас** — спишется выбранная сумма, конец оплаченного срока **сдвинется**.",
     prepaid,
     "",
-    "**2. Пакет после срока** — что спишется в **первую** полночь МСК **после** окончания текущего оплаченного периода (текущий срок **не** сокращается и **не** продлевается этим действием).",
+    "**2. Пакет после срока** — что спишется **при первом наступлении начала дня** после окончания текущего оплаченного периода (текущий срок **не** сокращается и **не** продлевается этим действием).",
     "",
     "Нужны только **аренда** или **покупка квартиры** — раздел **Магазин** → жильё.",
   ];
@@ -1443,7 +1443,7 @@ function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
     lines.push(
       "**Своя квартира**",
       "- **" + (getApartmentDef(u.ownedApartmentId)?.label ?? "-") + "**",
-      "- Коммуналка раз в **30 дней** (полночь МСК).",
+      "- Коммуналка раз в **30 дней** (начало календарного дня).",
       "- Продажа: **" + Math.round(APARTMENT_SELL_REFUND_RATE * 100) + "%** цены на руки; престиж от квартиры **снимается**.",
       "",
       "**Смена квартиры** - кнопки ниже (платите разницу). **Аренда** в этом разделе недоступна.",
@@ -1726,7 +1726,7 @@ function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
     u.jobId === "soleProp"
       ? ([
           `Текущая работа: **${def.title}**`,
-          `Доход: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}** — действия бизнеса и **ежедневный оклад** (МСК).`,
+          `Доход: **${jobPayoutShortForMenu(u.jobId, def.basePayoutRub)}** (пассивно) — действия бизнеса и **суточный оклад**.`,
         ] as string[])
       : [
           `Текущая работа: **${def.title}**`,
@@ -1853,7 +1853,7 @@ function buildJobDetailBody(member: GuildMember, jobId: JobId): string {
         "**Оплата за смену:** случайно **6 500–8 000** ₽.",
         "**Расходники:** **500** ₽.",
         "**Множитель ранга** тир-1 применяется к итогу после расходников.",
-        mskDayShiftPayCoeffEmbedBlock(),
+        calendarDayShiftPayCoeffEmbedBlock(),
         `**Сим:** тариф **${fmt(COURIER_SIM_MONTHLY_FEE_RUB)}** ₽ с **баланса сим** на **30** суток — списывается при **первой** смене после окончания оплаченного периода; основной счёт **не** используется.`,
       ].join("\n\n");
       break;
@@ -1893,7 +1893,7 @@ function buildJobDetailBody(member: GuildMember, jobId: JobId): string {
         "**Расходники:** **1 500** ₽.",
         "**3%** штраф **−4 500…−6 500** ₽ · каждая **7-я** смена: **+22 000** ₽.",
         "**После:** **×ранг** тир-2.",
-        mskDayShiftPayCoeffEmbedBlock(),
+        calendarDayShiftPayCoeffEmbedBlock(),
         "**Навыки:** дисциплина **28+**, логистика **20+** · нужно **жильё**.",
       ].join("\n\n");
       break;
@@ -1915,18 +1915,18 @@ function buildJobDetailBody(member: GuildMember, jobId: JobId): string {
     case "officeAnalyst": {
       const basePass = getTier3JobDef("officeAnalyst").passiveBaseRub;
       main = [
-        `**Ежедневный оклад (полночь МСК):** **${fmt(basePass)}** ₽ × (**1** + **8%** × **ранг**). Ранг каждые **${TIER3_PROMOTION_EVERY_DAYS}** дней стрика (макс. **15**).`,
+        `**Суточный оклад** (пассивно): **${fmt(basePass)}** ₽ × (**1** + **8%** × **ранг**). Ранг каждые **${TIER3_PROMOTION_EVERY_DAYS}** дней стрика (макс. **15**).`,
         "**КД смены:** **4** ч.",
         "**Оплата за смену:** случайно **45 000–55 000** ₽ + надбавки от ранга и стрика · **3%** штраф **−12…−22k**.",
-        mskDayShiftPayCoeffEmbedBlock(),
-        "**Связь** и **Совещание** (КД **24** ч): **10–30%** ориентира оклада того же ранга.",
+        calendarDayShiftPayCoeffEmbedBlock(),
+        "**Связь** и **Совещание** (КД **24** ч): **10–30%** ориентира **суточного оклада** того же ранга.",
         "**Навыки:** коммуникация **30+**, логистика **28+**, дисциплина **35+** · **жильё**.",
       ].join("\n\n");
       break;
     }
     case "shadowFixer":
       main = [
-        "**Ежедневного оклада нет.**",
+        "**Суточного пассивного оклада нет.**",
         "**КД смены:** **12** ч.",
         "**Оплата за смену:** **от −150 000** до **~1 200 000+** ₽ (положительные ветки × **posBoost** от ранга и стрика).",
         "**Вилки и доли (до posBoost):**",
@@ -1936,16 +1936,16 @@ function buildJobDetailBody(member: GuildMember, jobId: JobId): string {
         "• **~130 000** ₽ — **24%**",
         "• **~400 000** ₽ — **9%**",
         "• **~1 200 000** ₽ — **3%**",
-        "**Связь:** **10–30%** ориентира **70 000**×(**1**+**8%**×ранг) ₽/сутки, КД **24** ч.",
+        "**Связь:** **10–30%** ориентира **70 000**×(**1**+**8%**×ранг) ₽ **за сутки**, КД **24** ч.",
         "**Куратор:** ускорение стрика · КД **24** ч.",
         "**Навыки:** коммуникация **42+**, логистика **38+**, дисциплина **48+** · **жильё**.",
       ].join("\n\n");
       break;
     case "soleProp":
       main = [
-        "**Ежедневный оклад (полночь МСК):** считается от **баланса бизнеса** (потолок **500 000 000** ₽).",
+        "**Суточный оклад** (пассивно): считается от **баланса бизнеса** (потолок **500 000 000** ₽).",
         "**Формула:** `floor((45 000 + капитал × 0,0045) × (1 + 8%×ранг) × престиж × эффективность × …)`** — риск −2…+2 даёт сдвиг множителя.",
-        "**Пример:** при **0** ₽ на бизнесе и ранге **0** базовая часть **45 000** ₽/день до престижа; при **1 000 000** ₽ на бизнесе **+4 500** ₽ от капитала (до множителей).",
+        "**Пример:** при **0** ₽ на бизнесе и ранге **0** базовая часть **45 000** ₽ **за сутки** до престижа; при **1 000 000** ₽ на бизнесе **+4 500** ₽ от капитала (до множителей).",
         "**Реклама / персонал / контроль** — как в панели ИП.",
         "**Навыки:** коммуникация **55+**, логистика **52+**, дисциплина **60+** · **жильё**.",
       ].join("\n\n");
@@ -2085,13 +2085,13 @@ function workCatalogBackButtonId(jobId: JobId): string {
   return ECON_WORK_BUTTON_STARTERS;
 }
 
-/** Ориентир ежедневного оклада ИП при разных вложениях (риск 0 — без рандом-джиттера). */
+/** Ориентир суточного оклада ИП при разных вложениях (риск 0 — без рандом-джиттера). */
 function solePropPassiveExampleLines(u: ReturnType<typeof getEconomyUser>): string[] {
   const sdef = getTier3JobDef("soleProp");
   const streak = u.jobMskDayStreak ?? 0;
   const caps = [0, 100_000, 250_000, 500_000, 1_000_000, 2_000_000, 5_000_000];
   const out: string[] = [
-    "**Ориентир ежедневного оклада** при разном балансе бизнеса (полночь МСК, ползунок риска **0** — без случайного джиттера):",
+    "**Ориентир суточного оклада** при разном балансе бизнеса (ползунок риска **0** — без случайного джиттера):",
   ];
   for (const cap of caps) {
     const night = computeTier3PassiveRub({
@@ -2104,10 +2104,10 @@ function solePropPassiveExampleLines(u: ReturnType<typeof getEconomyUser>): stri
       solePropPassiveEffMult: u.solePropPassiveEffMult ?? 1,
       solePropPassiveTempMult: u.solePropPassiveTempMult ?? 1,
     });
-    out.push(`• **${fmt(cap)}** ₽ → **~${fmt(night)}**/день · **~${fmt(night * 30)}**/30 сут`);
+    out.push(`• **${fmt(cap)}** ₽ → **~${fmt(night)}** ₽ **за сутки** · **~${fmt(night * 30)}** ₽ **за 30 сут**`);
   }
   out.push(
-    `Считано с вашими **престижем**, множителями и **рангом ${tier3PromotionRank(streak)}**; строка «оценка оклада» выше — с **вашим** текущим риском.`,
+    `Считано с вашими **престижем**, множителями и **рангом ${tier3PromotionRank(streak)}**; строка «оценка суточного оклада» выше — с **вашим** текущим риском.`,
   );
   return out;
 }
@@ -2118,13 +2118,13 @@ function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, no
   const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
   const lines: string[] = [];
   const rankTitle = tier3RankTitle(jobId as Tier3JobId, rank);
-  lines.push(`**Должность:** **${rankTitle}** (ранг **${rank}**) · стрик МСК: **${u.jobMskDayStreak ?? 0}** дн.`);
+  lines.push(`**Должность:** **${rankTitle}** (ранг **${rank}**) · стрик: **${u.jobMskDayStreak ?? 0}** дн.`);
   if (def.archetype === "legal") {
-    lines.push(`Ежедневный оклад (полночь МСК) — **основной** доход; смены — дополнение.`);
+    lines.push(`**Суточный оклад** (пассивно) — **основной** доход; смены — дополнение.`);
     const ref = tier3ReferencePassiveRubFromStreak(u.jobMskDayStreak ?? 0);
-    lines.push(`Ориентир ежедневного оклада для бонусов: **~${fmt(ref)}** ₽.`);
+    lines.push(`Ориентир суточного оклада для бонусов: **~${fmt(ref)}** ₽.`);
   } else if (def.archetype === "illegal") {
-    lines.push(`Ежедневного оклада **нет**; смены + мелкие действия **24 ч** КД каждое.`);
+    lines.push(`Суточного пассивного оклада **нет**; смены + мелкие действия **24 ч** КД каждое.`);
   } else {
     const sdef = getTier3JobDef("soleProp");
     const passEst = computeTier3PassiveRub({
@@ -2137,9 +2137,9 @@ function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, no
       solePropPassiveEffMult: u.solePropPassiveEffMult ?? 1,
       solePropPassiveTempMult: u.solePropPassiveTempMult ?? 1,
     });
-    lines.push(`Баланс бизнеса: **${fmt(u.solePropCapitalRub ?? 0)}** ₽ · оценка оклада (сутки): **~${fmt(passEst)}** ₽.`);
+    lines.push(`Баланс бизнеса: **${fmt(u.solePropCapitalRub ?? 0)}** ₽ · оценка суточного оклада: **~${fmt(passEst)}** ₽.`);
     lines.push(
-      `Эффективность оклада: **×${(u.solePropPassiveEffMult ?? 1).toFixed(1)}** · временный множ.: **×${(u.solePropPassiveTempMult ?? 1).toFixed(2)}**${
+      `Эффективность суточного оклада: **×${(u.solePropPassiveEffMult ?? 1).toFixed(1)}** · временный множ.: **×${(u.solePropPassiveTempMult ?? 1).toFixed(2)}**${
         u.solePropPassiveTempUntilMs && now < u.solePropPassiveTempUntilMs
           ? ` до <t:${Math.floor(u.solePropPassiveTempUntilMs / 1000)}:R>`
           : ""
@@ -3069,7 +3069,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         [
           `Сейчас действует оплаченный срок **до** <t:${Math.floor(uR.housingRentNextDueMs / 1000)}:F> — **он не меняется.**`,
           "",
-          `После его окончания **первое** автосписание в полночь МСК будет по пакету **${rentPlanLabelRu(planNext)}** (**${fmt(priceN)}** ₽).`,
+          `После его окончания **первое** автосписание **в начале следующего дня** будет по пакету **${rentPlanLabelRu(planNext)}** (**${fmt(priceN)}** ₽).`,
           "",
           "Ручные продления до этой даты и пакет **текущего** цикла **не** затрагиваются.",
         ].join("\n"),
@@ -3119,7 +3119,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       .setTitle("Сохранено")
       .setDescription(
         [
-          `После <t:${Math.floor(uC.housingRentNextDueMs / 1000)}:F> первое автосписание в полночь МСК: **${rentPlanLabelRu(planNext)}** (**${fmt(priceC)}** ₽).`,
+          `После <t:${Math.floor(uC.housingRentNextDueMs / 1000)}:F> первое автосписание **в начале следующего дня**: **${rentPlanLabelRu(planNext)}** (**${fmt(priceC)}** ₽).`,
           "",
           "До этой даты можно **переопределить** пакет в **Жильё** → **Изменить срок** (кнопки «После срока»).",
         ].join("\n"),
@@ -3428,7 +3428,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         solePropControlReadyAt: now + SOLE_PROP_CONTROL_CD_MS,
       });
       await replyOrUpdate(interaction, {
-        embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: ["Контроль отмечен на сегодня (МСК)."] })],
+        embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: ["Контроль отмечен на текущие календарные сутки."] })],
         components: buildCurrentJobRows(member),
       });
       return true;
@@ -3477,7 +3477,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await replyOrUpdate(interaction, {
         embeds: [
           buildCurrentJobEmbed(member, {
-            tier3ActionNotes: [`Связь: **${formatDelta(netRub)}** на счёт (10–30% ориентира ежедневного оклада).${taxPart}`],
+            tier3ActionNotes: [`Связь: **${formatDelta(netRub)}** на счёт (10–30% ориентира суточного оклада).${taxPart}`],
           }),
         ],
         components: buildCurrentJobRows(member),
@@ -3503,7 +3503,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         await replyOrUpdate(interaction, {
           embeds: [
             buildCurrentJobEmbed(member, {
-              tier3ActionNotes: [`Совещание: **${formatDelta(netRub)}** на счёт (10–30% ориентира ежедневного оклада).${taxPart}`],
+              tier3ActionNotes: [`Совещание: **${formatDelta(netRub)}** на счёт (10–30% ориентира суточного оклада).${taxPart}`],
             }),
           ],
           components: buildCurrentJobRows(member),
@@ -3741,7 +3741,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
 
     if (jobId === "soleProp") {
-      await interaction.reply({ content: "На **ИП** смен **нет** — доход **ежедневным окладом** и действиями бизнеса.", flags: MessageFlags.Ephemeral });
+      await interaction.reply({ content: "На **ИП** смен **нет** — доход **суточным окладом** (пассивно) и действиями бизнеса.", flags: MessageFlags.Ephemeral });
       return true;
     }
 
@@ -3864,7 +3864,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       const sm = shiftSpamMult(ix);
       if (sm < 1 - 1e-9) {
         jobTotal = Math.floor(jobTotal * sm);
-        notes.push(`коэффициент за смену в МСК-сутках: **×${sm}** (**${ix}-я** смена дня)`);
+        notes.push(`коэффициент за смену за календарные сутки: **×${sm}** (**${ix}-я** смена дня)`);
       }
       spamPatch = { workShiftMskYmd: ymd, workShiftsToday: ix };
     }

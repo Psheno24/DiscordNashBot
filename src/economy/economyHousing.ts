@@ -58,7 +58,7 @@ export function economyUserClearTier2PlusJobPatch(u: EconomyUser): Partial<Econo
   };
 }
 
-/** Списание аренды / коммуналки в полночь МСК (по полю housingLastMskYmd). */
+/** Списание аренды / коммуналки в начале календарного дня (по полю housingLastMskYmd). */
 export function processHousingMskMidnightForUser(guildId: string, userId: string, todayYmd: string, nowMs: number): void {
   const u = getEconomyUser(guildId, userId);
   if (u.housingKind !== "rent" && u.housingKind !== "owned") return;

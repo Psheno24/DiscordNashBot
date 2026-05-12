@@ -1,7 +1,7 @@
 import { mskPreviousDayYmd } from "./mskCalendar.js";
 import type { EconomyUser } from "./userStore.js";
 
-/** Полночь МСК: просадка без «Контроля», восстановление при серии контролей, сброс временного буста оклада. */
+/** Суточный тик ИП: просадка без «Контроля», восстановление при серии контролей, сброс временного буста оклада. */
 export function solePropMidnightPatch(u: EconomyUser, todayYmd: string, nowMs: number): Partial<EconomyUser> {
   const patch: Partial<EconomyUser> = {};
   const yesterday = mskPreviousDayYmd(todayYmd);
