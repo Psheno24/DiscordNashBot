@@ -75,7 +75,7 @@ export function tier12CareerEmbedLines(jobId: Tier12JobId, shiftsTotal: number, 
   const progress =
     nextAt == null
       ? `**${title}** (ранг **${rank}**, **макс.**) · смен **${shiftsTotal}**`
-      : `**${title}** (ранг **${rank}**) · смен **${shiftsTotal}** / **${nextAt}** до следующей`;
+      : `**${title}** (ранг **${rank}**) · смен **${shiftsTotal}** / **${nextAt}** до следующего ранга (**${tier12RankTitle(jobId, rank + 1)}**)`;
   const bonusLine = `**Множитель от ранга к выплате:** **×${mult.toFixed(2)}**`;
   return [progress, bonusLine];
 }
