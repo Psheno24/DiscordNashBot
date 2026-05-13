@@ -3,7 +3,6 @@ import { join } from "node:path";
 import {
   APARTMENT_MODELS,
   CAR_MODELS,
-  ECONOMY_LEGACY_BALANCE_MULT,
   PHONE_MODELS,
   housingRentPlanPeriodMs,
   housingRentPlanPriceRub,
@@ -75,9 +74,6 @@ export interface EconomyUser {
   prestigePoints?: number;
   /** Купленный автомобиль — снимает аренду вела с UI и укорачивает КД смены доставки. */
   ownedCarId?: string;
-
-  /** Одноразовая миграция балансов v2 → v3 (×ECONOMY_LEGACY_BALANCE_MULT). */
-  economyV3BalanceScaled?: boolean;
 
   /** Жильё: нет / аренда / своя квартира. */
   housingKind?: HousingKind;
@@ -315,8 +311,6 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   let prestigePoints = Number.isFinite((u as any)?.prestigePoints) ? Math.max(0, Math.floor((u as any).prestigePoints)) : undefined;
   let ownedCarId =
     typeof (u as any)?.ownedCarId === "string" && VALID_CAR_ID.has((u as any).ownedCarId) ? (u as any).ownedCarId : undefined;
-  const economyV3BalanceScaled = (u as any)?.economyV3BalanceScaled === true ? true : undefined;
-
   let housingKind = normalizeHousingKind((u as any)?.housingKind) ?? "none";
   const housingRentNextDueMs = Number.isFinite((u as any)?.housingRentNextDueMs)
     ? Math.max(0, Math.floor((u as any).housingRentNextDueMs))
@@ -406,7 +400,6 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     phoneModelId,
     prestigePoints,
     ownedCarId,
-    economyV3BalanceScaled,
     housingKind: housingKind === "none" ? undefined : housingKind,
     housingRentNextDueMs,
     housingRentPlan,
@@ -449,27 +442,9 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   return out;
 }
 
-function applyV3BalanceMigration(raw: EconomyUser, userId: string): EconomyUser {
-  const mult = ECONOMY_LEGACY_BALANCE_MULT;
-  const migrated: Partial<EconomyUser> = {
-    ...raw,
-    rubles: Math.floor((raw.rubles ?? 0) * mult),
-    simBalanceRub: Math.floor((raw.simBalanceRub ?? 0) * mult),
-    solePropCapitalRub: Math.floor(((raw as any).solePropCapitalRub ?? 0) * mult),
-    economyV3BalanceScaled: true,
-    phoneModelId: (raw as any).phoneModelId ?? (raw.hasPhone ? "phone_budget" : undefined),
-  };
-  return normalizeUser(migrated, userId);
-}
-
 export function getEconomyUser(guildId: string, userId: string): EconomyUser {
   const s = readStore();
   const raw = s.guilds[guildId]?.[userId];
-  if (raw && raw.economyV3BalanceScaled !== true) {
-    const migrated = applyV3BalanceMigration(raw, userId);
-    setEconomyUser(guildId, userId, migrated);
-    return migrated;
-  }
   return normalizeUser(raw, userId);
 }
 

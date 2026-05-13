@@ -2,9 +2,6 @@
 export const COURIER_SIM_MONTHLY_FEE_RUB = 1_000;
 export const COURIER_SIM_MONTHLY_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
 
-/** Одноразовый множитель старых балансов при первом запуске v3. */
-export const ECONOMY_LEGACY_BALANCE_MULT = 25;
-
 export type PhoneModelId = "phone_budget" | "phone_10k" | "phone_40k" | "phone_70k" | "phone_100k";
 
 export interface PhoneDef {

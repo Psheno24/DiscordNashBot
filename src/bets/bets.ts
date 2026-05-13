@@ -145,17 +145,15 @@ async function takeRublesFromUser(
   patchEconomyUser(guildId, targetUserId, { rubles: u.rubles - amount });
   if (creditTreasury) {
     addToTreasury(guildId, amount);
+    appendFeedEvent({
+      ts: Date.now(),
+      guildId,
+      type: "admin:budget",
+      actorUserId,
+      text: `${actorDisplay} забрал у <@${targetUserId}> **${amount.toLocaleString("ru-RU")} ₽** в казну.`,
+    });
+    await ensureEconomyFeedPanel(client);
   }
-  appendFeedEvent({
-    ts: Date.now(),
-    guildId,
-    type: "admin:budget",
-    actorUserId,
-    text: creditTreasury
-      ? `${actorDisplay} забрал у <@${targetUserId}> **${amount.toLocaleString("ru-RU")} ₽** в казну.`
-      : `${actorDisplay} изъял у <@${targetUserId}> **${amount.toLocaleString("ru-RU")} ₽** (без зачисления в казну).`,
-  });
-  await ensureEconomyFeedPanel(client);
   return { ok: true };
 }
 
