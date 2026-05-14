@@ -33,6 +33,7 @@ import {
   takeMoneyCommandName,
   welcomePreviewCommandName,
 } from "./welcomePreview.js";
+import { startTelegramSidecar } from "./telegram/bot.js";
 
 const client = new Client({
   intents: [
@@ -56,6 +57,7 @@ client.once(Events.ClientReady, async (c) => {
   scheduleEconomyMskMidnightTick(c, async () => {
     await ensureEconomyFeedPanel(c);
   });
+  startTelegramSidecar(c);
 });
 
 registerMemberJoin(client);

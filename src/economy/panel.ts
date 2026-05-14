@@ -12,6 +12,12 @@ import {
   type GuildMember,
   type ModalSubmitInteraction,
 } from "discord.js";
+import {
+  createTelegramLinkCode,
+  getLastIssuedTelegramCode,
+  getLinkedTelegramIdForDiscord,
+} from "../telegram/bridgeStore.js";
+import { isTelegramBridgeConfigured } from "../telegram/env.js";
 import { economyFeedChannelId, economyTerminalChannelId } from "../config.js";
 import { getVoiceSeconds } from "../voice/timeStore.js";
 import { appendFeedEvent, listFeedEvents } from "./feedStore.js";
@@ -135,6 +141,14 @@ const ECON_PROFILE_BUTTON_INFO = "econ:profile:info";
 const ECON_PROFILE_BUTTON_FOCUS = "econ:profile:focus";
 const ECON_PROFILE_BUTTON_LADDER = "econ:profile:ladder";
 const ECON_PROFILE_BUTTON_BETS_HISTORY = "econ:profile:betsHistory";
+/** Экран привязки Telegram (если задан TELEGRAM_BOT_TOKEN). */
+const ECON_PROFILE_BUTTON_TG = "econ:profile:tgCode";
+const ECON_TG_BACK_PROFILE = "econ:tg:back";
+const ECON_TG_MENU_ROOT = "econ:tg:menu";
+const ECON_TG_NEW_CODE = "econ:tg:newCode";
+const ECON_TG_NEW_CONFIRM = "econ:tg:newConfirm";
+const ECON_TG_NEW_CANCEL = "econ:tg:newCancel";
+const TG_LINK_CODE_TTL_MS = 10 * 60 * 1000;
 const ECON_PROFILE_BETS_PAGE_PREFIX = "econ:profile:betsPage:";
 /** Записей на страницу (лимит описания эмбеда ~4096 символов). */
 const PROFILE_BETS_PAGE_SIZE = 7;
@@ -307,8 +321,12 @@ function buildProfileHubEmbed(member: GuildMember): EmbedBuilder {
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
-function buildProfileHubRows(active: "info" | "focus" | "ladder" | "bets"): ActionRowBuilder<ButtonBuilder>[] {
-  return [
+function showTelegramBridgeInProfile(member: GuildMember): boolean {
+  return member.guild.ownerId === member.id && isTelegramBridgeConfigured();
+}
+
+function buildProfileHubRows(member: GuildMember, active: "info" | "focus" | "ladder" | "bets"): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(ECON_PROFILE_BUTTON_INFO)
@@ -327,8 +345,103 @@ function buildProfileHubRows(active: "info" | "focus" | "ladder" | "bets"): Acti
         .setLabel("История ставок")
         .setStyle(active === "bets" ? ButtonStyle.Primary : ButtonStyle.Secondary),
     ),
-    buildMenuRow(),
   ];
+  if (showTelegramBridgeInProfile(member)) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ECON_PROFILE_BUTTON_TG)
+          .setLabel("Telegram: код привязки")
+          .setStyle(ButtonStyle.Secondary),
+      ),
+    );
+  }
+  rows.push(buildMenuRow());
+  return rows;
+}
+
+function buildTelegramHubEmbed(member: GuildMember): EmbedBuilder {
+  const gid = member.guild.id;
+  const uid = member.id;
+  const linkedTg = getLinkedTelegramIdForDiscord(gid, uid);
+  const last = getLastIssuedTelegramCode(gid, uid);
+  const now = Date.now();
+  const lines: string[] = [];
+  lines.push(linkedTg ? "**Статус:** Telegram **привязан**." : "**Статус:** Telegram **не привязан**.");
+  lines.push("");
+  if (last) {
+    const expired = now > last.expiresAtMs;
+    lines.push(`**Код:** \`${last.code}\`${expired ? " **(истёк)**" : ""}`);
+    if (!expired) {
+      const expSec = Math.floor(last.expiresAtMs / 1000);
+      lines.push(`Действует до <t:${expSec}:F> (<t:${expSec}:R>).`);
+    }
+  } else {
+    lines.push("_Код ещё не выдавался — нажми **«Новый код»**._");
+  }
+  lines.push("", "В Telegram-боте: `/link КОД`");
+  lines.push(
+    "",
+    "**Важно:** если привязка **уже работает** (приходят напоминания, команды отвечают) — **новый код не нужен**.",
+    "Новый код — только для **первой** привязки, если истёк старый, или если хочешь привязать **другой** Telegram.",
+  );
+  return new EmbedBuilder()
+    .setColor(PROFILE_COLOR)
+    .setTitle("Telegram")
+    .setDescription(lines.join("\n"))
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildTelegramNewCodeConfirmEmbed(member: GuildMember): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Выдать новый код?")
+    .setDescription(
+      [
+        "У тебя уже есть **действующий** код привязки.",
+        "",
+        "**Новый код** отменит старый и понадобится только если:",
+        "· Telegram ещё **не** привязали,",
+        "· старый код **истёк**,",
+        "· или нужно привязать **другой** аккаунт Telegram.",
+        "",
+        "Если всё уже работает — нажми **«Отмена»**.",
+      ].join("\n"),
+    )
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildTelegramHubRows(member: GuildMember, view: "hub" | "confirmNew"): ActionRowBuilder<ButtonBuilder>[] {
+  if (view === "confirmNew") {
+    return [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_TG_NEW_CONFIRM).setLabel("Да, новый код").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(ECON_TG_NEW_CANCEL).setLabel("Отмена").setStyle(ButtonStyle.Secondary),
+      ),
+    ];
+  }
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_TG_NEW_CODE).setLabel("Новый код").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(ECON_TG_BACK_PROFILE).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_TG_MENU_ROOT).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+async function assertTelegramGuildOwner(interaction: ButtonInteraction, member: GuildMember): Promise<boolean> {
+  if (!isTelegramBridgeConfigured()) {
+    await interaction.reply({ content: "Telegram для бота не настроен.", flags: MessageFlags.Ephemeral });
+    return false;
+  }
+  if (member.guild.ownerId !== member.id) {
+    await interaction.reply({
+      content: "Раздел Telegram доступен только **владельцу сервера**.",
+      flags: MessageFlags.Ephemeral,
+    });
+    return false;
+  }
+  return true;
 }
 
 /** Чистый результат одной принятой ставки (кэф зафиксирован при приёме). */
@@ -432,11 +545,11 @@ function buildProfileBetsTabComponents(member: GuildMember, page: number): Actio
       ),
     );
   }
-  rows.push(...buildProfileHubRows("bets"));
+  rows.push(...buildProfileHubRows(member, "bets"));
   return rows;
 }
 
-function buildFocusRows(cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
+function buildFocusRows(member: GuildMember, cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
@@ -458,7 +571,7 @@ function buildFocusRows(cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
         .setStyle(ButtonStyle.Success)
         .setDisabled(cur === "money"),
     ),
-    ...buildProfileHubRows("focus"),
+    ...buildProfileHubRows(member, "focus"),
   ];
 }
 
@@ -1654,13 +1767,13 @@ function effectiveAssemblerCooldownMs(u: ReturnType<typeof getEconomyUser>, _now
   return ASSEMBLER_BASE_CD_MS;
 }
 
-function effectiveShiftCooldownMs(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): number {
+export function effectiveShiftCooldownMs(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): number {
   if (jobId === "courier") return effectiveCourierCooldownMs(u, now);
   if (jobId === "assembler") return effectiveAssemblerCooldownMs(u, now);
   return getAnyJobDef(jobId).baseCooldownMs;
 }
 
-function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): { ok: boolean; msLeft: number } {
+export function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): { ok: boolean; msLeft: number } {
   const cd = effectiveShiftCooldownMs(u, jobId, now);
   const last = lastWorkAtForJob(u, jobId);
   const next = last + cd;
@@ -2474,13 +2587,13 @@ const SKILLS: Array<{ id: SkillId; title: string }> = [
 ];
 
 const ECON_SKILL_BUTTON_PREFIX = "econ:skill:";
-// Общий КД на любую тренировку: ~2–3 раза в сутки при активной игре.
-const TRAIN_COOLDOWN_MS = 8 * 60 * 60 * 1000;
+/** Общий КД на любую тренировку: ~2–3 раза в сутки при активной игре. */
+export const ECONOMY_TRAIN_COOLDOWN_MS = 8 * 60 * 60 * 1000;
 
 function buildSkillsEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const now = Date.now();
-  const left = u.lastTrainAt ? Math.max(0, u.lastTrainAt + TRAIN_COOLDOWN_MS - now) : 0;
+  const left = u.lastTrainAt ? Math.max(0, u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS - now) : 0;
   const cdLine = left > 0 ? `Следующая тренировка (любой навык) через **${formatCooldown(left)}**.` : "Тренировка **доступна сейчас**.";
   const lines = SKILLS.map((s) => `- **${s.title}**: ${getSkillLevel(u, s.id)} / ${ECONOMY_SKILL_MAX}`);
   return new EmbedBuilder()
@@ -2493,7 +2606,7 @@ function buildSkillsEmbed(member: GuildMember): EmbedBuilder {
 function buildSkillsRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const now = Date.now();
-  const cooldownReady = !u.lastTrainAt || now >= u.lastTrainAt + TRAIN_COOLDOWN_MS;
+  const cooldownReady = !u.lastTrainAt || now >= u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS;
   const row = new ActionRowBuilder<ButtonBuilder>();
   for (const s of SKILLS) {
     const atMax = getSkillLevel(u, s.id) >= ECONOMY_SKILL_MAX;
@@ -2678,6 +2791,12 @@ function isEconomyButton(id: string): boolean {
       ECON_HOUSING_BACK,
       ECON_HOUSING_LEAVE,
       ECON_PROFILE_BUTTON_INFO,
+      ECON_PROFILE_BUTTON_TG,
+      ECON_TG_BACK_PROFILE,
+      ECON_TG_MENU_ROOT,
+      ECON_TG_NEW_CODE,
+      ECON_TG_NEW_CONFIRM,
+      ECON_TG_NEW_CANCEL,
       ECON_PROFILE_BUTTON_FOCUS,
       ECON_PROFILE_BUTTON_LADDER,
       ECON_PROFILE_BUTTON_BETS_HISTORY,
@@ -2726,6 +2845,207 @@ function buildCooldownBlockedEmbed(member: GuildMember, msLeft: number): EmbedBu
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
+export type EconomyRunWorkShiftResult =
+  | { ok: false; kind: "ephemeral"; message: string }
+  | { ok: false; kind: "cooldown" }
+  | { ok: true; walletDeltaRub: number; notes: string[] };
+
+export type EconomyRunTrainSkillResult =
+  | { ok: false; kind: "unknown_skill" | "cooldown_or_max" }
+  | { ok: true; skillLabel: string; newLevel: number };
+
+export function economyRunTrainSkill(member: GuildMember, skillId: SkillId): EconomyRunTrainSkillResult {
+  if (!["communication", "logistics", "discipline"].includes(skillId)) return { ok: false, kind: "unknown_skill" };
+  const u = getEconomyUser(member.guild.id, member.id);
+  const now = Date.now();
+  if (u.lastTrainAt && now < u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS) return { ok: false, kind: "cooldown_or_max" };
+  const curLvl = getSkillLevel(u, skillId);
+  if (curLvl >= ECONOMY_SKILL_MAX) return { ok: false, kind: "cooldown_or_max" };
+  const nextLvl = Math.min(ECONOMY_SKILL_MAX, curLvl + 1);
+  patchEconomyUser(member.guild.id, member.id, {
+    skills: { ...(u.skills ?? {}), [skillId]: nextLvl },
+    lastTrainAt: now,
+  });
+  return { ok: true, skillLabel: skillName(skillId), newLevel: nextLvl };
+}
+
+/** Общая логика «Выйти на смену» для Discord и Telegram. */
+export async function economyRunWorkShift(client: Client, member: GuildMember): Promise<EconomyRunWorkShiftResult> {
+  const guildId = member.guild.id;
+  const u = getEconomyUser(guildId, member.id);
+  const jobId = u.jobId;
+  if (!jobId) return { ok: false, kind: "ephemeral", message: "Сначала выбери работу." };
+  const now = Date.now();
+  const st = canWorkNow(u, jobId, now);
+  if (!st.ok) return { ok: false, kind: "cooldown" };
+
+  if (jobId === "soleProp") {
+    return {
+      ok: false,
+      kind: "ephemeral",
+      message: "На **ИП** смен **нет** — доход **суточным окладом** (пассивно) и действиями бизнеса.",
+    };
+  }
+
+  if (jobId === "courier") {
+    if (!u.hasPhone) return { ok: false, kind: "ephemeral", message: "Купите **телефон** в магазине терминала." };
+    if (!u.courierSimNumber) return { ok: false, kind: "ephemeral", message: "Оформите **симку** в магазине." };
+    const onlineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
+    if (onlineDue && (u.simBalanceRub ?? 0) < COURIER_SIM_MONTHLY_FEE_RUB) {
+      return {
+        ok: false,
+        kind: "ephemeral",
+        message: `На балансе сим нужно **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ за **тариф** на **30** суток (пополните в магазине).`,
+      };
+    }
+  }
+
+  const def = getAnyJobDef(jobId);
+  const expBefore = getJobExp(u, jobId);
+  const expAfter = expBefore + 1;
+
+  let base = def.basePayoutRub;
+  let extra = 0;
+  const notes: string[] = [];
+
+  const rankAfterT12 = isTier12JobId(jobId) ? tier12RankFromShifts(expAfter, def.baseCooldownMs) : 0;
+
+  if (jobId === "courier") {
+    base = randInt(6_500, 8_000);
+  } else if (jobId === "waiter") {
+    base = 0;
+    extra = rollStreetBrokerRub(rankAfterT12);
+    notes.push(`уличный брокер (до ранга): **${formatDelta(extra)}** ₽`);
+  } else if (jobId === "watchman") {
+    base = randInt(11_000, 13_000);
+  } else if (jobId === "dispatcher") {
+    base = randInt(26_000, 30_000);
+  } else if (jobId === "assembler") {
+    base = randInt(15_000, 18_000);
+    if (chance(0.03)) {
+      const fine = randInt(4_500, 6_500);
+      extra -= fine;
+      notes.push(`штраф ${formatDelta(-fine)}`);
+    }
+    if (expAfter % 7 === 0) {
+      extra += ASSEMBLER_7TH_BONUS_RUB;
+      notes.push(`премия ${formatDelta(ASSEMBLER_7TH_BONUS_RUB)} (7 смен)`);
+    }
+  } else if (jobId === "expediter") {
+    base = 0;
+    extra = rollCorporateBrokerRub(rankAfterT12);
+    notes.push(`корп. брокер (до ранга): **${formatDelta(extra)}** ₽`);
+  } else if (jobId === "officeAnalyst") {
+    const pr = tier3PromotionRank(u.jobMskDayStreak ?? 0);
+    const streak = u.jobMskDayStreak ?? 0;
+    base = randInt(45_000, 55_000) + pr * 1_000 + Math.min(500, Math.floor(streak / 5) * 40);
+    if (chance(0.03)) {
+      const fine = randInt(12_000, 22_000);
+      extra -= fine;
+      notes.push(`штраф ${formatDelta(-fine)}`);
+    }
+  } else if (jobId === "shadowFixer") {
+    base = 0;
+    const pr = tier3PromotionRank(u.jobMskDayStreak ?? 0);
+    const streak = u.jobMskDayStreak ?? 0;
+    const posBoost = 1 + pr * 0.025 + Math.min(0.15, streak * 0.002);
+    const r = Math.random() * 100;
+    if (r < 10) {
+      extra = -150_000;
+      notes.push(`облава / потери **${formatDelta(extra)}**`);
+    } else if (r < 32) {
+      extra = -40_000;
+      notes.push(`срыв цепочки **${formatDelta(extra)}**`);
+    } else if (r < 64) {
+      extra = Math.floor(40_000 * posBoost);
+      notes.push(`средний поток **${formatDelta(extra)}**`);
+    } else if (r < 88) {
+      extra = Math.floor(130_000 * posBoost);
+      notes.push(`крупная сделка **${formatDelta(extra)}**`);
+    } else if (r < 97) {
+      extra = Math.floor(400_000 * posBoost);
+      notes.push(`очень крупно **${formatDelta(extra)}**`);
+    } else {
+      extra = Math.floor(1_200_000 * posBoost);
+      notes.push(`легендарный куш **${formatDelta(extra)}**`);
+    }
+  }
+
+  let jobTotal = base + extra;
+  const variablePayout = jobUsesVariablePayout(jobId);
+  if (!variablePayout) jobTotal = Math.max(0, jobTotal);
+
+  if (isTier12JobId(jobId)) {
+    const rankBeforeT12 = tier12RankFromShifts(expBefore, def.baseCooldownMs);
+    jobTotal = Math.floor(jobTotal * tier12RankIncomeMult(jobId, rankAfterT12));
+    if (rankAfterT12 > rankBeforeT12) {
+      notes.push(`Повышение: **${tier12RankTitle(jobId, rankAfterT12)}** (ранг **${rankAfterT12}**).`);
+      appendFeedEvent({
+        ts: now,
+        guildId,
+        type: "job:promotion",
+        actorUserId: member.id,
+        text: `${member.toString()}: **${def.title}** — **${tier12RankTitle(jobId, rankAfterT12)}** (ранг **${rankAfterT12}**).`,
+      });
+    }
+  }
+
+  let spamPatch: Partial<EconomyUser> = {};
+  if (jobId === "courier" || jobId === "assembler" || jobId === "officeAnalyst") {
+    const ymd = mskTodayYmd(now);
+    const prev = u.workShiftMskYmd === ymd ? (u.workShiftsToday ?? 0) : 0;
+    const ix = prev + 1;
+    const sm = shiftSpamMult(ix);
+    if (sm < 1 - 1e-9) {
+      jobTotal = Math.floor(jobTotal * sm);
+      notes.push(`коэффициент за смену за календарные сутки: **×${sm}** (**${ix}-я** смена дня)`);
+    }
+    spamPatch = { workShiftMskYmd: ymd, workShiftsToday: ix };
+  }
+
+  let rublesNext = u.rubles;
+  let simBalNext = u.simBalanceRub ?? 0;
+  let phoneUntilNext = u.courierPhonePaidUntilMs;
+
+  if (jobId === "courier") {
+    const onlineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
+    if (onlineDue) {
+      simBalNext -= COURIER_SIM_MONTHLY_FEE_RUB;
+      phoneUntilNext = now + COURIER_SIM_MONTHLY_PERIOD_MS;
+      notes.push(`тариф 30 суток ${formatDelta(-COURIER_SIM_MONTHLY_FEE_RUB)} (баланс сим)`);
+    }
+  }
+
+  let payToWallet = jobTotal;
+  if (jobTotal > 0 && isLegalTaxableJob(jobId)) {
+    const { netRub, taxRub } = withholdLegalIncomeTax(guildId, jobTotal);
+    payToWallet = netRub;
+    if (taxRub > 0) notes.push(`налог **${fmt(taxRub)}** ₽ → казна`);
+  }
+  rublesNext += payToWallet;
+  rublesNext = Math.max(0, rublesNext);
+
+  const patch: Partial<EconomyUser> = {
+    rubles: rublesNext,
+    simBalanceRub: simBalNext,
+    courierPhonePaidUntilMs: phoneUntilNext,
+    lastWorkAtByJob: { ...(u.lastWorkAtByJob ?? {}), [jobId]: now },
+    jobExp: { ...(u.jobExp ?? {}), [jobId]: expAfter },
+    ...spamPatch,
+  };
+  patchEconomyUser(guildId, member.id, patch);
+  const walletDeltaRub = rublesNext - u.rubles;
+  appendFeedEvent({
+    ts: now,
+    guildId,
+    type: "job:shift",
+    actorUserId: member.id,
+    text: `${member.toString()} вышел на смену: **${def.title}** — ${formatDelta(walletDeltaRub)}`,
+  });
+  await ensureEconomyFeedPanel(client);
+  return { ok: true, walletDeltaRub, notes };
+}
+
 export async function handleEconomyButton(interaction: ButtonInteraction): Promise<boolean> {
   const cid = interaction.customId;
   const isKnown =
@@ -2739,7 +3059,8 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     cid.startsWith(ECON_WORK_BUTTON_JOB_DETAIL_CLOSE_PREFIX) ||
     cid.startsWith("econ:shop") ||
     cid.startsWith("econ:housing:") ||
-    cid.startsWith(ECON_SKILL_BUTTON_PREFIX);
+    cid.startsWith(ECON_SKILL_BUTTON_PREFIX) ||
+    cid.startsWith("econ:tg:");
   if (!isKnown) return false;
   if (!interaction.inGuild() || !interaction.guildId || !interaction.member) {
     await interaction.reply({ content: "Эта кнопка работает только на сервере.", flags: MessageFlags.Ephemeral });
@@ -2763,7 +3084,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_BUTTON_PROFILE) {
-    await replyOrUpdate(interaction, { embeds: [buildProfileHubEmbed(member)], components: buildProfileHubRows("info") });
+    await replyOrUpdate(interaction, { embeds: [buildProfileHubEmbed(member)], components: buildProfileHubRows(member, "info") });
     return true;
   }
 
@@ -2807,18 +3128,82 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_PROFILE_BUTTON_INFO) {
-    await replyOrUpdate(interaction, { embeds: [buildProfileEmbed(member)], components: buildProfileHubRows("info") });
+    await replyOrUpdate(interaction, { embeds: [buildProfileEmbed(member)], components: buildProfileHubRows(member, "info") });
+    return true;
+  }
+
+  if (id === ECON_PROFILE_BUTTON_TG) {
+    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    await replyOrUpdate(interaction, {
+      embeds: [buildTelegramHubEmbed(member)],
+      components: buildTelegramHubRows(member, "hub"),
+    });
+    return true;
+  }
+
+  if (id === ECON_TG_BACK_PROFILE) {
+    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    await replyOrUpdate(interaction, { embeds: [buildProfileHubEmbed(member)], components: buildProfileHubRows(member, "info") });
+    return true;
+  }
+
+  if (id === ECON_TG_MENU_ROOT) {
+    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    await replyOrUpdate(interaction, {
+      embeds: [buildTerminalPanelEmbed(member.guild.name)],
+      components: buildTerminalPanelRows(member),
+    });
+    return true;
+  }
+
+  if (id === ECON_TG_NEW_CODE) {
+    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    const gid = member.guild.id;
+    const uid = member.id;
+    const last = getLastIssuedTelegramCode(gid, uid);
+    const now = Date.now();
+    if (last && now < last.expiresAtMs) {
+      await replyOrUpdate(interaction, {
+        embeds: [buildTelegramNewCodeConfirmEmbed(member)],
+        components: buildTelegramHubRows(member, "confirmNew"),
+      });
+      return true;
+    }
+    createTelegramLinkCode(gid, uid, TG_LINK_CODE_TTL_MS);
+    await replyOrUpdate(interaction, {
+      embeds: [buildTelegramHubEmbed(member)],
+      components: buildTelegramHubRows(member, "hub"),
+    });
+    return true;
+  }
+
+  if (id === ECON_TG_NEW_CONFIRM) {
+    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    createTelegramLinkCode(member.guild.id, member.id, TG_LINK_CODE_TTL_MS);
+    await replyOrUpdate(interaction, {
+      embeds: [buildTelegramHubEmbed(member)],
+      components: buildTelegramHubRows(member, "hub"),
+    });
+    return true;
+  }
+
+  if (id === ECON_TG_NEW_CANCEL) {
+    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    await replyOrUpdate(interaction, {
+      embeds: [buildTelegramHubEmbed(member)],
+      components: buildTelegramHubRows(member, "hub"),
+    });
     return true;
   }
 
   if (id === ECON_PROFILE_BUTTON_FOCUS) {
     const u = getEconomyUser(member.guild.id, member.id);
-    await replyOrUpdate(interaction, { embeds: [buildFocusEmbed(member)], components: buildFocusRows(u.focus) });
+    await replyOrUpdate(interaction, { embeds: [buildFocusEmbed(member)], components: buildFocusRows(member, u.focus) });
     return true;
   }
 
   if (id === ECON_PROFILE_BUTTON_LADDER) {
-    await replyOrUpdate(interaction, { embeds: [buildLadderEmbed(member)], components: buildProfileHubRows("ladder") });
+    await replyOrUpdate(interaction, { embeds: [buildLadderEmbed(member)], components: buildProfileHubRows(member, "ladder") });
     return true;
   }
 
@@ -3697,195 +4082,16 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_WORK_BUTTON_SHIFT) {
-    const guildId = member.guild.id;
-    const u = getEconomyUser(guildId, member.id);
-    const jobId = u.jobId;
-    if (!jobId) {
-      await interaction.reply({ content: "Сначала выбери работу.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    const now = Date.now();
-    const st = canWorkNow(u, jobId, now);
-    if (!st.ok) {
-      await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
-      return true;
-    }
-
-    if (jobId === "soleProp") {
-      await interaction.reply({ content: "На **ИП** смен **нет** — доход **суточным окладом** (пассивно) и действиями бизнеса.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-
-    if (jobId === "courier") {
-      if (!u.hasPhone) {
-        await interaction.reply({ content: "Купите **телефон** в магазине терминала.", flags: MessageFlags.Ephemeral });
-        return true;
-      }
-      if (!u.courierSimNumber) {
-        await interaction.reply({ content: "Оформите **симку** в магазине.", flags: MessageFlags.Ephemeral });
-        return true;
-      }
-      const onlineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
-      if (onlineDue && (u.simBalanceRub ?? 0) < COURIER_SIM_MONTHLY_FEE_RUB) {
-        await interaction.reply({
-          content: `На балансе сим нужно **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ за **тариф** на **30** суток (пополните в магазине).`,
-          flags: MessageFlags.Ephemeral,
-        });
-        return true;
-      }
-    }
-
-    const def = getAnyJobDef(jobId);
-    const expBefore = getJobExp(u, jobId);
-    const expAfter = expBefore + 1;
-
-    let base = def.basePayoutRub;
-    let extra = 0;
-    const notes: string[] = [];
-
-    const rankAfterT12 = isTier12JobId(jobId)
-      ? tier12RankFromShifts(expAfter, def.baseCooldownMs)
-      : 0;
-
-    if (jobId === "courier") {
-      base = randInt(6_500, 8_000);
-    } else if (jobId === "waiter") {
-      base = 0;
-      extra = rollStreetBrokerRub(rankAfterT12);
-      notes.push(`уличный брокер (до ранга): **${formatDelta(extra)}** ₽`);
-    } else if (jobId === "watchman") {
-      base = randInt(11_000, 13_000);
-    } else if (jobId === "dispatcher") {
-      base = randInt(26_000, 30_000);
-    } else if (jobId === "assembler") {
-      base = randInt(15_000, 18_000);
-      if (chance(0.03)) {
-        const fine = randInt(4_500, 6_500);
-        extra -= fine;
-        notes.push(`штраф ${formatDelta(-fine)}`);
-      }
-      if (expAfter % 7 === 0) {
-        extra += ASSEMBLER_7TH_BONUS_RUB;
-        notes.push(`премия ${formatDelta(ASSEMBLER_7TH_BONUS_RUB)} (7 смен)`);
-      }
-    } else if (jobId === "expediter") {
-      base = 0;
-      extra = rollCorporateBrokerRub(rankAfterT12);
-      notes.push(`корп. брокер (до ранга): **${formatDelta(extra)}** ₽`);
-    } else if (jobId === "officeAnalyst") {
-      const pr = tier3PromotionRank(u.jobMskDayStreak ?? 0);
-      const streak = u.jobMskDayStreak ?? 0;
-      base = randInt(45_000, 55_000) + pr * 1_000 + Math.min(500, Math.floor(streak / 5) * 40);
-      if (chance(0.03)) {
-        const fine = randInt(12_000, 22_000);
-        extra -= fine;
-        notes.push(`штраф ${formatDelta(-fine)}`);
-      }
-    } else if (jobId === "shadowFixer") {
-      base = 0;
-      const pr = tier3PromotionRank(u.jobMskDayStreak ?? 0);
-      const streak = u.jobMskDayStreak ?? 0;
-      const posBoost = 1 + pr * 0.025 + Math.min(0.15, streak * 0.002);
-      const r = Math.random() * 100;
-      if (r < 10) {
-        extra = -150_000;
-        notes.push(`облава / потери **${formatDelta(extra)}**`);
-      } else if (r < 32) {
-        extra = -40_000;
-        notes.push(`срыв цепочки **${formatDelta(extra)}**`);
-      } else if (r < 64) {
-        extra = Math.floor(40_000 * posBoost);
-        notes.push(`средний поток **${formatDelta(extra)}**`);
-      } else if (r < 88) {
-        extra = Math.floor(130_000 * posBoost);
-        notes.push(`крупная сделка **${formatDelta(extra)}**`);
-      } else if (r < 97) {
-        extra = Math.floor(400_000 * posBoost);
-        notes.push(`очень крупно **${formatDelta(extra)}**`);
+    const r = await economyRunWorkShift(interaction.client, member);
+    if (!r.ok) {
+      if (r.kind === "ephemeral") {
+        await interaction.reply({ content: r.message, flags: MessageFlags.Ephemeral });
       } else {
-        extra = Math.floor(1_200_000 * posBoost);
-        notes.push(`легендарный куш **${formatDelta(extra)}**`);
+        await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
       }
+      return true;
     }
-
-    let jobTotal = base + extra;
-    const variablePayout = jobUsesVariablePayout(jobId);
-    if (!variablePayout) jobTotal = Math.max(0, jobTotal);
-
-    if (isTier12JobId(jobId)) {
-      const rankBeforeT12 = tier12RankFromShifts(expBefore, def.baseCooldownMs);
-      jobTotal = Math.floor(jobTotal * tier12RankIncomeMult(jobId, rankAfterT12));
-      if (rankAfterT12 > rankBeforeT12) {
-        notes.push(`Повышение: **${tier12RankTitle(jobId, rankAfterT12)}** (ранг **${rankAfterT12}**).`);
-        appendFeedEvent({
-          ts: now,
-          guildId,
-          type: "job:promotion",
-          actorUserId: member.id,
-          text: `${member.toString()}: **${def.title}** — **${tier12RankTitle(jobId, rankAfterT12)}** (ранг **${rankAfterT12}**).`,
-        });
-      }
-    }
-
-    let spamPatch: Partial<EconomyUser> = {};
-    if (jobId === "courier" || jobId === "assembler" || jobId === "officeAnalyst") {
-      const ymd = mskTodayYmd(now);
-      const prev = u.workShiftMskYmd === ymd ? (u.workShiftsToday ?? 0) : 0;
-      const ix = prev + 1;
-      const sm = shiftSpamMult(ix);
-      if (sm < 1 - 1e-9) {
-        jobTotal = Math.floor(jobTotal * sm);
-        notes.push(`коэффициент за смену за календарные сутки: **×${sm}** (**${ix}-я** смена дня)`);
-      }
-      spamPatch = { workShiftMskYmd: ymd, workShiftsToday: ix };
-    }
-
-    let rublesNext = u.rubles;
-    let simBalNext = u.simBalanceRub ?? 0;
-    let phoneUntilNext = u.courierPhonePaidUntilMs;
-
-    if (jobId === "courier") {
-      const onlineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
-      if (onlineDue) {
-        simBalNext -= COURIER_SIM_MONTHLY_FEE_RUB;
-        phoneUntilNext = now + COURIER_SIM_MONTHLY_PERIOD_MS;
-        notes.push(`тариф 30 суток ${formatDelta(-COURIER_SIM_MONTHLY_FEE_RUB)} (баланс сим)`);
-      }
-    }
-
-    let payToWallet = jobTotal;
-    if (jobTotal > 0 && isLegalTaxableJob(jobId)) {
-      const { netRub, taxRub } = withholdLegalIncomeTax(guildId, jobTotal);
-      payToWallet = netRub;
-      if (taxRub > 0) notes.push(`налог **${fmt(taxRub)}** ₽ → казна`);
-    }
-    rublesNext += payToWallet;
-    rublesNext = Math.max(0, rublesNext);
-
-    const patch: any = {
-      rubles: rublesNext,
-      simBalanceRub: simBalNext,
-      courierPhonePaidUntilMs: phoneUntilNext,
-      lastWorkAtByJob: { ...(u.lastWorkAtByJob ?? {}), [jobId]: now },
-      jobExp: { ...(u.jobExp ?? {}), [jobId]: expAfter },
-      ...spamPatch,
-    };
-    patchEconomyUser(guildId, member.id, patch);
-    const walletDeltaRub = rublesNext - u.rubles;
-    appendFeedEvent({
-      ts: now,
-      guildId,
-      type: "job:shift",
-      actorUserId: member.id,
-      text: `${member.toString()} вышел на смену: **${def.title}** — ${formatDelta(walletDeltaRub)}`,
-    });
-    await ensureEconomyFeedPanel(interaction.client);
-    // Показать игроку в его же окне: сколько получил и текущий баланс.
-    const after = getEconomyUser(guildId, member.id);
-    const embed = buildCurrentJobEmbed(member, { lastShiftDeltaRub: walletDeltaRub, lastShiftNotes: notes });
-    // В embed баланс/эксп считаются через store; убедимся, что берем уже обновлённый rubles.
-    // (buildCurrentJobEmbed сам читает store, который уже обновили)
-    void after;
+    const embed = buildCurrentJobEmbed(member, { lastShiftDeltaRub: r.walletDeltaRub, lastShiftNotes: r.notes });
     await replyOrUpdate(interaction, { embeds: [embed], components: buildCurrentJobRows(member) });
     return true;
   }
@@ -3897,26 +4103,15 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id.startsWith(ECON_SKILL_BUTTON_PREFIX)) {
     const skillId = id.slice(ECON_SKILL_BUTTON_PREFIX.length) as SkillId;
-    if (!["communication", "logistics", "discipline"].includes(skillId)) {
-      await interaction.reply({ content: "Неизвестный навык.", flags: MessageFlags.Ephemeral });
+    const tr = economyRunTrainSkill(member, skillId);
+    if (!tr.ok) {
+      if (tr.kind === "unknown_skill") {
+        await interaction.reply({ content: "Неизвестный навык.", flags: MessageFlags.Ephemeral });
+      } else {
+        await replyOrUpdate(interaction, { embeds: [buildSkillsEmbed(member)], components: buildSkillsRows(member) });
+      }
       return true;
     }
-    const u = getEconomyUser(member.guild.id, member.id);
-    const now = Date.now();
-    if (u.lastTrainAt && now < u.lastTrainAt + TRAIN_COOLDOWN_MS) {
-      await replyOrUpdate(interaction, { embeds: [buildSkillsEmbed(member)], components: buildSkillsRows(member) });
-      return true;
-    }
-    const curLvl = getSkillLevel(u, skillId);
-    if (curLvl >= ECONOMY_SKILL_MAX) {
-      await replyOrUpdate(interaction, { embeds: [buildSkillsEmbed(member)], components: buildSkillsRows(member) });
-      return true;
-    }
-    const nextLvl = Math.min(ECONOMY_SKILL_MAX, curLvl + 1);
-    patchEconomyUser(member.guild.id, member.id, {
-      skills: { ...(u.skills ?? {}), [skillId]: nextLvl },
-      lastTrainAt: now,
-    });
     await replyOrUpdate(interaction, { embeds: [buildSkillsEmbed(member)], components: buildSkillsRows(member) });
     return true;
   }
@@ -3924,7 +4119,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if ([ECON_BUTTON_FOCUS_ROLE, ECON_BUTTON_FOCUS_BALANCE, ECON_BUTTON_FOCUS_MONEY].includes(id)) {
     const next: FocusPreset = id === ECON_BUTTON_FOCUS_ROLE ? "role" : id === ECON_BUTTON_FOCUS_MONEY ? "money" : "balance";
     patchEconomyUser(member.guild.id, member.id, { focus: next });
-    await replyOrUpdate(interaction, { embeds: [buildFocusEmbed(member)], components: buildFocusRows(next) });
+    await replyOrUpdate(interaction, { embeds: [buildFocusEmbed(member)], components: buildFocusRows(member, next) });
     return true;
   }
 
