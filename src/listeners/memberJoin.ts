@@ -5,17 +5,16 @@ import { embedInfo, embedWarn } from "../theme.js";
 import { resolveFirstLadderRoleId, syncVoiceLadderForMember } from "../voice/voiceLadder.js";
 
 const NICK_MAX = 32;
-const PREFIX = "Товарищ (";
+const PREFIX = "Товарищ ";
 
-/** Ник в формате «Товарищ (ник)», не длиннее лимита Discord. Только при первом входе. */
+/** Ник в формате «Товарищ ник» (без скобок), не длиннее лимита Discord. Только при первом входе. */
 export function buildTovarischNickname(user: User): string {
   const raw = (user.globalName ?? user.username).trim() || "безымянный";
-  const suffix = ")";
   let inner = raw;
-  let nick = `${PREFIX}${inner}${suffix}`;
+  let nick = `${PREFIX}${inner}`;
   while (nick.length > NICK_MAX && inner.length > 0) {
     inner = inner.slice(0, -1);
-    nick = `${PREFIX}${inner}${suffix}`;
+    nick = `${PREFIX}${inner}`;
   }
   if (nick.length > NICK_MAX) {
     nick = nick.slice(0, NICK_MAX);

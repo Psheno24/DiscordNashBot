@@ -127,9 +127,6 @@ const ECON_COURIER_BIKE_1D = "econ:work:courierbike:1d";
 const ECON_COURIER_BIKE_3D = "econ:work:courierbike:3d";
 const ECON_COURIER_BIKE_7D = "econ:work:courierbike:7d";
 
-/** Топливо / расходники за смену (не престиж). */
-const COURIER_FUEL_RUB = 500;
-const ASSEMBLER_FUEL_RUB = 1_500;
 const ASSEMBLER_BASE_CD_MS = 3 * 60 * 60 * 1000;
 const ASSEMBLER_MIN_CD_MS = Math.round(1.75 * 60 * 60 * 1000);
 const ASSEMBLER_7TH_BONUS_RUB = 22_000;
@@ -652,7 +649,7 @@ function jobOpeningLine(jobId: JobId): string {
     case "dispatcher":
       return "**Колл-центр** · КД **24** ч · фикс **26–30k** · **×ранг** т2";
     case "assembler":
-      return "**Склад** · КД от транспорта · фикс **15–18k** · **×ранг** т2";
+      return "**Склад** · КД **3** ч · с **личным авто** из магазина короче (скутер ~**2,5** ч) · фикс **15–18k** · **×ранг** т2";
     case "expediter":
       return "**Развлекательный центр** · КД **6** ч · **от ~−38k до ~155k** (шансы в **Подробнее**) · **×ранг** т2";
     case "officeAnalyst": {
@@ -699,7 +696,7 @@ const JOBS_STARTER: JobDef[] = [
     description:
       [
         "**КД смены:** 3 ч без вела; с **арендой электровела** — 2 ч; с **авто** — по классу (**скутер ~2,5 ч** … **топ ~1 ч**).",
-        "**Оплата за смену:** случайно **6 500–8 000** ₽. **Расходники:** **500** ₽. **Множитель ранга** тир-1 — в карточке профессии.",
+        "**Оплата за смену:** случайно **6 500–8 000** ₽. **Множитель ранга** тир-1 — в карточке профессии.",
         `Нужны **телефон** и **симка**. С **баланса сим** — **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ за **тариф** на **30** суток (при первой смене после перерыва); внутри оплаченного периода смены **без** доп. списаний с сим. **Основной счёт не трогается.**`,
         "**Электровел** — посуточная аренда (если **нет** своего авто). Коэффициенты по номеру смены за **текущие календарные сутки** — в **Подробнее**.",
       ].join("\n"),
@@ -764,8 +761,8 @@ const JOBS_TIER2: JobDef[] = [
     baseCooldownMs: ASSEMBLER_BASE_CD_MS,
     basePayoutRub: 16_500,
     description: [
-      "**КД:** **3 ч** пешком / вел **2 ч** / с авто (**не ниже 1 ч 45 мин**; транспорт задаётся в магазине).",
-      "**Оплата за смену:** случайно **15 000–18 000** ₽. **Расходники:** **1 500** ₽. **3%** штраф; каждая **7-я** смена — премия **22 000** ₽; **множитель ранга** тир-2 — в карточке. Коэффициенты по номеру смены за **текущие календарные сутки** — в **Подробнее**.",
+      "**КД:** **3** ч без **личного** транспорта; с **авто** из магазина — по классу (например **скутер ~2,5 ч** … **не ниже 1 ч 45 мин**).",
+      "**Оплата за смену:** случайно **15 000–18 000** ₽. **3%** штраф; каждая **7-я** смена — премия **22 000** ₽; **множитель ранга** тир-2 — в карточке. Коэффициенты по номеру смены за **текущие календарные сутки** — в **Подробнее**.",
     ].join("\n"),
     reqSkills: { discipline: 28, logistics: 20 },
   },
@@ -859,12 +856,6 @@ function jobShiftPayEmbedLine(jobId: JobId): string {
     default:
       return "Оплата за смену: —";
   }
-}
-
-function jobConsumablesEmbedLine(jobId: JobId): string | null {
-  if (jobId === "courier") return "Расходники: **500** ₽";
-  if (jobId === "assembler") return "Расходники: **1 500** ₽";
-  return null;
 }
 
 function jobExtraDeductionsLabel(jobId: JobId): "да" | "нет" {
@@ -1068,7 +1059,7 @@ function hasOwnedCourierCar(u: ReturnType<typeof getEconomyUser>): boolean {
   return Boolean(u.ownedCarId && getCarDef(u.ownedCarId));
 }
 
-/** Транспорт доставки/склада: авто или вел (с датой окончания аренды вела). Без привязки к jobId — только состояние игрока. */
+/** Транспорт доставки: личное авто или аренда электровела. Без привязки к jobId — только состояние игрока. */
 function courierTransportExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
   const lines: string[] = [];
   const car = getCarDef(u.ownedCarId);
@@ -1661,11 +1652,10 @@ function effectiveCourierCooldownMs(u: ReturnType<typeof getEconomyUser>, now: n
   return def.baseCooldownMs;
 }
 
-/** Склад / логист: класс авто задаёт КД; минимум **1 ч 45 мин**. */
-function effectiveAssemblerCooldownMs(u: ReturnType<typeof getEconomyUser>, now: number = Date.now()): number {
+/** Склад: без личного авто — **3** ч; с авто из магазина — КД по классу (мин. **1 ч 45 мин**). */
+function effectiveAssemblerCooldownMs(u: ReturnType<typeof getEconomyUser>, _now?: number): number {
   const car = getCarDef(u.ownedCarId);
   if (car) return Math.max(ASSEMBLER_MIN_CD_MS, car.courierShiftCdMs);
-  if (hasActiveBikeRental(u, now)) return 2 * 60 * 60 * 1000;
   return ASSEMBLER_BASE_CD_MS;
 }
 
@@ -1683,7 +1673,7 @@ function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: num
   return { ok: false, msLeft: next - now };
 }
 
-/** Подсказка КД склада по текущему транспорту из магазина. */
+/** Подсказка КД склада: база **3** ч или личное авто из магазина. */
 function assemblerWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
   const cdMs = effectiveAssemblerCooldownMs(u, now);
   const h = (cdMs / 3600000).toFixed(2).replace(/\.?0+$/, "");
@@ -1691,14 +1681,10 @@ function assemblerWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: num
   if (car) {
     return [`**Склад:** с авто **${car.label}** — КД смены **${h}** ч (**не ниже 1 ч 45 мин**).`];
   }
-  if (hasActiveBikeRental(u, now)) {
-    const t = Math.floor((u.courierBikeUntilMs ?? 0) / 1000);
-    return [
-      `**Склад:** с электровелом — КД смены **${h}** ч.`,
-      `**Аренда вела** до <t:${t}:F> (<t:${t}:R>).`,
-    ];
-  }
-  return [`**Склад:** пешком / без вела — КД **${h}** ч; вел или авто ускоряют (магазин).`];
+  return [
+    "**Склад:** без личного транспорта — КД смены **3** ч.",
+    "Купите **авто** в магазине терминала (например **скутер** — ~**2,5** ч), чтобы сократить КД.",
+  ];
 }
 
 const WORK_SECTION_INTRO = [
@@ -1853,8 +1839,7 @@ function buildJobDetailBody(member: GuildMember, jobId: JobId): string {
       main = [
         "**КД:** **3** ч пешком · **2** ч с электровелом · с авто (**скутер ~2,5 ч** … **топ ~1 ч**).",
         "**Оплата за смену:** случайно **6 500–8 000** ₽.",
-        "**Расходники:** **500** ₽.",
-        "**Множитель ранга** тир-1 применяется к итогу после расходников.",
+        "**Множитель ранга** тир-1 применяется к итогу смены (см. карточку профессии).",
         calendarDayShiftPayCoeffEmbedBlock(),
         `**Сим:** тариф **${fmt(COURIER_SIM_MONTHLY_FEE_RUB)}** ₽ с **баланса сим** на **30** суток — списывается при **первой** смене после окончания оплаченного периода; основной счёт **не** используется.`,
       ].join("\n\n");
@@ -1890,9 +1875,8 @@ function buildJobDetailBody(member: GuildMember, jobId: JobId): string {
       break;
     case "assembler":
       main = [
-        "**КД:** **3 ч** пешком · вел **2 ч** · с авто (**не ниже 1 ч 45 мин**; транспорт из магазина).",
+        "**КД:** **3** ч без **личного** транспорта; с **авто** из магазина — по классу (например **скутер ~2,5 ч** … **не ниже 1 ч 45 мин**).",
         "**Оплата за смену:** случайно **15 000–18 000** ₽.",
-        "**Расходники:** **1 500** ₽.",
         "**3%** штраф **−4 500…−6 500** ₽ · каждая **7-я** смена: **+22 000** ₽.",
         "**После:** **×ранг** тир-2.",
         calendarDayShiftPayCoeffEmbedBlock(),
@@ -2002,8 +1986,6 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
     body.push(`КД смены: **${cdHoursLabel(cd)} ч**`);
   }
   body.push(jobShiftPayEmbedLine(jobId));
-  const cons = jobConsumablesEmbedLine(jobId);
-  if (cons) body.push(cons);
 
   body.push("");
   const exp = getJobExp(u, jobId);
@@ -2306,11 +2288,7 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
         ),
       );
     }
-    if (
-      (jobId === "courier" || jobId === "assembler") &&
-      !hasOwnedCourierCar(u) &&
-      !hasActiveBikeRental(u, now)
-    ) {
+    if (jobId === "courier" && !hasOwnedCourierCar(u) && !hasActiveBikeRental(u, now)) {
       rows.push(buildCourierBikeRow(member));
     }
     if (isTier3PanelJob(jobId)) {
@@ -2380,8 +2358,6 @@ function buildCurrentJobEmbed(
     lines.push(`КД смены: **${cdHoursLabel(cd)} ч**`);
   }
   lines.push(jobShiftPayEmbedLine(jid));
-  const con = jobConsumablesEmbedLine(jid);
-  if (con) lines.push(con);
 
   lines.push("");
   lines.push(`Опыт смен на этой работе: **${exp}**`);
@@ -2477,11 +2453,7 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
       ),
     );
   }
-  if (
-    (u.jobId === "courier" || u.jobId === "assembler") &&
-    !hasOwnedCourierCar(u) &&
-    !hasActiveBikeRental(u, now)
-  ) {
+  if (u.jobId === "courier" && !hasOwnedCourierCar(u) && !hasActiveBikeRental(u, now)) {
     rows.push(buildCourierBikeRow(member));
   }
   if (isTier3PanelJob(u.jobId)) {
@@ -3291,8 +3263,8 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_COURIER_BIKE_1D || id === ECON_COURIER_BIKE_3D || id === ECON_COURIER_BIKE_7D) {
     const u = getEconomyUser(member.guild.id, member.id);
-    if (u.jobId !== "courier" && u.jobId !== "assembler") {
-      await interaction.reply({ content: "Аренда вела доступна на **доставке** или **складе** (без личного авто).", flags: MessageFlags.Ephemeral });
+    if (u.jobId !== "courier") {
+      await interaction.reply({ content: "Аренда вела доступна только на **доставке** (без личного авто).", flags: MessageFlags.Ephemeral });
       return true;
     }
     if (hasOwnedCourierCar(u)) {
@@ -3783,7 +3755,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       : 0;
 
     if (jobId === "courier") {
-      base = randInt(6_500, 8_000) - COURIER_FUEL_RUB;
+      base = randInt(6_500, 8_000);
     } else if (jobId === "waiter") {
       base = 0;
       extra = rollStreetBrokerRub(rankAfterT12);
@@ -3793,7 +3765,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     } else if (jobId === "dispatcher") {
       base = randInt(26_000, 30_000);
     } else if (jobId === "assembler") {
-      base = randInt(15_000, 18_000) - ASSEMBLER_FUEL_RUB;
+      base = randInt(15_000, 18_000);
       if (chance(0.03)) {
         const fine = randInt(4_500, 6_500);
         extra -= fine;
