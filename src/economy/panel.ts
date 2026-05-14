@@ -858,11 +858,6 @@ function jobShiftPayEmbedLine(jobId: JobId): string {
   }
 }
 
-function jobExtraDeductionsLabel(jobId: JobId): "да" | "нет" {
-  if (jobId === "watchman" || jobId === "dispatcher") return "нет";
-  return "да";
-}
-
 function jobTaxEmbedLines(guildId: string, jobId: JobId): string[] {
   if (jobId === "shadowFixer") {
     return ["Подоходный налог с зачисления на личный счёт: **не удерживается**."];
@@ -2042,7 +2037,6 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   }
 
   body.push("");
-  body.push(`Дополнительные списания: **${jobExtraDeductionsLabel(jobId)}**`);
   body.push(...jobTaxEmbedLines(guildId, jobId));
 
   body.push("");
@@ -2383,7 +2377,6 @@ function buildCurrentJobEmbed(
   }
 
   lines.push("");
-  lines.push(`Дополнительные списания: **${jobExtraDeductionsLabel(jid)}**`);
   lines.push(...jobTaxEmbedLines(guildId, jid));
 
   if (jid !== "soleProp") {
