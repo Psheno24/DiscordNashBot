@@ -3046,6 +3046,141 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
   return { ok: true, walletDeltaRub, notes };
 }
 
+/** Markdown Discord → HTML для Telegram (упрощённо). */
+export function economyMarkdownToTelegramHtml(text: string): string {
+  let s = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  s = s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  s = s.replace(/<t:(\d+):[a-zA-Z]+>/g, (_, sec) => {
+    const d = new Date(Number(sec) * 1000);
+    return d.toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
+  });
+  return s;
+}
+
+export function economyIsWorkJobId(s: string): s is JobId {
+  return isWorkJobId(s);
+}
+
+export function listWorkJobsByTier(tier: "t1" | "t2" | "t3"): JobId[] {
+  if (tier === "t1") return JOBS_STARTER.map((j) => j.id);
+  if (tier === "t2") return JOBS_TIER2.map((j) => j.id);
+  return JOBS_TIER3.map((j) => j.id);
+}
+
+export function economyJobTitle(id: JobId): string {
+  return jobTitle(id);
+}
+
+export function economyFormatSkillsScreen(member: GuildMember): string {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const now = Date.now();
+  const left = u.lastTrainAt ? Math.max(0, u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS - now) : 0;
+  const cdLine =
+    left > 0
+      ? `Следующая тренировка (любой навык) через <b>${formatCooldown(left)}</b>.`
+      : "Тренировка <b>доступна сейчас</b>.";
+  const lines = SKILLS.map((s) => `· <b>${s.title}</b>: ${getSkillLevel(u, s.id)} / ${ECONOMY_SKILL_MAX}`);
+  return ["<b>Навыки</b>", "", cdLine, "", ...lines, "", "Выбери навык ниже."].join("\n");
+}
+
+export function economyFormatSkillsNotify(u: ReturnType<typeof getEconomyUser>): string {
+  const lines = SKILLS.map((s) => `· <b>${s.title}</b>: ${getSkillLevel(u, s.id)} / ${ECONOMY_SKILL_MAX}`);
+  return ["Можно потренировать <b>навык</b>.", "", ...lines].join("\n");
+}
+
+export function economyFormatWorkMenuScreen(member: GuildMember): string {
+  const embed = buildWorkMenuEmbed(member);
+  const title = embed.data.title ?? "Работа";
+  const desc = embed.data.description ?? "";
+  return economyMarkdownToTelegramHtml(`<b>${title}</b>\n\n${desc}`);
+}
+
+export function economyFormatJobCardScreen(member: GuildMember, jobId: JobId): string {
+  const embed = buildJobInfoEmbed(member, jobId);
+  const title = embed.data.title ?? economyJobTitle(jobId);
+  const desc = embed.data.description ?? "";
+  return economyMarkdownToTelegramHtml(`<b>${title}</b>\n\n${desc}`);
+}
+
+export function economyFormatJobListScreen(tier: "t1" | "t2" | "t3"): string {
+  const title = tier === "t1" ? "Начальные (т1)" : tier === "t2" ? "С навыком (т2)" : "Продвинутые (т3)";
+  const jobs = listWorkJobsByTier(tier);
+  const lines = jobs.map((id) => `· ${jobOpeningLine(id)}`);
+  return economyMarkdownToTelegramHtml(`<b>${title}</b>\n\n${lines.join("\n")}\n\nВыбери профессию ниже.`);
+}
+
+export type EconomyTakeJobResult =
+  | { ok: true; kind: "hired" | "already_current" }
+  | { ok: false; kind: "unknown_job" }
+  | { ok: false; kind: "missing_skills"; missing: string[] }
+  | { ok: false; kind: "need_housing" }
+  | { ok: false; kind: "shift_cooldown"; msLeft: number }
+  | { ok: false; kind: "confirm_switch"; jobId: JobId; currentTitle: string; newTitle: string };
+
+export function economyTakeJob(
+  member: GuildMember,
+  jobId: JobId,
+  opts?: { forceSwitch?: boolean },
+): EconomyTakeJobResult {
+  if (!isWorkJobId(jobId)) return { ok: false, kind: "unknown_job" };
+  const guildId = member.guild.id;
+  const cur = getEconomyUser(guildId, member.id);
+  const def = getAnyJobDef(jobId);
+  const req = meetsJobReq(cur, def);
+  if (!req.ok) return { ok: false, kind: "missing_skills", missing: req.missing };
+  const nowTake = Date.now();
+  if ((isTier2JobId(jobId) || isTier3PanelJob(jobId)) && !hasTier2PlusHousing(cur, nowTake)) {
+    return { ok: false, kind: "need_housing" };
+  }
+  if (cur.jobId) {
+    if (cur.jobId === jobId) return { ok: true, kind: "already_current" };
+    const st = canWorkNow(cur, cur.jobId, Date.now());
+    if (!st.ok) return { ok: false, kind: "shift_cooldown", msLeft: st.msLeft };
+    if (!opts?.forceSwitch) {
+      return {
+        ok: false,
+        kind: "confirm_switch",
+        jobId,
+        currentTitle: jobTitle(cur.jobId),
+        newTitle: def.title,
+      };
+    }
+    patchEconomyUser(guildId, member.id, {
+      jobId,
+      jobChosenAt: Date.now(),
+      ...tier3PatchWhenJobChanges(cur, jobId),
+    });
+    return { ok: true, kind: "hired" };
+  }
+  const curTake = getEconomyUser(guildId, member.id);
+  patchEconomyUser(guildId, member.id, {
+    jobId,
+    jobChosenAt: Date.now(),
+    ...tier3PatchWhenJobChanges(curTake, jobId),
+  });
+  return { ok: true, kind: "hired" };
+}
+
+export type EconomyQuitJobResult =
+  | { ok: true }
+  | { ok: false; kind: "no_job" | "shift_cooldown"; msLeft?: number };
+
+export function economyQuitJob(member: GuildMember): EconomyQuitJobResult {
+  const guildId = member.guild.id;
+  const u = getEconomyUser(guildId, member.id);
+  if (!u.jobId) return { ok: false, kind: "no_job" };
+  const st = canWorkNow(u, u.jobId, Date.now());
+  if (!st.ok) return { ok: false, kind: "shift_cooldown", msLeft: st.msLeft };
+  const uQuit = getEconomyUser(guildId, member.id);
+  patchEconomyUser(guildId, member.id, {
+    jobId: undefined,
+    jobChosenAt: undefined,
+    lastWorkAtByJob: undefined,
+    ...tier3PatchWhenJobChanges(uQuit, undefined),
+  });
+  return { ok: true };
+}
+
 export async function handleEconomyButton(interaction: ButtonInteraction): Promise<boolean> {
   const cid = interaction.customId;
   const isKnown =
