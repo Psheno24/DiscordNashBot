@@ -28,6 +28,16 @@ export interface NotifyLatch {
   lastTrainBoundaryNotifiedMs?: number;
 }
 
+/** UI в личке Telegram: одна панель + отдельные push-уведомления. */
+export interface TelegramUiState {
+  /** Сообщение с inline-меню (редактируется как в Discord). */
+  panelMessageId?: number;
+  /** Последнее уведомление «смена готова» (заменяется новым). */
+  notifyWorkMessageId?: number;
+  /** Последнее уведомление «навык готов» (заменяется новым). */
+  notifyTrainMessageId?: number;
+}
+
 interface StoreShape {
   pendingCodes: Record<string, PendingTelegramCode>;
   linksByTelegramId: Record<string, TelegramLink>;
@@ -35,6 +45,7 @@ interface StoreShape {
   linksByDiscordKey: Record<string, string>;
   lastIssuedCodeByDiscord: Record<string, LastIssuedTelegramCode>;
   notifyLatchByTelegramId: Record<string, NotifyLatch>;
+  uiByTelegramId: Record<string, TelegramUiState>;
 }
 
 export function discordPairKey(guildId: string, discordUserId: string): string {
@@ -65,7 +76,16 @@ function normalizeStore(raw: Partial<StoreShape>): StoreShape {
     raw.notifyLatchByTelegramId && typeof raw.notifyLatchByTelegramId === "object"
       ? raw.notifyLatchByTelegramId
       : {};
-  return { pendingCodes, linksByTelegramId, linksByDiscordKey, lastIssuedCodeByDiscord, notifyLatchByTelegramId };
+  const uiByTelegramId =
+    raw.uiByTelegramId && typeof raw.uiByTelegramId === "object" ? raw.uiByTelegramId : {};
+  return {
+    pendingCodes,
+    linksByTelegramId,
+    linksByDiscordKey,
+    lastIssuedCodeByDiscord,
+    notifyLatchByTelegramId,
+    uiByTelegramId,
+  };
 }
 
 function readStore(): StoreShape {
@@ -77,6 +97,7 @@ function readStore(): StoreShape {
       linksByDiscordKey: {},
       lastIssuedCodeByDiscord: {},
       notifyLatchByTelegramId: {},
+      uiByTelegramId: {},
     };
   }
   try {
@@ -89,6 +110,7 @@ function readStore(): StoreShape {
       linksByDiscordKey: {},
       lastIssuedCodeByDiscord: {},
       notifyLatchByTelegramId: {},
+      uiByTelegramId: {},
     };
   }
 }
@@ -178,5 +200,17 @@ export function patchNotifyLatch(telegramUserId: string, patch: Partial<NotifyLa
   const id = String(telegramUserId);
   const cur = s.notifyLatchByTelegramId[id] ?? {};
   s.notifyLatchByTelegramId[id] = { ...cur, ...patch };
+  writeStore(s);
+}
+
+export function getTelegramUiState(telegramUserId: string): TelegramUiState {
+  return readStore().uiByTelegramId[String(telegramUserId)] ?? {};
+}
+
+export function patchTelegramUiState(telegramUserId: string, patch: Partial<TelegramUiState>): void {
+  const s = readStore();
+  const id = String(telegramUserId);
+  const cur = s.uiByTelegramId[id] ?? {};
+  s.uiByTelegramId[id] = { ...cur, ...patch };
   writeStore(s);
 }

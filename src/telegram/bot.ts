@@ -20,8 +20,10 @@ import { getEconomyUser, lastWorkAtForJob, type JobId, type SkillId } from "../e
 import {
   getNotifyLatch,
   getTelegramLink,
+  getTelegramUiState,
   listLinkedTelegramUserIds,
   patchNotifyLatch,
+  patchTelegramUiState,
   peekTelegramLinkCode,
   removeTelegramLinkCode,
   setTelegramLink,
@@ -39,12 +41,29 @@ type TgCb = {
 type InlineBtn = { text: string; callback_data: string };
 type InlineKb = { inline_keyboard: InlineBtn[][] };
 
-function tgApi(token: string, method: string, body?: object): Promise<unknown> {
+type TgApiResult = { ok?: boolean; result?: { message_id?: number } };
+
+function tgApi(token: string, method: string, body?: object): Promise<TgApiResult> {
   return fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: body !== undefined ? JSON.stringify(body) : undefined,
-  }).then((r) => r.json());
+  }).then((r) => r.json() as Promise<TgApiResult>);
+}
+
+async function registerBotCommands(token: string) {
+  await tgApi(token, "setMyCommands", {
+    commands: [
+      { command: "menu", description: "Главное меню" },
+      { command: "work", description: "Работа и смены" },
+      { command: "skills", description: "Навыки и тренировка" },
+      { command: "shift", description: "Выйти на смену" },
+      { command: "train", description: "Тренировка (communication|logistics|discipline)" },
+      { command: "status", description: "Статус работы и навыков" },
+      { command: "link", description: "Привязка Discord (код из профиля)" },
+      { command: "help", description: "Справка" },
+    ],
+  });
 }
 
 function fmtMs(ms: number): string {
@@ -178,14 +197,19 @@ function shiftNotifyKeyboard(): InlineKb {
   return kb(row({ text: "Выйти на смену", callback_data: "sh" }, { text: "Работа", callback_data: "w" }));
 }
 
-async function sendMessage(token: string, chatId: number, text: string, replyMarkup?: InlineKb) {
+async function sendMessage(token: string, chatId: number, text: string, replyMarkup?: InlineKb): Promise<number | undefined> {
   const chunk = text.length > 4000 ? `${text.slice(0, 3990)}…` : text;
-  await tgApi(token, "sendMessage", {
+  const res = await tgApi(token, "sendMessage", {
     chat_id: chatId,
     text: chunk,
     parse_mode: "HTML",
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
+  return res.ok ? res.result?.message_id : undefined;
+}
+
+async function deleteMessage(token: string, chatId: number, messageId: number) {
+  await tgApi(token, "deleteMessage", { chat_id: chatId, message_id: messageId });
 }
 
 async function editScreen(
@@ -193,16 +217,16 @@ async function editScreen(
   chatId: number,
   messageId: number,
   text: string,
-  replyMarkup: InlineKb,
+  replyMarkup?: InlineKb,
 ): Promise<boolean> {
   const chunk = text.length > 4000 ? `${text.slice(0, 3990)}…` : text;
-  const res = (await tgApi(token, "editMessageText", {
+  const res = await tgApi(token, "editMessageText", {
     chat_id: chatId,
     message_id: messageId,
     text: chunk,
     parse_mode: "HTML",
-    reply_markup: replyMarkup,
-  })) as { ok?: boolean };
+    ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
+  });
   return Boolean(res.ok);
 }
 
@@ -220,7 +244,7 @@ async function resolveMember(client: Client, guildId: string, discordUserId: str
   return guild.members.fetch({ user: discordUserId, force: false }).catch(() => null);
 }
 
-type ScreenPayload = { text: string; markup: InlineKb };
+type ScreenPayload = { text: string; markup?: InlineKb };
 
 function screenMain(): ScreenPayload {
   return {
@@ -259,19 +283,81 @@ function screenSwitchConfirm(currentTitle: string, newTitle: string, jobId: JobI
   };
 }
 
-async function presentScreen(
+/** Одна «панель» в чате: правка того же сообщения (как embed в Discord). */
+async function presentPanel(
+  tgUserId: string,
   token: string,
   chatId: number,
-  messageId: number | undefined,
   payload: ScreenPayload,
-  ack?: TgCb,
+  opts?: { messageId?: number; ack?: TgCb },
 ): Promise<void> {
-  if (ack) await answerCallback(token, ack.id);
-  if (messageId != null) {
-    const ok = await editScreen(token, chatId, messageId, payload.text, payload.markup);
-    if (ok) return;
+  if (opts?.ack) await answerCallback(token, opts.ack.id);
+  const ui = getTelegramUiState(tgUserId);
+  const tryIds = [opts?.messageId, ui.panelMessageId].filter((x): x is number => x != null);
+  for (const mid of tryIds) {
+    const ok = await editScreen(token, chatId, mid, payload.text, payload.markup);
+    if (ok) {
+      patchTelegramUiState(tgUserId, { panelMessageId: mid });
+      return;
+    }
   }
-  await sendMessage(token, chatId, payload.text, payload.markup);
+  const sent = await sendMessage(token, chatId, payload.text, payload.markup);
+  if (sent != null) patchTelegramUiState(tgUserId, { panelMessageId: sent });
+}
+
+async function pushNotify(
+  token: string,
+  tgUserId: string,
+  chatId: number,
+  kind: "work" | "train",
+  text: string,
+  markup: InlineKb,
+) {
+  const ui = getTelegramUiState(tgUserId);
+  const oldId = kind === "work" ? ui.notifyWorkMessageId : ui.notifyTrainMessageId;
+  if (oldId) await deleteMessage(token, chatId, oldId);
+  const newId = await sendMessage(token, chatId, text, markup);
+  if (newId == null) return;
+  patchTelegramUiState(tgUserId, kind === "work" ? { notifyWorkMessageId: newId } : { notifyTrainMessageId: newId });
+}
+
+function screenStatus(member: GuildMember): ScreenPayload {
+  const eu = getEconomyUser(member.guild.id, member.id);
+  const jid = eu.jobId;
+  let line = "Работа: <b>не выбрана</b>";
+  if (jid && jid !== "soleProp") {
+    const st = canWorkNow(eu, jid, Date.now());
+    line = st.ok ? `Смена (<b>${economyJobTitle(jid)}</b>): можно` : `Смена: КД ${fmtMs(st.msLeft)}`;
+  } else if (jid === "soleProp") line = "ИП — смен нет, пассивный доход.";
+  let tline = "Навыки: тренировка доступна";
+  if (eu.lastTrainAt) {
+    const left = eu.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS - Date.now();
+    tline = left > 0 ? `Навыки: КД ${fmtMs(left)}` : "Навыки: <b>можно</b>";
+  }
+  return {
+    text: ["<b>Статус</b>", "", line, tline, "", economyFormatSkillsNotify(eu)].join("\n"),
+    markup: mainMenuKeyboard(),
+  };
+}
+
+function screenAfterShift(member: GuildMember, walletDeltaRub: number, notes: string[]): ScreenPayload {
+  const header = [`<b>Смена:</b> ${formatDelta(walletDeltaRub)} к кошельку.`];
+  if (notes.length) header.push("", ...notes.map((n) => `· ${n.replace(/\*\*/g, "")}`));
+  return {
+    text: [...header, "", economyFormatWorkMenuScreen(member)].join("\n"),
+    markup: workMenuKeyboard(member),
+  };
+}
+
+function screenAfterTrain(member: GuildMember, skillLabel: string, newLevel: number): ScreenPayload {
+  return {
+    text: [
+      `<b>${skillLabel}</b> → уровень <b>${newLevel}</b>.`,
+      "",
+      economyFormatSkillsScreen(member),
+    ].join("\n"),
+    markup: skillsKeyboard(member),
+  };
 }
 
 async function requireLink(
@@ -304,17 +390,12 @@ async function handleShift(client: Client, tgUserId: string, chatId: number, tok
   const r = await economyRunWorkShift(client, ctx.member);
   if (!r.ok) {
     const msg = r.kind === "cooldown" ? "Смена на КД." : r.message.replace(/\*\*/g, "");
-    if (ack && !messageId) await answerCallback(token, ack.id, msg);
-    else if (ack) await answerCallback(token, ack.id, msg);
-    if (ctx.member.guild) {
-      await presentScreen(token, chatId, messageId, screenWork(ctx.member), undefined);
-    }
+    if (ack) await answerCallback(token, ack.id, msg);
+    await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId });
     return;
   }
-  const lines = [`<b>Смена:</b> ${formatDelta(r.walletDeltaRub)} к кошельку.`];
-  if (r.notes.length) lines.push("", ...r.notes.map((n) => `· ${n.replace(/\*\*/g, "")}`));
   if (ack) await answerCallback(token, ack.id, "Готово");
-  await sendMessage(token, chatId, lines.join("\n"), workMenuKeyboard(ctx.member));
+  await presentPanel(tgUserId, token, chatId, screenAfterShift(ctx.member, r.walletDeltaRub, r.notes), { messageId });
 }
 
 async function handleTrain(
@@ -330,18 +411,12 @@ async function handleTrain(
   if (!ctx) return;
   const tr = economyRunTrainSkill(ctx.member, skillId);
   if (!tr.ok) {
-    await answerCallback(token, ack?.id ?? "", tr.kind === "unknown_skill" ? "Неверный навык" : "КД или максимум");
-    await presentScreen(token, chatId, messageId, screenSkills(ctx.member), undefined);
+    if (ack) await answerCallback(token, ack.id, tr.kind === "unknown_skill" ? "Неверный навык" : "КД или максимум");
+    await presentPanel(tgUserId, token, chatId, screenSkills(ctx.member), { messageId });
     return;
   }
   if (ack) await answerCallback(token, ack.id, "Готово");
-  const extra = economyFormatSkillsNotify(getEconomyUser(ctx.guildId, ctx.member.id));
-  await sendMessage(
-    token,
-    chatId,
-    `<b>${tr.skillLabel}</b> → уровень <b>${tr.newLevel}</b>.\n\n${extra}`,
-    skillsKeyboard(ctx.member),
-  );
+  await presentPanel(tgUserId, token, chatId, screenAfterTrain(ctx.member, tr.skillLabel, tr.newLevel), { messageId });
 }
 
 async function handleTake(
@@ -359,63 +434,62 @@ async function handleTake(
   const r = economyTakeJob(ctx.member, jobId, { forceSwitch: force });
   if (!r.ok) {
     if (r.kind === "missing_skills") {
-      await answerCallback(token, ack?.id ?? "", "Не хватает навыков");
-      await sendMessage(token, chatId, `Не хватает навыков:\n${r.missing.map((m) => `· ${m}`).join("\n")}`);
+      if (ack) await answerCallback(token, ack.id, "Не хватает навыков");
+      const body = economyFormatWorkMenuScreen(ctx.member);
+      await presentPanel(tgUserId, token, chatId, {
+        text: `<b>Не хватает навыков:</b>\n${r.missing.map((m) => `· ${m}`).join("\n")}\n\n${body}`,
+        markup: workMenuKeyboard(ctx.member),
+      }, { messageId });
       return;
     }
     if (r.kind === "need_housing") {
-      await answerCallback(token, ack?.id ?? "", "Нужно жильё");
-      await sendMessage(
-        token,
-        chatId,
-        "Сначала оформите <b>жильё</b> (аренда или квартира) в магазине терминала Discord — для работ тир 2+.",
-      );
+      if (ack) await answerCallback(token, ack.id, "Нужно жильё");
+      const body = economyFormatWorkMenuScreen(ctx.member);
+      await presentPanel(tgUserId, token, chatId, {
+        text: "Сначала оформите <b>жильё</b> (аренда или квартира) в магазине терминала Discord — для работ тир 2+.\n\n" + body,
+        markup: workMenuKeyboard(ctx.member),
+      }, { messageId });
       return;
     }
     if (r.kind === "shift_cooldown") {
-      await answerCallback(token, ack?.id ?? "", `КД ${fmtMs(r.msLeft)}`);
-      await presentScreen(token, chatId, messageId, screenWork(ctx.member), undefined);
+      if (ack) await answerCallback(token, ack.id, `КД ${fmtMs(r.msLeft)}`);
+      await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId });
       return;
     }
     if (r.kind === "confirm_switch") {
-      await presentScreen(
-        token,
-        chatId,
-        messageId,
-        screenSwitchConfirm(r.currentTitle, r.newTitle, r.jobId),
-        ack,
-      );
+      await presentPanel(tgUserId, token, chatId, screenSwitchConfirm(r.currentTitle, r.newTitle, r.jobId), { messageId, ack });
       return;
     }
     return;
   }
   if (ack) await answerCallback(token, ack.id, r.kind === "already_current" ? "Уже эта работа" : "Принято");
-  await presentScreen(token, chatId, messageId, screenJob(ctx.member, jobId), undefined);
+  await presentPanel(tgUserId, token, chatId, screenJob(ctx.member, jobId), { messageId });
 }
 
 async function handleQuit(client: Client, tgUserId: string, chatId: number, token: string, confirm: boolean, ack?: TgCb, messageId?: number) {
   const ctx = await requireLink(client, tgUserId, chatId, token, ack);
   if (!ctx) return;
   if (!confirm) {
-    await presentScreen(
+    await presentPanel(
+      tgUserId,
       token,
       chatId,
-      messageId,
       { text: "<b>Уволиться?</b>\n\nНельзя уволиться, пока идёт КД смены на текущей работе.", markup: quitConfirmKeyboard() },
-      ack,
+      { messageId, ack },
     );
     return;
   }
   const r = economyQuitJob(ctx.member);
   if (!r.ok) {
-    if (r.kind === "shift_cooldown") {
-      await answerCallback(token, ack?.id ?? "", `КД ${fmtMs(r.msLeft ?? 0)}`);
-    } else await answerCallback(token, ack?.id ?? "", "Нет работы");
-    await presentScreen(token, chatId, messageId, screenWork(ctx.member), undefined);
+    if (ack) {
+      if (r.kind === "shift_cooldown") await answerCallback(token, ack.id, `КД ${fmtMs(r.msLeft ?? 0)}`);
+      else await answerCallback(token, ack.id, "Нет работы");
+    }
+    await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId });
     return;
   }
   if (ack) await answerCallback(token, ack.id, "Уволены");
-  await presentScreen(token, chatId, messageId, screenWork(ctx.member), undefined);
+  await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId });
 }
 
 async function routeCallback(
@@ -429,24 +503,24 @@ async function routeCallback(
   const messageId = cq.message?.message_id;
 
   if (data === "m") {
-    await presentScreen(token, chatId, messageId, screenMain(), cq);
+    await presentPanel(tgUserId, token, chatId, screenMain(), { messageId, ack: cq });
     return;
   }
   if (data === "w") {
     const ctx = await requireLink(client, tgUserId, chatId, token, cq);
     if (!ctx) return;
-    await presentScreen(token, chatId, messageId, screenWork(ctx.member), undefined);
+    await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId, ack: cq });
     return;
   }
   if (data === "wt1" || data === "wt2" || data === "wt3") {
     const tier = data === "wt1" ? "t1" : data === "wt2" ? "t2" : "t3";
-    await presentScreen(token, chatId, messageId, screenTier(tier), cq);
+    await presentPanel(tgUserId, token, chatId, screenTier(tier), { messageId, ack: cq });
     return;
   }
   if (data === "sk") {
     const ctx = await requireLink(client, tgUserId, chatId, token, cq);
     if (!ctx) return;
-    await presentScreen(token, chatId, messageId, screenSkills(ctx.member), undefined);
+    await presentPanel(tgUserId, token, chatId, screenSkills(ctx.member), { messageId, ack: cq });
     return;
   }
   if (data === "sh") {
@@ -464,21 +538,7 @@ async function routeCallback(
   if (data === "st") {
     const ctx = await requireLink(client, tgUserId, chatId, token, cq);
     if (!ctx) return;
-    const eu = getEconomyUser(ctx.guildId, ctx.member.id);
-    const jid = eu.jobId;
-    let line = "Работа: <b>не выбрана</b>";
-    if (jid && jid !== "soleProp") {
-      const st = canWorkNow(eu, jid, Date.now());
-      line = st.ok ? `Смена (<b>${economyJobTitle(jid)}</b>): можно` : `Смена: КД ${fmtMs(st.msLeft)}`;
-    } else if (jid === "soleProp") line = "ИП — смен нет, пассивный доход.";
-    let tline = "Навыки: тренировка доступна";
-    if (eu.lastTrainAt) {
-      const left = eu.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS - Date.now();
-      tline = left > 0 ? `Навыки: КД ${fmtMs(left)}` : "Навыки: <b>можно</b>";
-    }
-    const skillBlock = economyFormatSkillsNotify(eu);
-    await answerCallback(token, cq.id);
-    await sendMessage(token, chatId, `<b>Статус</b>\n\n${line}\n${tline}\n\n${skillBlock}`, mainMenuKeyboard());
+    await presentPanel(tgUserId, token, chatId, screenStatus(ctx.member), { messageId, ack: cq });
     return;
   }
   if (data.startsWith("j:")) {
@@ -489,7 +549,7 @@ async function routeCallback(
     }
     const ctx = await requireLink(client, tgUserId, chatId, token, cq);
     if (!ctx) return;
-    await presentScreen(token, chatId, messageId, screenJob(ctx.member, raw), undefined);
+    await presentPanel(tgUserId, token, chatId, screenJob(ctx.member, raw), { messageId, ack: cq });
     return;
   }
   if (data.startsWith("t:")) {
@@ -533,9 +593,11 @@ async function tickNotifications(client: Client, token: string) {
       const st = canWorkNow(u, jobId, now);
       const boundary = workReadyBoundaryMs(u, jobId, now);
       if (st.ok && boundary > 0 && latch.lastWorkBoundaryNotifiedMs !== boundary) {
-        await sendMessage(
+        await pushNotify(
           token,
+          tgId,
           chatId,
+          "work",
           `Можно выйти на смену: <b>${economyJobTitle(jobId)}</b>.`,
           shiftNotifyKeyboard(),
         );
@@ -549,7 +611,7 @@ async function tickNotifications(client: Client, token: string) {
       if (trainReady && latch.lastTrainBoundaryNotifiedMs !== trainBoundary) {
         const member = await resolveMember(client, link.guildId, link.discordUserId);
         const skKb = member ? skillsKeyboard(member) : skillsKeyboardForUser(u);
-        await sendMessage(token, chatId, economyFormatSkillsNotify(u), skKb);
+        await pushNotify(token, tgId, chatId, "train", economyFormatSkillsNotify(u), skKb);
         patchNotifyLatch(tgId, { lastTrainBoundaryNotifiedMs: trainBoundary });
       }
     }
@@ -587,6 +649,7 @@ export function startTelegramSidecar(client: Client): void {
   console.log(`Telegram: long poll + панели${restrict ? " (whitelist)" : ""}.`);
 
   void tgApi(token, "deleteWebhook", { drop_pending_updates: true });
+  void registerBotCommands(token);
 
   setInterval(() => {
     void tickNotifications(client, token);
@@ -627,41 +690,52 @@ export function startTelegramSidecar(client: Client): void {
         const { cmd, args } = parseCommand(msg.text);
         if (cmd === "start" || cmd === "help" || cmd === "menu") {
           const linked = getTelegramLink(tgUserId);
-          const intro = linked
-            ? "<b>Меню</b> — кнопки ниже. Работа и навыки как в Discord."
-            : [
+          if (linked) {
+            await presentPanel(tgUserId, token, msg.chat.id, screenMain());
+          } else {
+            await presentPanel(tgUserId, token, msg.chat.id, {
+              text: [
                 "<b>Nash · Telegram</b>",
                 "",
                 "<code>/link КОД</code> — привязка (Discord → профиль → Telegram).",
                 "После привязки — кнопки <b>Работа</b> и <b>Навыки</b>.",
-              ].join("\n");
-          await sendMessage(token, msg.chat.id, intro, linked ? mainMenuKeyboard() : undefined);
+              ].join("\n"),
+            });
+          }
           continue;
         }
-        if (cmd === "link" && args[0]) {
+        if (cmd === "link") {
+          if (!args[0]) {
+            await presentPanel(tgUserId, token, msg.chat.id, {
+              text: "Отправь: <code>/link КОД</code>\nКод — в Discord: профиль → Telegram.",
+            });
+            continue;
+          }
           const row = peekTelegramLinkCode(args[0]);
           if (!row) {
-            await sendMessage(token, msg.chat.id, "Код недействителен или истёк. Запроси новый в Discord.");
+            await presentPanel(tgUserId, token, msg.chat.id, {
+              text: "Код недействителен или истёк. Запроси новый в Discord.",
+            });
             continue;
           }
           const g = await client.guilds.fetch(row.guildId).catch(() => null);
           if (!g) {
-            await sendMessage(token, msg.chat.id, "Сервер Discord недоступен боту.");
+            await presentPanel(tgUserId, token, msg.chat.id, { text: "Сервер Discord недоступен боту." });
             continue;
           }
           removeTelegramLinkCode(args[0]);
           setTelegramLink(tgUserId, { guildId: row.guildId, discordUserId: row.discordUserId, linkedAtMs: Date.now() });
-          await sendMessage(token, msg.chat.id, "Привязано. Открой меню:", mainMenuKeyboard());
+          await presentPanel(tgUserId, token, msg.chat.id, screenMain());
           continue;
         }
         if (cmd === "work" || cmd === "w") {
           const ctx = await requireLink(client, tgUserId, msg.chat.id, token);
-          if (ctx) await sendMessage(token, msg.chat.id, economyFormatWorkMenuScreen(ctx.member), workMenuKeyboard(ctx.member));
+          if (ctx) await presentPanel(tgUserId, token, msg.chat.id, screenWork(ctx.member));
           continue;
         }
         if (cmd === "skills" || cmd === "sk") {
           const ctx = await requireLink(client, tgUserId, msg.chat.id, token);
-          if (ctx) await sendMessage(token, msg.chat.id, economyFormatSkillsScreen(ctx.member), skillsKeyboard(ctx.member));
+          if (ctx) await presentPanel(tgUserId, token, msg.chat.id, screenSkills(ctx.member));
           continue;
         }
         if (cmd === "shift") {
@@ -673,8 +747,8 @@ export function startTelegramSidecar(client: Client): void {
           continue;
         }
         if (cmd === "status" || cmd === "st") {
-          const fakeCq = { id: "cmd", data: "st", from: { id: Number(tgUserId) }, message: msg as TgCb["message"] };
-          await routeCallback(client, token, tgUserId, fakeCq);
+          const ctx = await requireLink(client, tgUserId, msg.chat.id, token);
+          if (ctx) await presentPanel(tgUserId, token, msg.chat.id, screenStatus(ctx.member));
           continue;
         }
       }
