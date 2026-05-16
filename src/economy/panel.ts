@@ -177,6 +177,37 @@ const ECON_LOTTERY_CONFIRM_PREFIX = "econ:lottery:confirm:";
 const ECON_LOTTERY_CANCEL = "econ:lottery:cancel";
 const ECON_MODAL_LOTTERY_QTY = "modal:econ:lotteryQty";
 
+type LotteryMenuMessageRef = { channelId: string; messageId: string };
+
+/** Последнее ephemeral-меню лотереи — чтобы не плодить копии после модалки «Купить». */
+const lotteryMenuMessageByUser = new Map<string, LotteryMenuMessageRef>();
+
+function lotteryMenuUserKey(guildId: string, userId: string): string {
+  return `${guildId}:${userId}`;
+}
+
+function rememberLotteryMenuMessage(guildId: string, userId: string, channelId: string, messageId: string): void {
+  lotteryMenuMessageByUser.set(lotteryMenuUserKey(guildId, userId), { channelId, messageId });
+}
+
+async function deleteStoredLotteryMenuMessage(
+  client: import("discord.js").Client,
+  guildId: string,
+  userId: string,
+  exceptMessageId?: string,
+): Promise<void> {
+  const key = lotteryMenuUserKey(guildId, userId);
+  const ref = lotteryMenuMessageByUser.get(key);
+  if (!ref || ref.messageId === exceptMessageId) return;
+  const ch = await client.channels.fetch(ref.channelId).catch(() => null);
+  if (ch?.isTextBased() && !ch.isDMBased()) {
+    await ch.messages.delete(ref.messageId).catch(() => null);
+  }
+  if (lotteryMenuMessageByUser.get(key)?.messageId === ref.messageId) {
+    lotteryMenuMessageByUser.delete(key);
+  }
+}
+
 const ECON_COURIER_BIKE_1D = "econ:work:courierbike:1d";
 const ECON_COURIER_BIKE_3D = "econ:work:courierbike:3d";
 const ECON_COURIER_BIKE_7D = "econ:work:courierbike:7d";
@@ -3800,10 +3831,20 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_SHOP_LOTTERY) {
     await replyOrUpdate(interaction, { embeds: [buildShopLotteryEmbed(member)], components: buildShopLotteryRows(member) });
+    const chId = interaction.channelId;
+    let mid: string | undefined = interaction.message?.id;
+    if (!mid) {
+      const r = await interaction.fetchReply().catch(() => null);
+      mid = r?.id;
+    }
+    if (chId && mid) rememberLotteryMenuMessage(member.guild.id, member.id, chId, mid);
     return true;
   }
 
   if (id === ECON_SHOP_LOTTERY_BUY_OPEN) {
+    if (interaction.channelId && interaction.message?.id) {
+      rememberLotteryMenuMessage(member.guild.id, member.id, interaction.channelId, interaction.message.id);
+    }
     const modal = new ModalBuilder().setCustomId(ECON_MODAL_LOTTERY_QTY).setTitle("Купить лотерейные билеты");
     modal.addComponents(
       new ActionRowBuilder<TextInputBuilder>().addComponents(
@@ -3845,11 +3886,17 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     });
     await ensureEconomyFeedPanel(interaction.client);
     await interaction.update({ embeds: [buildShopLotteryEmbed(member)], components: buildShopLotteryRows(member) });
+    if (interaction.channelId && interaction.message?.id) {
+      rememberLotteryMenuMessage(member.guild.id, member.id, interaction.channelId, interaction.message.id);
+    }
     return true;
   }
 
   if (id === ECON_LOTTERY_CANCEL) {
-    await replyOrUpdate(interaction, { embeds: [buildShopLotteryEmbed(member)], components: buildShopLotteryRows(member) });
+    await interaction.update({ embeds: [buildShopLotteryEmbed(member)], components: buildShopLotteryRows(member) });
+    if (interaction.channelId && interaction.message?.id) {
+      rememberLotteryMenuMessage(member.guild.id, member.id, interaction.channelId, interaction.message.id);
+    }
     return true;
   }
 
@@ -4478,11 +4525,16 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
       });
       return true;
     }
+    await deleteStoredLotteryMenuMessage(interaction.client, mem.guild.id, mem.id);
     await interaction.reply({
       embeds: [buildLotteryConfirmEmbed(mem, qty)],
       components: buildLotteryConfirmRows(qty),
       flags: MessageFlags.Ephemeral,
     });
+    const confirmMsg = await interaction.fetchReply().catch(() => null);
+    if (interaction.channelId && confirmMsg?.id) {
+      rememberLotteryMenuMessage(mem.guild.id, mem.id, interaction.channelId, confirmMsg.id);
+    }
     return true;
   }
 
