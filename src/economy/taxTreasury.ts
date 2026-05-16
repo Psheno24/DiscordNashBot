@@ -58,18 +58,27 @@ export function trySpendTreasuryRub(guildId: string, amountRub: number): SpendTr
   return { ok: true };
 }
 
-/** НДС с покупок в магазине терминала: доля от суммы чека → казна. */
-export const SHOP_VAT_PERCENT = 22;
+const DEFAULT_SHOP_VAT_PERCENT = 22;
 
-export function shopPurchaseVatRub(grossRub: number): number {
+export function getShopVatPercent(guildId: string): number {
+  const v = getGuildConfig(guildId).shopVatPercent;
+  if (v == null || !Number.isFinite(v)) return DEFAULT_SHOP_VAT_PERCENT;
+  return clampPercent0_100(v);
+}
+
+/** @deprecated используйте getShopVatPercent(guildId) */
+export const SHOP_VAT_PERCENT = DEFAULT_SHOP_VAT_PERCENT;
+
+export function shopPurchaseVatRub(guildId: string, grossRub: number): number {
   const g = Math.floor(grossRub);
   if (g <= 0) return 0;
-  return Math.min(g, Math.floor((g * SHOP_VAT_PERCENT) / 100));
+  const pct = getShopVatPercent(guildId);
+  return Math.min(g, Math.floor((g * pct) / 100));
 }
 
 /** Зачисляет НДС в казну; возвращает фактически зачисленный НДС. */
 export function remitShopPurchaseVatToTreasury(guildId: string, grossRub: number): number {
-  const vat = shopPurchaseVatRub(grossRub);
+  const vat = shopPurchaseVatRub(guildId, grossRub);
   if (vat > 0) addToTreasury(guildId, vat);
   return vat;
 }

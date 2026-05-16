@@ -38,6 +38,12 @@ export function setEconomyTerminalPanelMessageId(channelId: string, messageId: s
   writeStore(s);
 }
 
+export function clearEconomyTerminalPanelMessageId(channelId: string) {
+  const s = readStore();
+  delete s.terminalMessages[channelId];
+  writeStore(s);
+}
+
 export function getEconomyFeedPanelMessageId(channelId: string): string | undefined {
   return readStore().feedMessages[channelId];
 }

@@ -1,5 +1,6 @@
 import type { Client } from "discord.js";
 import { getGuildConfig, patchGuildConfig } from "../guildConfig/store.js";
+import { scalePositiveIncome } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { processHousingMskMidnightForUser } from "./economyHousing.js";
 import { isMskMonday, msUntilNextMskMidnight } from "./mskCalendar.js";
@@ -83,9 +84,10 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
       });
       const rankAfter = tier3PromotionRank(streakOut.nextStreak);
 
-      let creditPassive = passive;
-      if (passive > 0 && (def.archetype === "legal" || def.archetype === "ip")) {
-        const { netRub } = withholdLegalIncomeTax(guild.id, passive);
+      const passiveScaled = scalePositiveIncome(guild.id, passive);
+      let creditPassive = passiveScaled;
+      if (passiveScaled > 0 && (def.archetype === "legal" || def.archetype === "ip")) {
+        const { netRub } = withholdLegalIncomeTax(guild.id, passiveScaled);
         creditPassive = netRub;
       }
 
@@ -101,7 +103,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
       const member = await guild.members.fetch(userId).catch(() => null);
       const mention = member ? member.toString() : `Пользователь ${userId}`;
 
-      if (passive > 0) {
+      if (passiveScaled > 0) {
         appendFeedEvent({
           ts: Date.now(),
           guildId: guild.id,

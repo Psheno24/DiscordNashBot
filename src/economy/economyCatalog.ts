@@ -1,3 +1,5 @@
+import { roundEconomyPrice } from "./economyRound.js";
+
 /** Тариф сим-карты доставки: один платёж на 30 суток (с баланса сим). */
 export const COURIER_SIM_MONTHLY_FEE_RUB = 1_000;
 export const COURIER_SIM_MONTHLY_PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
@@ -98,27 +100,40 @@ export const HOUSING_CALENDAR_MONTH_MS = 30 * MS_PER_DAY;
 /** @deprecated имя оставлено для совместимости импортов — то же, что календарный месяц коммуналки */
 export const HOUSING_RENT_PERIOD_MS = HOUSING_CALENDAR_MONTH_MS;
 
-/** Пакет «30 суток сразу» — дешевле посуточного эквивалента. */
-export const HOUSING_RENT_MONTH_PKG_RUB = 40_000;
+/** Пакет «30 суток сразу». */
+export const HOUSING_RENT_MONTH_PKG_RUB = 100_000;
 export const HOUSING_RENT_MONTH_PKG_MS = 30 * MS_PER_DAY;
 
-/** Посуточно: как старые 70k за 30 дней, одни сутки. */
-export const HOUSING_RENT_DAILY_MONTH_EQUIV_RUB = 70_000;
-export const HOUSING_RENT_DAY_PKG_RUB = Math.ceil(HOUSING_RENT_DAILY_MONTH_EQUIV_RUB / 30);
+/** Посуточный эквивалент (дороже пакета на месяц) — прежнее соотношение 70k:40k. */
+export const HOUSING_RENT_DAILY_MONTH_EQUIV_RUB = 175_000;
 export const HOUSING_RENT_DAY_PKG_MS = MS_PER_DAY;
 
-/** Неделя: среднее между дневной ставкой «70k/30» и «40k/30» за сутки, ×7. */
-export const HOUSING_RENT_WEEK_PKG_RUB = Math.round(
-  ((HOUSING_RENT_MONTH_PKG_RUB / 30 + HOUSING_RENT_DAILY_MONTH_EQUIV_RUB / 30) / 2) * 7,
-);
+/** Неделя: среднее между суточной ставкой пакета месяца и посуточного эквивалента, ×7. */
 export const HOUSING_RENT_WEEK_PKG_MS = 7 * MS_PER_DAY;
+
+/** Аренда электровела доставки: эквивалент **30 000** ₽ / 30 суток. */
+export const COURIER_BIKE_MONTH_EQUIV_RUB = 30_000;
 
 export type HousingRentPlan = "day" | "week" | "month";
 
-export function housingRentPlanPriceRub(plan: HousingRentPlan): number {
-  if (plan === "day") return HOUSING_RENT_DAY_PKG_RUB;
-  if (plan === "week") return HOUSING_RENT_WEEK_PKG_RUB;
+function housingRentPlanPriceRubRaw(plan: HousingRentPlan): number {
+  if (plan === "day") return Math.ceil(HOUSING_RENT_DAILY_MONTH_EQUIV_RUB / 30);
+  if (plan === "week") {
+    return Math.round(((HOUSING_RENT_MONTH_PKG_RUB / 30 + HOUSING_RENT_DAILY_MONTH_EQUIV_RUB / 30) / 2) * 7);
+  }
   return HOUSING_RENT_MONTH_PKG_RUB;
+}
+
+export function housingRentPlanPriceRub(plan: HousingRentPlan): number {
+  return roundEconomyPrice(housingRentPlanPriceRubRaw(plan));
+}
+
+/** @deprecated сырые значения — для отображения используйте housingRentPlanPriceRub */
+export const HOUSING_RENT_DAY_PKG_RUB = housingRentPlanPriceRub("day");
+export const HOUSING_RENT_WEEK_PKG_RUB = housingRentPlanPriceRub("week");
+
+export function courierBikeRentPriceRub(days: 1 | 3 | 7): number {
+  return roundEconomyPrice((COURIER_BIKE_MONTH_EQUIV_RUB * days) / 30);
 }
 
 export function housingRentPlanPeriodMs(plan: HousingRentPlan): number {

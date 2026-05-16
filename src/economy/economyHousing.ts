@@ -1,3 +1,4 @@
+import { inflatedApartmentUtilityRub, inflatedHousingRentPrice } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
 import {
   getApartmentDef,
@@ -12,7 +13,7 @@ import { remitShopPurchaseVatToTreasury } from "./taxTreasury.js";
 import { isTier3JobId, tier3PatchWhenJobChanges } from "./tier3Jobs.js";
 
 /** Пропорциональный возврат ₽ за неиспользованное время текущей оплаченной аренды (для покупки квартиры и т.п.). */
-export function housingRentUnusedRefundRub(u: EconomyUser, nowMs: number = Date.now()): number {
+export function housingRentUnusedRefundRub(u: EconomyUser, nowMs: number = Date.now(), guildId?: string): number {
   if (u.housingKind !== "rent" || u.housingRentNextDueMs == null) return 0;
   const remainingMs = u.housingRentNextDueMs - nowMs;
   if (remainingMs <= 0) return 0;
@@ -35,7 +36,7 @@ export function housingRentUnusedRefundRub(u: EconomyUser, nowMs: number = Date.
   }
 
   const plan = u.housingRentPlan ?? "month";
-  const pr = housingRentPlanPriceRub(plan);
+  const pr = guildId ? inflatedHousingRentPrice(guildId, plan) : housingRentPlanPriceRub(plan);
   const pm = housingRentPlanPeriodMs(plan);
   if (pm <= 0) return 0;
   return Math.floor((pr * remainingMs) / pm);
@@ -69,7 +70,7 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
 
   if (u.housingKind === "rent" && u.housingRentNextDueMs != null && nowMs >= u.housingRentNextDueMs) {
     const plan: HousingRentPlan = u.housingRentRenewalPlan ?? u.housingRentPlan ?? "month";
-    const renewRub = housingRentPlanPriceRub(plan);
+    const renewRub = inflatedHousingRentPrice(guildId, plan);
     const renewMs = housingRentPlanPeriodMs(plan);
     if (u.rubles >= renewRub) {
       patchEconomyUser(guildId, userId, {
@@ -123,7 +124,7 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
 
   if (u.housingKind === "owned" && u.ownedApartmentId && u.housingUtilityNextDueMs != null && nowMs >= u.housingUtilityNextDueMs) {
     const apt = getApartmentDef(u.ownedApartmentId);
-    const util = apt?.monthlyUtilityRub ?? 0;
+    const util = inflatedApartmentUtilityRub(guildId, u.ownedApartmentId);
     if (util > 0 && u.rubles >= util) {
       patchEconomyUser(guildId, userId, {
         rubles: u.rubles - util,

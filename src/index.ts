@@ -1,4 +1,5 @@
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
+import { processAllGuildsMacroMonth } from "./economy/economyMacro.js";
 import { discordToken } from "./config.js";
 import { registerMemberJoin } from "./listeners/memberJoin.js";
 import { setOnTreasuryMutated } from "./economy/taxTreasury.js";
@@ -14,7 +15,9 @@ import {
   ensureEconomyTerminalPanel,
   handleEconomyButton,
   handleEconomyModal,
+  onEconomyTerminalPanelDeleted,
 } from "./economy/panel.js";
+import { scheduleLotteryDrawTick } from "./economy/lotteryDraw.js";
 import { scheduleEconomyMskMidnightTick } from "./economy/tier3Daily.js";
 import {
   ensureBetsHealth,
@@ -51,13 +54,32 @@ client.once(Events.ClientReady, async (c) => {
     void refreshNeuroPanelGuild(c, gid);
   });
   await ensureNeuroPanel(c);
+  await processAllGuildsMacroMonth(c);
   await ensureEconomyTerminalPanel(c);
   await ensureEconomyFeedPanel(c);
   await ensureBetsHealth(c);
   scheduleEconomyMskMidnightTick(c, async () => {
+    await processAllGuildsMacroMonth(c);
+    await ensureEconomyTerminalPanel(c);
     await ensureEconomyFeedPanel(c);
   });
+  scheduleLotteryDrawTick(c);
+  setInterval(
+    () => {
+      void ensureEconomyTerminalPanel(c);
+    },
+    60 * 60 * 1000,
+  );
   startTelegramSidecar(c);
+});
+
+client.on(Events.MessageDelete, async (msg) => {
+  try {
+    if (!msg.guildId || !msg.channelId) return;
+    await onEconomyTerminalPanelDeleted(msg.client, msg.channelId, msg.id);
+  } catch (e) {
+    console.error("terminal panel restore:", e);
+  }
 });
 
 registerMemberJoin(client);

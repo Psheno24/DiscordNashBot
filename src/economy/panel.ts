@@ -22,6 +22,7 @@ import { economyFeedChannelId, economyTerminalChannelId } from "../config.js";
 import { getVoiceSeconds } from "../voice/timeStore.js";
 import { appendFeedEvent, listFeedEvents } from "./feedStore.js";
 import {
+  clearEconomyTerminalPanelMessageId,
   getEconomyFeedPanelMessageId,
   getEconomyTerminalPanelMessageId,
   setEconomyFeedPanelMessageId,
@@ -62,6 +63,7 @@ import {
   APARTMENT_TRADE_IN_RATE_AFTER_MONTH,
   CAR_MODELS,
   CAR_TRADE_IN_RATE,
+  courierBikeRentPriceRub,
   COURIER_SIM_MONTHLY_FEE_RUB,
   COURIER_SIM_MONTHLY_PERIOD_MS,
   getApartmentDef,
@@ -104,6 +106,26 @@ import {
   tier12RankIncomeMult,
   tier12RankTitle,
 } from "./tier12Career.js";
+import {
+  buildMacroTerminalLines,
+  inflatedApartmentPurchaseCost,
+  inflatedApartmentUtilityRub,
+  inflatedCarPurchaseCost,
+  inflatedCatalogApartmentPrice,
+  inflatedCatalogCarPrice,
+  inflatedCatalogPhonePrice,
+  inflatedHousingRentPrice,
+  inflatedPhonePurchaseCost,
+  scalePositiveIncome,
+  scaleSignedIncome,
+  scaledShopPrice,
+} from "./economyMacro.js";
+import { lotteryPeriodMskYmd, msUntilNextLotteryDrawMsk } from "./lotteryDraw.js";
+import {
+  addLotteryTickets,
+  getLotteryState,
+  LOTTERY_TICKET_PRICE_RUB,
+} from "./lotteryStore.js";
 
 export const ECON_BUTTON_MENU = "econ:menu";
 export const ECON_BUTTON_PROFILE = "econ:profile";
@@ -135,6 +157,11 @@ const ECON_SHOP_APT_SELL = "econ:shop:apt:sell";
 const ECON_SHOP_SIM = "econ:shop:sim";
 const ECON_SHOP_SIM_NEW = "econ:shop:sim:new";
 const ECON_SHOP_SIM_TOPUP_OPEN = "econ:shop:sim:topupOpen";
+const ECON_SHOP_LOTTERY = "econ:shop:lottery";
+const ECON_SHOP_LOTTERY_BUY_OPEN = "econ:shop:lottery:buyOpen";
+const ECON_LOTTERY_CONFIRM_PREFIX = "econ:lottery:confirm:";
+const ECON_LOTTERY_CANCEL = "econ:lottery:cancel";
+const ECON_MODAL_LOTTERY_QTY = "modal:econ:lotteryQty";
 
 const ECON_COURIER_BIKE_1D = "econ:work:courierbike:1d";
 const ECON_COURIER_BIKE_3D = "econ:work:courierbike:3d";
@@ -204,9 +231,6 @@ const SHOP_SIM_START_BALANCE_RUB = 50;
 const BIKE_1D_MS = 1 * 86400000;
 const BIKE_3D_MS = 3 * 86400000;
 const BIKE_7D_MS = 7 * 86400000;
-const COURIER_BIKE_1D_RUB = 95;
-const COURIER_BIKE_3D_RUB = 250;
-const COURIER_BIKE_7D_RUB = 520;
 
 function fmt(n: number): string {
   if (!Number.isFinite(n)) return "—";
@@ -287,11 +311,20 @@ function buildTerminalPanelRows(member: GuildMember): ActionRowBuilder<ButtonBui
   ];
 }
 
-function buildTerminalPublicEmbed(guildName: string): EmbedBuilder {
+function buildTerminalPublicEmbed(guildId: string, guildName: string): EmbedBuilder {
+  const macro = buildMacroTerminalLines(guildId);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Терминал страны")
-    .setDescription(["Нажми кнопку ниже — откроется **твоё личное меню** управления."].join("\n"))
+    .setTitle("Нейроком")
+    .setDescription(
+      [
+        "**Нейроком** — да здравствует ИИ в общине советских граждан!",
+        "",
+        "Управляй своей жизнью в государстве, нажав на кнопку **«Мой профиль»** (видно только тебе).",
+        "",
+        ...macro,
+      ].join("\n"),
+    )
     .setFooter({ text: `Сервер: ${guildName}` });
 }
 
@@ -1057,7 +1090,7 @@ function tier3CareerEmbedLines(u: ReturnType<typeof getEconomyUser>, jobId: Tier
 }
 
 /** Уличный брокер: штраф и джекпот зависят от ранга (−1% штраф / +1% джекпот за ступень). */
-function rollStreetBrokerRub(rank: number): number {
+function rollStreetBrokerRub(guildId: string, rank: number): number {
   const fineP = Math.max(3, 8 - rank);
   const jackpotP = Math.min(10, 5 + rank);
   const midTotal = 100 - fineP - jackpotP;
@@ -1065,18 +1098,18 @@ function rollStreetBrokerRub(rank: number): number {
   const pNorm = midTotal * (40 / 87);
   const pGood = midTotal * (15 / 87);
   const r = Math.random() * 100;
-  if (r < fineP) return -10_000;
+  if (r < fineP) return scaleSignedIncome(guildId, -10_000);
   let x = r - fineP;
-  if (x < pBad) return randInt(2800, 3200);
+  if (x < pBad) return scaleSignedIncome(guildId, randInt(2800, 3200));
   x -= pBad;
-  if (x < pNorm) return randInt(10400, 11600);
+  if (x < pNorm) return scaleSignedIncome(guildId, randInt(10400, 11600));
   x -= pNorm;
-  if (x < pGood) return randInt(23800, 26200);
-  return randInt(52000, 58000);
+  if (x < pGood) return scaleSignedIncome(guildId, randInt(23800, 26200));
+  return scaleSignedIncome(guildId, randInt(52000, 58000));
 }
 
 /** Корпоративный брокер (рандом тир-2): ветки как в балансе v2. */
-function rollCorporateBrokerRub(rank: number): number {
+function rollCorporateBrokerRub(guildId: string, rank: number): number {
   const pFine = Math.max(3, 8 - rank);
   const pContract = Math.min(10, 4 + rank);
   const midTotal = 100 - pFine - pContract;
@@ -1084,14 +1117,14 @@ function rollCorporateBrokerRub(rank: number): number {
   const pNorm = midTotal * (42 / 88);
   const pBig = midTotal * (14 / 88);
   const r = Math.random() * 100;
-  if (r < pFine) return randInt(-38000, -32000);
+  if (r < pFine) return scaleSignedIncome(guildId, randInt(-38000, -32000));
   let x = r - pFine;
-  if (x < pWeak) return randInt(7200, 8800);
+  if (x < pWeak) return scaleSignedIncome(guildId, randInt(7200, 8800));
   x -= pWeak;
-  if (x < pNorm) return randInt(20500, 23500);
+  if (x < pNorm) return scaleSignedIncome(guildId, randInt(20500, 23500));
   x -= pNorm;
-  if (x < pBig) return randInt(51000, 59000);
-  return randInt(135000, 155000);
+  if (x < pBig) return scaleSignedIncome(guildId, randInt(51000, 59000));
+  return scaleSignedIncome(guildId, randInt(135000, 155000));
 }
 
 function formatDelta(n: number): string {
@@ -1112,10 +1145,10 @@ function solePropAdMaxRub(streakDays: number): number {
   return Math.min(SOLE_PROP_CAP_MAX, 125_000 + rank * 40_000);
 }
 
-function rubFromTier3MetaPercent(streakDays: number): number {
+function rubFromTier3MetaPercent(guildId: string, streakDays: number): number {
   const ref = tier3ReferencePassiveRubFromStreak(streakDays);
   const p = 0.1 + Math.random() * 0.2;
-  return Math.max(0, Math.floor(ref * p));
+  return scalePositiveIncome(guildId, Math.max(0, Math.floor(ref * p)));
 }
 
 function solePropAdvertOutcome(
@@ -1260,18 +1293,19 @@ function hasTier2PlusHousing(u: EconomyUser, now: number): boolean {
 }
 
 function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const u = getEconomyUser(gid, member.id);
   const simLine = u.hasPhone
     ? `• Симка${u.courierSimNumber ? " **(куплено)**" : ""} — первая **${SHOP_SIM_NEW_PRICE_RUB}** ₽ (+**${SHOP_SIM_START_BALANCE_RUB}** ₽ на баланс), замена **${SHOP_SIM_NEW_PRICE_RUB}** ₽`
     : `• Симка — сначала **телефон**`;
   const phoneHint = u.hasPhone
     ? `• Телефон — **${getPhoneDef(u.phoneModelId)?.label ?? "есть"}** (апгрейд в подменю)`
-    : "• Телефон — модели **от 5 000** ₽";
+    : `• Телефон — модели **от ${fmt(inflatedCatalogPhonePrice(gid, "phone_budget"))}** ₽`;
   const carLine = u.ownedCarId ? `• Авто — **${getCarDef(u.ownedCarId)?.label ?? "есть"}**` : "• Авто — **нет**";
   const hk = u.housingKind ?? "none";
   const houseLine =
     hk === "rent"
-      ? `• Жильё — **аренда** (от **${fmt(HOUSING_RENT_DAY_PKG_RUB)}** ₽/сут. до **${fmt(HOUSING_RENT_MONTH_PKG_RUB)}** ₽/30 сут.)`
+      ? `• Жильё — **аренда** (от **${fmt(inflatedHousingRentPrice(gid, "day"))}** ₽/сут. до **${fmt(inflatedHousingRentPrice(gid, "month"))}** ₽/30 сут.)`
       : hk === "owned"
         ? `• Жильё — **своя квартира** (${getApartmentDef(u.ownedApartmentId)?.label ?? "—"})`
         : "• Жильё — **нет**";
@@ -1283,6 +1317,7 @@ function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
     simLine,
     carLine,
     houseLine,
+    `• **Лотерейный билет** — **${fmt(LOTTERY_TICKET_PRICE_RUB)}** ₽ (цена **не** растёт от инфляции)`,
   ];
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
 }
@@ -1301,6 +1336,9 @@ function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[
       new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE).setLabel("Жильё").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY).setLabel("Лотерея").setStyle(ButtonStyle.Success),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
     ),
   ];
@@ -1315,7 +1353,10 @@ function buildShopPhoneEmbed(member: GuildMember): EmbedBuilder {
     "",
     `При **апгрейде** текущий телефон **выкупается** (**${Math.round(PHONE_TRADE_IN_RATE * 100)}%** цены), доплата — остаток стоимости новой модели. Престиж меняется на **дельту** моделей.`,
     "",
-    ...PHONE_MODELS.map((p) => `• **${p.label}** — **${fmt(p.priceRub)}** ₽ (+**${p.prestigeDelta}** престижа)`),
+    ...PHONE_MODELS.map(
+      (p) =>
+        `• **${p.label}** — **${fmt(inflatedCatalogPhonePrice(member.guild.id, p.id))}** ₽ (+**${p.prestigeDelta}** престижа)`,
+    ),
   ];
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Телефон").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
 }
@@ -1330,7 +1371,7 @@ function buildShopPhoneRows(member: GuildMember): ActionRowBuilder<ButtonBuilder
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((p) => {
-          const cost = shopPhonePurchaseCostRub(cur, p, Boolean(u.hasPhone));
+          const cost = inflatedPhonePurchaseCost(member.guild.id, cur, p, Boolean(u.hasPhone));
           const downgrade = Boolean(cur && p.priceRub < cur.priceRub);
           const disabled = downgrade || u.rubles < cost || (cur?.id === p.id && Boolean(u.hasPhone));
           return new ButtonBuilder()
@@ -1362,7 +1403,7 @@ function buildShopCarEmbed(member: GuildMember): EmbedBuilder {
     "",
     ...CAR_MODELS.map(
       (c) =>
-        `• **${c.label}** — **${fmt(c.priceRub)}** ₽ (+**${fmt(c.prestigeDelta)}** пр.) · КД доставки **${(c.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч`,
+        `• **${c.label}** — **${fmt(inflatedCatalogCarPrice(member.guild.id, c.id))}** ₽ (+**${fmt(c.prestigeDelta)}** пр.) · КД доставки **${(c.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч`,
     ),
   ];
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Авто").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
@@ -1377,8 +1418,8 @@ function buildShopCarRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((c) => {
-          const cost = shopCarPurchaseCostRub(cur, c);
-          const downgrade = Boolean(cur && c.priceRub < cur.priceRub);
+          const cost = inflatedCarPurchaseCost(member.guild.id, cur, c);
+          const downgrade = Boolean(cur && inflatedCatalogCarPrice(member.guild.id, c.id) < inflatedCatalogCarPrice(member.guild.id, cur.id));
           const disabled = downgrade || u.rubles < cost || (cur?.id === c.id && Boolean(u.ownedCarId));
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_CAR_BUY_PREFIX}${c.id}`)
@@ -1404,7 +1445,7 @@ function applyRentPlanPurchase(member: GuildMember, plan: HousingRentPlan): { ok
   const u = getEconomyUser(member.guild.id, member.id);
   const hk = u.housingKind ?? "none";
   if (hk === "owned") return { ok: false, reply: "У вас **своя квартира** — аренда недоступна." };
-  const price = housingRentPlanPriceRub(plan);
+  const price = inflatedHousingRentPrice(member.guild.id, plan);
   const periodMs = housingRentPlanPeriodMs(plan);
   if (u.rubles < price) return { ok: false, reply: `Нужно **${fmt(price)}** ₽.` };
   const now = Date.now();
@@ -1443,7 +1484,8 @@ async function replyAfterRentPlanPurchase(
 
 /** Главный экран «Жильё» в меню терминала — только для аренды. */
 function buildMyRentHomeEmbed(member: GuildMember): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const u = getEconomyUser(gid, member.id);
   const now = Date.now();
   const due = u.housingRentNextDueMs;
   const dueLine =
@@ -1453,14 +1495,14 @@ function buildMyRentHomeEmbed(member: GuildMember): EmbedBuilder {
         ? `Срок по данным: <t:${Math.floor(due / 1000)}:F> — **продлите** в магазине или здесь (**Изменить срок**).`
         : "Срок окончания **не задан** — оформите аренду в **Магазин** → жильё.";
   const curPlan = u.housingRentPlan ?? "month";
-  const curRub = housingRentPlanPriceRub(curPlan);
+  const curRub = inflatedHousingRentPrice(gid, curPlan);
   const renewLine =
     u.housingRentRenewalPlan != null
-      ? `После окончания текущего срока **первое** автосписание **в начале следующего календарного дня**: **${rentPlanLabelRu(u.housingRentRenewalPlan)}** (**${fmt(housingRentPlanPriceRub(u.housingRentRenewalPlan))}** ₽).`
+      ? `После окончания текущего срока **первое** автосписание **в начале следующего календарного дня**: **${rentPlanLabelRu(u.housingRentRenewalPlan)}** (**${fmt(inflatedHousingRentPrice(gid, u.housingRentRenewalPlan))}** ₽).`
       : `Пакет на **следующий** цикл после текущего срока **не выбран** — **в начале дня** спишется пакет **текущего** цикла: **${rentPlanLabelRu(curPlan)}** (**${fmt(curRub)}** ₽).`;
   const refundLine =
     due != null && now < due
-      ? `Если купите квартиру в магазине, на счёт вернётся **≈ ${fmt(housingRentUnusedRefundRub(u, now))}** ₽ за неиспользованное время.`
+      ? `Если купите квартиру в магазине, на счёт вернётся **≈ ${fmt(housingRentUnusedRefundRub(u, now, gid))}** ₽ за неиспользованное время.`
       : "";
   const lines = [
     "**Статус:** снимаете жильё (**аренда**).",
@@ -1520,24 +1562,28 @@ function buildMyRentEditEmbed(member: GuildMember): EmbedBuilder {
 }
 
 function buildMyRentEditRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
-  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const u = getEconomyUser(gid, member.id);
+  const rentDay = inflatedHousingRentPrice(gid, "day");
+  const rentWeek = inflatedHousingRentPrice(gid, "week");
+  const rentMonth = inflatedHousingRentPrice(gid, "month");
   const rows: ActionRowBuilder<ButtonBuilder>[] = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${ECON_HOUSING_EXT_PREFIX}day`)
-        .setLabel(`+1 сут. (${fmt(HOUSING_RENT_DAY_PKG_RUB)} ₽)`)
+        .setLabel(`+1 сут. (${fmt(rentDay)} ₽)`)
         .setStyle(ButtonStyle.Primary)
-        .setDisabled(u.rubles < HOUSING_RENT_DAY_PKG_RUB),
+        .setDisabled(u.rubles < rentDay),
       new ButtonBuilder()
         .setCustomId(`${ECON_HOUSING_EXT_PREFIX}week`)
-        .setLabel(`+7 сут. (${fmt(HOUSING_RENT_WEEK_PKG_RUB)} ₽)`)
+        .setLabel(`+7 сут. (${fmt(rentWeek)} ₽)`)
         .setStyle(ButtonStyle.Primary)
-        .setDisabled(u.rubles < HOUSING_RENT_WEEK_PKG_RUB),
+        .setDisabled(u.rubles < rentWeek),
       new ButtonBuilder()
         .setCustomId(`${ECON_HOUSING_EXT_PREFIX}month`)
-        .setLabel(`+30 сут. (${fmt(HOUSING_RENT_MONTH_PKG_RUB)} ₽)`)
+        .setLabel(`+30 сут. (${fmt(rentMonth)} ₽)`)
         .setStyle(ButtonStyle.Success)
-        .setDisabled(u.rubles < HOUSING_RENT_MONTH_PKG_RUB),
+        .setDisabled(u.rubles < rentMonth),
     ),
   ];
   const nowR = Date.now();
@@ -1569,7 +1615,8 @@ function buildMyRentEditRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
 }
 
 function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const u = getEconomyUser(gid, member.id);
   const hk = u.housingKind ?? "none";
   const lines: string[] = [
     "Баланс: **" + fmt(u.rubles) + "** \u20bd, престиж **" + fmt(u.prestigePoints ?? 0) + "**",
@@ -1601,9 +1648,9 @@ function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
   } else {
     lines.push(
       "**Снять жильё в аренду** - выберите пакет ниже:",
-      "- **30 суток** - **" + fmt(HOUSING_RENT_MONTH_PKG_RUB) + "** \u20bd",
-      "- **7 суток** - **" + fmt(HOUSING_RENT_WEEK_PKG_RUB) + "** \u20bd",
-      "- **1 сутки** - **" + fmt(HOUSING_RENT_DAY_PKG_RUB) + "** \u20bd",
+      "- **30 суток** - **" + fmt(inflatedHousingRentPrice(gid, "month")) + "** \u20bd",
+      "- **7 суток** - **" + fmt(inflatedHousingRentPrice(gid, "week")) + "** \u20bd",
+      "- **1 сутки** - **" + fmt(inflatedHousingRentPrice(gid, "day")) + "** \u20bd",
       "",
       "При **первом** заселении: **+" + String(HOUSING_RENT_PRESTIGE_ONE_TIME) + "** престижа (снимается при съезде).",
       "",
@@ -1616,9 +1663,9 @@ function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
       "- **" +
         a.label +
         "** - **" +
-        fmt(a.priceRub) +
+        fmt(inflatedCatalogApartmentPrice(gid, a.id)) +
         "** \u20bd, коммуналка **" +
-        fmt(a.monthlyUtilityRub) +
+        fmt(inflatedApartmentUtilityRub(gid, a.id)) +
         "** / мес, +**" +
         fmt(a.prestigeDelta) +
         "** пр.",
@@ -1632,27 +1679,31 @@ function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
 }
 
 function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
-  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const u = getEconomyUser(gid, member.id);
   const hk = u.housingKind ?? "none";
+  const rentDay = inflatedHousingRentPrice(gid, "day");
+  const rentWeek = inflatedHousingRentPrice(gid, "week");
+  const rentMonth = inflatedHousingRentPrice(gid, "month");
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   if (hk === "rent") {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_HOUSE_RENT_1D)
-          .setLabel(`+1 сут. (${fmt(HOUSING_RENT_DAY_PKG_RUB)} ₽)`)
+          .setLabel(`+1 сут. (${fmt(rentDay)} ₽)`)
           .setStyle(ButtonStyle.Primary)
-          .setDisabled(u.rubles < HOUSING_RENT_DAY_PKG_RUB),
+          .setDisabled(u.rubles < rentDay),
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_HOUSE_RENT_7D)
-          .setLabel(`+7 сут. (${fmt(HOUSING_RENT_WEEK_PKG_RUB)} ₽)`)
+          .setLabel(`+7 сут. (${fmt(rentWeek)} ₽)`)
           .setStyle(ButtonStyle.Primary)
-          .setDisabled(u.rubles < HOUSING_RENT_WEEK_PKG_RUB),
+          .setDisabled(u.rubles < rentWeek),
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_HOUSE_RENT_30D)
-          .setLabel(`+30 сут. (${fmt(HOUSING_RENT_MONTH_PKG_RUB)} ₽)`)
+          .setLabel(`+30 сут. (${fmt(rentMonth)} ₽)`)
           .setStyle(ButtonStyle.Success)
-          .setDisabled(u.rubles < HOUSING_RENT_MONTH_PKG_RUB),
+          .setDisabled(u.rubles < rentMonth),
       ),
     );
   } else if (hk !== "owned") {
@@ -1660,28 +1711,28 @@ function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_HOUSE_RENT_1D)
-          .setLabel(`Снять 1 сут. (${fmt(HOUSING_RENT_DAY_PKG_RUB)} ₽)`)
+          .setLabel(`Снять 1 сут. (${fmt(rentDay)} ₽)`)
           .setStyle(ButtonStyle.Secondary)
-          .setDisabled(u.rubles < HOUSING_RENT_DAY_PKG_RUB),
+          .setDisabled(u.rubles < rentDay),
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_HOUSE_RENT_7D)
-          .setLabel(`Снять 7 сут. (${fmt(HOUSING_RENT_WEEK_PKG_RUB)} ₽)`)
+          .setLabel(`Снять 7 сут. (${fmt(rentWeek)} ₽)`)
           .setStyle(ButtonStyle.Primary)
-          .setDisabled(u.rubles < HOUSING_RENT_WEEK_PKG_RUB),
+          .setDisabled(u.rubles < rentWeek),
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_HOUSE_RENT_30D)
-          .setLabel(`Снять 30 сут. (${fmt(HOUSING_RENT_MONTH_PKG_RUB)} ₽)`)
+          .setLabel(`Снять 30 сут. (${fmt(rentMonth)} ₽)`)
           .setStyle(ButtonStyle.Success)
-          .setDisabled(u.rubles < HOUSING_RENT_MONTH_PKG_RUB),
+          .setDisabled(u.rubles < rentMonth),
       ),
     );
   }
   const curApt = getApartmentDef(u.ownedApartmentId);
   const nowApt = Date.now();
-  const rentRef = hk === "rent" ? housingRentUnusedRefundRub(u, nowApt) : 0;
+  const rentRef = hk === "rent" ? housingRentUnusedRefundRub(u, nowApt, gid) : 0;
   const aptPurchasedAt = hk === "owned" ? u.ownedApartmentPurchasedAtMs : undefined;
   if (hk === "owned" && curApt) {
-    const refund = Math.floor(curApt.priceRub * APARTMENT_SELL_REFUND_RATE);
+    const refund = Math.floor(inflatedCatalogApartmentPrice(gid, curApt.id) * APARTMENT_SELL_REFUND_RATE);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
@@ -1698,9 +1749,13 @@ function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder
         ...slice.map((a) => {
           const cost =
             hk === "owned" && curApt
-              ? shopApartmentPurchaseCostRub(curApt, a, aptPurchasedAt, nowApt)
-              : a.priceRub;
-          const downgrade = Boolean(hk === "owned" && curApt && a.priceRub < curApt.priceRub);
+              ? inflatedApartmentPurchaseCost(gid, curApt, a, aptPurchasedAt, nowApt)
+              : inflatedCatalogApartmentPrice(gid, a.id);
+          const downgrade = Boolean(
+            hk === "owned" &&
+              curApt &&
+              inflatedCatalogApartmentPrice(gid, a.id) < inflatedCatalogApartmentPrice(gid, curApt.id),
+          );
           const disabled = downgrade || u.rubles + rentRef < cost || (hk === "owned" && curApt?.id === a.id);
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_APT_BUY_PREFIX}${a.id}`)
@@ -1767,25 +1822,105 @@ function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[
   ];
 }
 
+function lotteryDrawUnixTs(nowMs: number = Date.now()): number {
+  const period = lotteryPeriodMskYmd(nowMs);
+  return Math.floor(Date.parse(`${period}T21:00:00+03:00`) / 1000);
+}
+
+function buildShopLotteryEmbed(member: GuildMember): EmbedBuilder {
+  const gid = member.guild.id;
+  const period = lotteryPeriodMskYmd();
+  const st = getLotteryState(gid, period);
+  const drawTs = lotteryDrawUnixTs();
+  const lines = [
+    "**Лотерейный билет** — **1 000** ₽ (цена **фиксирована**, инфляция **не** действует).",
+    "",
+    "**Шансы на каждый купленный билет** (розыгрыш **один раз** за период):",
+    "• **25%** — вернуть **полную** стоимость билета",
+    "• **50%** — вернуть **половину** стоимости билета",
+    "• **15%** — **10%** от джекпота (**только 1** билет за период среди всех игроков)",
+    "• **8%** — **50%** от джекпота (**только 1** билет)",
+    "• **2%** — **весь** джекпот (**только 1** билет)",
+    "",
+    `**Джекпот:** **${fmt(st.jackpotRub)}** ₽ (минимум **100 000** ₽)`,
+    `**Билетов в текущем периоде:** **${st.ticketsSold}**`,
+    "",
+    `**Розыгрыш:** <t:${drawTs}:F> (<t:${drawTs}:R>) · **21:00** МСК`,
+  ];
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Лотерея").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildShopLotteryRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY_BUY_OPEN).setLabel("Купить").setStyle(ButtonStyle.Primary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_HUB).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+function buildLotteryConfirmEmbed(member: GuildMember, qty: number): EmbedBuilder {
+  const total = qty * LOTTERY_TICKET_PRICE_RUB;
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Подтверждение покупки")
+    .setDescription(
+      [
+        `Купить лотерейных билетов: **${qty}**`,
+        `Сумма: **${fmt(total)}** ₽`,
+        "",
+        "Средства спишутся с **личного счёта** и пополнят **джекпот**.",
+      ].join("\n"),
+    )
+    .setFooter({ text: member.user.tag });
+}
+
+function buildLotteryConfirmRows(qty: number): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_LOTTERY_CONFIRM_PREFIX}${qty}`)
+        .setLabel("Купить")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(ECON_LOTTERY_CANCEL).setLabel("Отменить").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+function parseLotteryQtyInput(raw: string): number | undefined {
+  const s = raw.trim().replace(/\s/g, "");
+  if (!/^\d+$/.test(s)) return undefined;
+  const n = Number.parseInt(s, 10);
+  if (!Number.isFinite(n) || n < 1 || n > 500) return undefined;
+  return n;
+}
+
 function buildCourierBikeRow(member: GuildMember): ActionRowBuilder<ButtonBuilder> {
-  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const u = getEconomyUser(gid, member.id);
   const r = u.rubles;
+  const p1 = scaledShopPrice(gid, courierBikeRentPriceRub(1));
+  const p3 = scaledShopPrice(gid, courierBikeRentPriceRub(3));
+  const p7 = scaledShopPrice(gid, courierBikeRentPriceRub(7));
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(ECON_COURIER_BIKE_1D)
-      .setLabel(`Вел 1д (${COURIER_BIKE_1D_RUB} ₽)`)
+      .setLabel(`Вел 1д (${fmt(p1)} ₽)`)
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(r < COURIER_BIKE_1D_RUB),
+      .setDisabled(r < p1),
     new ButtonBuilder()
       .setCustomId(ECON_COURIER_BIKE_3D)
-      .setLabel(`Вел 3д (${COURIER_BIKE_3D_RUB} ₽)`)
+      .setLabel(`Вел 3д (${fmt(p3)} ₽)`)
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(r < COURIER_BIKE_3D_RUB),
+      .setDisabled(r < p3),
     new ButtonBuilder()
       .setCustomId(ECON_COURIER_BIKE_7D)
-      .setLabel(`Вел 7д (${COURIER_BIKE_7D_RUB} ₽)`)
+      .setLabel(`Вел 7д (${fmt(p7)} ₽)`)
       .setStyle(ButtonStyle.Secondary)
-      .setDisabled(r < COURIER_BIKE_7D_RUB),
+      .setDisabled(r < p7),
   );
 }
 
@@ -2725,6 +2860,14 @@ function buildFeedArchiveEmbed(guildId: string, page: number): { embed: EmbedBui
   return { embed, totalPages };
 }
 
+export async function onEconomyTerminalPanelDeleted(client: Client, channelId: string, messageId: string): Promise<void> {
+  const stored = getEconomyTerminalPanelMessageId(channelId);
+  if (stored && stored === messageId) {
+    clearEconomyTerminalPanelMessageId(channelId);
+    await ensureEconomyTerminalPanel(client);
+  }
+}
+
 export async function ensureEconomyTerminalPanel(client: Client) {
   for (const guild of client.guilds.cache.values()) {
     const chId = economyTerminalChannelId(guild.id);
@@ -2734,7 +2877,7 @@ export async function ensureEconomyTerminalPanel(client: Client) {
     if (!ch?.isTextBased() || ch.isDMBased()) continue;
     if (!ch.isSendable()) continue;
 
-    const payload = { embeds: [buildTerminalPublicEmbed(ch.guild.name)], components: buildTerminalPublicRows() };
+    const payload = { embeds: [buildTerminalPublicEmbed(ch.guild.id, ch.guild.name)], components: buildTerminalPublicRows() };
 
     const storedId = getEconomyTerminalPanelMessageId(chId);
     if (storedId) {
@@ -2856,6 +2999,9 @@ function isEconomyButton(id: string): boolean {
       ECON_SHOP_SIM,
       ECON_SHOP_SIM_NEW,
       ECON_SHOP_SIM_TOPUP_OPEN,
+      ECON_SHOP_LOTTERY,
+      ECON_SHOP_LOTTERY_BUY_OPEN,
+      ECON_LOTTERY_CANCEL,
       ECON_SHOP_APT_SELL,
       ECON_COURIER_BIKE_1D,
       ECON_COURIER_BIKE_3D,
@@ -2957,38 +3103,40 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
   const rankAfterT12 = isTier12JobId(jobId) ? tier12RankFromShifts(expAfter, def.baseCooldownMs) : 0;
 
   if (jobId === "courier") {
-    base = randInt(6_500, 8_000);
+    base = scaleSignedIncome(guildId, randInt(6_500, 8_000));
   } else if (jobId === "waiter") {
     base = 0;
-    extra = rollStreetBrokerRub(rankAfterT12);
+    extra = rollStreetBrokerRub(guildId, rankAfterT12);
     notes.push(`уличный брокер (до ранга): **${formatDelta(extra)}** ₽`);
   } else if (jobId === "watchman") {
-    base = randInt(11_000, 13_000);
+    base = scaleSignedIncome(guildId, randInt(11_000, 13_000));
   } else if (jobId === "dispatcher") {
-    base = randInt(26_000, 30_000);
+    base = scaleSignedIncome(guildId, randInt(26_000, 30_000));
   } else if (jobId === "assembler") {
-    base = randInt(15_000, 18_000);
+    base = scaleSignedIncome(guildId, randInt(15_000, 18_000));
     if (chance(0.03)) {
-      const fine = randInt(4_500, 6_500);
-      extra -= fine;
-      notes.push(`штраф ${formatDelta(-fine)}`);
+      const fine = scaleSignedIncome(guildId, -randInt(4_500, 6_500));
+      extra += fine;
+      notes.push(`штраф ${formatDelta(fine)}`);
     }
     if (expAfter % 7 === 0) {
-      extra += ASSEMBLER_7TH_BONUS_RUB;
-      notes.push(`премия ${formatDelta(ASSEMBLER_7TH_BONUS_RUB)} (7 смен)`);
+      const bonus = scaleSignedIncome(guildId, ASSEMBLER_7TH_BONUS_RUB);
+      extra += bonus;
+      notes.push(`премия ${formatDelta(bonus)} (7 смен)`);
     }
   } else if (jobId === "expediter") {
     base = 0;
-    extra = rollCorporateBrokerRub(rankAfterT12);
+    extra = rollCorporateBrokerRub(guildId, rankAfterT12);
     notes.push(`корп. брокер (до ранга): **${formatDelta(extra)}** ₽`);
   } else if (jobId === "officeAnalyst") {
     const pr = tier3PromotionRank(u.jobMskDayStreak ?? 0);
     const streak = u.jobMskDayStreak ?? 0;
-    base = randInt(45_000, 55_000) + pr * 1_000 + Math.min(500, Math.floor(streak / 5) * 40);
+    const officeRaw = randInt(45_000, 55_000) + pr * 1_000 + Math.min(500, Math.floor(streak / 5) * 40);
+    base = scaleSignedIncome(guildId, officeRaw);
     if (chance(0.03)) {
-      const fine = randInt(12_000, 22_000);
-      extra -= fine;
-      notes.push(`штраф ${formatDelta(-fine)}`);
+      const fine = scaleSignedIncome(guildId, -randInt(12_000, 22_000));
+      extra += fine;
+      notes.push(`штраф ${formatDelta(fine)}`);
     }
   } else if (jobId === "shadowFixer") {
     base = 0;
@@ -2997,22 +3145,22 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     const posBoost = 1 + pr * 0.025 + Math.min(0.15, streak * 0.002);
     const r = Math.random() * 100;
     if (r < 10) {
-      extra = -150_000;
+      extra = scaleSignedIncome(guildId, -150_000);
       notes.push(`облава / потери **${formatDelta(extra)}**`);
     } else if (r < 32) {
-      extra = -40_000;
+      extra = scaleSignedIncome(guildId, -40_000);
       notes.push(`срыв цепочки **${formatDelta(extra)}**`);
     } else if (r < 64) {
-      extra = Math.floor(40_000 * posBoost);
+      extra = scaleSignedIncome(guildId, Math.floor(40_000 * posBoost));
       notes.push(`средний поток **${formatDelta(extra)}**`);
     } else if (r < 88) {
-      extra = Math.floor(130_000 * posBoost);
+      extra = scaleSignedIncome(guildId, Math.floor(130_000 * posBoost));
       notes.push(`крупная сделка **${formatDelta(extra)}**`);
     } else if (r < 97) {
-      extra = Math.floor(400_000 * posBoost);
+      extra = scaleSignedIncome(guildId, Math.floor(400_000 * posBoost));
       notes.push(`очень крупно **${formatDelta(extra)}**`);
     } else {
-      extra = Math.floor(1_200_000 * posBoost);
+      extra = scaleSignedIncome(guildId, Math.floor(1_200_000 * posBoost));
       notes.push(`легендарный куш **${formatDelta(extra)}**`);
     }
   }
@@ -3239,6 +3387,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     cid.startsWith(ECON_WORK_BUTTON_JOB_DETAIL_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_JOB_DETAIL_CLOSE_PREFIX) ||
     cid.startsWith("econ:shop") ||
+    cid.startsWith(ECON_LOTTERY_CONFIRM_PREFIX) ||
     cid.startsWith("econ:housing:") ||
     cid.startsWith(ECON_SKILL_BUTTON_PREFIX) ||
     cid.startsWith("econ:tg:");
@@ -3446,9 +3595,12 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     const u = getEconomyUser(member.guild.id, member.id);
     const cur = getPhoneDef(u.phoneModelId);
-    const cost = shopPhonePurchaseCostRub(cur, defP, Boolean(u.hasPhone));
+    const cost = inflatedPhonePurchaseCost(member.guild.id, cur, defP, Boolean(u.hasPhone));
     const prestigeDelta = defP.prestigeDelta - (cur?.prestigeDelta ?? 0);
-    if (cur && defP.priceRub < cur.priceRub) {
+    if (
+      cur &&
+      inflatedCatalogPhonePrice(member.guild.id, defP.id) < inflatedCatalogPhonePrice(member.guild.id, cur.id)
+    ) {
       await interaction.reply({ content: "Понижение модели **недоступно**.", flags: MessageFlags.Ephemeral });
       return true;
     }
@@ -3485,9 +3637,12 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     const u = getEconomyUser(member.guild.id, member.id);
     const cur = getCarDef(u.ownedCarId);
-    const cost = shopCarPurchaseCostRub(cur, defC);
+    const cost = inflatedCarPurchaseCost(member.guild.id, cur, defC);
     const prestigeDelta = defC.prestigeDelta - (cur?.prestigeDelta ?? 0);
-    if (cur && defC.priceRub < cur.priceRub) {
+    if (
+      cur &&
+      inflatedCatalogCarPrice(member.guild.id, defC.id) < inflatedCatalogCarPrice(member.guild.id, cur.id)
+    ) {
       await interaction.reply({ content: "Понижение класса **недоступно**.", flags: MessageFlags.Ephemeral });
       return true;
     }
@@ -3596,7 +3751,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       });
       return true;
     }
-    const priceN = housingRentPlanPriceRub(planNext);
+    const priceN = inflatedHousingRentPrice(member.guild.id, planNext);
     const embedR = new EmbedBuilder()
       .setColor(PANEL_COLOR)
       .setTitle("Пакет на следующий цикл")
@@ -3648,7 +3803,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     patchEconomyUser(member.guild.id, member.id, { housingRentRenewalPlan: planNext });
-    const priceC = housingRentPlanPriceRub(planNext);
+    const priceC = inflatedHousingRentPrice(member.guild.id, planNext);
     const doneEmb = new EmbedBuilder()
       .setColor(PANEL_COLOR)
       .setTitle("Сохранено")
@@ -3679,16 +3834,21 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const hk = u.housingKind ?? "none";
     const curA = getApartmentDef(u.ownedApartmentId);
     const now = Date.now();
+    const gidA = member.guild.id;
     const cost =
       hk === "owned" && curA
-        ? shopApartmentPurchaseCostRub(curA, defA, u.ownedApartmentPurchasedAtMs, now)
-        : defA.priceRub;
+        ? inflatedApartmentPurchaseCost(gidA, curA, defA, u.ownedApartmentPurchasedAtMs, now)
+        : inflatedCatalogApartmentPrice(gidA, defA.id);
     const prestigeDelta = defA.prestigeDelta - (curA?.prestigeDelta ?? 0);
-    if (hk === "owned" && curA && defA.priceRub < curA.priceRub) {
+    if (
+      hk === "owned" &&
+      curA &&
+      inflatedCatalogApartmentPrice(gidA, defA.id) < inflatedCatalogApartmentPrice(gidA, curA.id)
+    ) {
       await interaction.reply({ content: "Переезд на более дешёвую квартиру **недоступен**.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    const rentRefund = hk === "rent" ? housingRentUnusedRefundRub(u, now) : 0;
+    const rentRefund = hk === "rent" ? housingRentUnusedRefundRub(u, now, gidA) : 0;
     if (u.rubles + rentRefund < cost) {
       await interaction.reply({
         content: `Нужно ещё **${fmt(Math.max(0, cost - rentRefund))}** ₽ (с учётом возврата с аренды **${fmt(rentRefund)}** ₽).`,
@@ -3742,7 +3902,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await interaction.reply({ content: "Квартира не найдена в данных.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    const refund = Math.floor(curA.priceRub * APARTMENT_SELL_REFUND_RATE);
+    const refund = Math.floor(inflatedCatalogApartmentPrice(member.guild.id, curA.id) * APARTMENT_SELL_REFUND_RATE);
     const nextPrestige = Math.max(0, (u.prestigePoints ?? 0) - curA.prestigeDelta);
     const quitJob = economyUserClearTier2PlusJobPatch(u);
     patchEconomyUser(member.guild.id, member.id, {
@@ -3763,6 +3923,61 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     });
     await ensureEconomyFeedPanel(interaction.client);
     await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_LOTTERY) {
+    await replyOrUpdate(interaction, { embeds: [buildShopLotteryEmbed(member)], components: buildShopLotteryRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_LOTTERY_BUY_OPEN) {
+    const modal = new ModalBuilder().setCustomId(ECON_MODAL_LOTTERY_QTY).setTitle("Купить лотерейные билеты");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("qty")
+          .setLabel("Количество (только цифры, 1–500)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(4)
+          .setPlaceholder("1"),
+      ),
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (id.startsWith(ECON_LOTTERY_CONFIRM_PREFIX)) {
+    const qty = Number.parseInt(id.slice(ECON_LOTTERY_CONFIRM_PREFIX.length), 10);
+    if (!Number.isFinite(qty) || qty < 1) {
+      await interaction.reply({ content: "Некорректное количество.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const total = qty * LOTTERY_TICKET_PRICE_RUB;
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (u.rubles < total) {
+      await interaction.reply({ content: `Нужно **${fmt(total)}** ₽.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    patchEconomyUser(member.guild.id, member.id, { rubles: u.rubles - total });
+    remitShopPurchaseVatToTreasury(member.guild.id, total);
+    const period = lotteryPeriodMskYmd();
+    addLotteryTickets(member.guild.id, period, member.id, qty);
+    appendFeedEvent({
+      ts: Date.now(),
+      guildId: member.guild.id,
+      type: "job:shift",
+      actorUserId: member.id,
+      text: `${member.toString()} купил лотерейных билетов: **${qty}** × **${LOTTERY_TICKET_PRICE_RUB.toLocaleString("ru-RU")}** ₽`,
+    });
+    await ensureEconomyFeedPanel(interaction.client);
+    await interaction.update({ embeds: [buildShopLotteryEmbed(member)], components: buildShopLotteryRows(member) });
+    return true;
+  }
+
+  if (id === ECON_LOTTERY_CANCEL) {
+    await replyOrUpdate(interaction, { embeds: [buildShopLotteryEmbed(member)], components: buildShopLotteryRows(member) });
     return true;
   }
 
@@ -3845,13 +4060,15 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     const ms = id === ECON_COURIER_BIKE_1D ? BIKE_1D_MS : id === ECON_COURIER_BIKE_3D ? BIKE_3D_MS : BIKE_7D_MS;
-    const price = id === ECON_COURIER_BIKE_1D ? COURIER_BIKE_1D_RUB : id === ECON_COURIER_BIKE_3D ? COURIER_BIKE_3D_RUB : COURIER_BIKE_7D_RUB;
+    const bikeDays: 1 | 3 | 7 = id === ECON_COURIER_BIKE_1D ? 1 : id === ECON_COURIER_BIKE_3D ? 3 : 7;
+    const price = scaledShopPrice(member.guild.id, courierBikeRentPriceRub(bikeDays));
     if (u.rubles < price) {
       await interaction.reply({ content: `Нужно **${price} ₽**.`, flags: MessageFlags.Ephemeral });
       return true;
     }
     const nextUntil = extendBikeRentalMs(u.courierBikeUntilMs, now, ms);
     patchEconomyUser(member.guild.id, member.id, { rubles: u.rubles - price, courierBikeUntilMs: nextUntil });
+    remitShopPurchaseVatToTreasury(member.guild.id, price);
     const refreshed = courierWorkRefreshPayload(member, interaction);
     await updateButtonParentMessage(interaction, refreshed);
     return true;
@@ -4002,7 +4219,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         return true;
       }
       const streak = u.jobMskDayStreak ?? 0;
-      const bonus = rubFromTier3MetaPercent(streak);
+      const bonus = rubFromTier3MetaPercent(member.guild.id, streak);
       const gid = member.guild.id;
       let netRub = bonus;
       let taxRub = 0;
@@ -4034,7 +4251,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       }
       if (def3.archetype === "legal") {
         const streak = u.jobMskDayStreak ?? 0;
-        const bonus = rubFromTier3MetaPercent(streak);
+        const bonus = rubFromTier3MetaPercent(member.guild.id, streak);
         const gid = member.guild.id;
         const { netRub, taxRub } = withholdLegalIncomeTax(gid, bonus);
         patchEconomyUser(member.guild.id, member.id, {
@@ -4370,6 +4587,32 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
 export async function handleEconomyModal(interaction: ModalSubmitInteraction): Promise<boolean> {
   const modalId = interaction.customId;
+
+  if (modalId === ECON_MODAL_LOTTERY_QTY) {
+    if (!interaction.inGuild() || !interaction.guildId || !interaction.member) {
+      await interaction.reply({ content: "Эта форма работает только на сервере.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const mem = interaction.member as GuildMember;
+    if (mem.user.bot) {
+      await interaction.reply({ content: "Ботам экономика не положена.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const qty = parseLotteryQtyInput(interaction.fields.getTextInputValue("qty"));
+    if (qty == null) {
+      await interaction.reply({
+        content: "Введите **целое число** от **1** до **500** (только цифры).",
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    await interaction.reply({
+      embeds: [buildLotteryConfirmEmbed(mem, qty)],
+      components: buildLotteryConfirmRows(qty),
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
 
   if (modalId === ECON_MODAL_SIM_TOPUP) {
     if (!interaction.inGuild() || !interaction.guildId || !interaction.member) {

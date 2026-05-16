@@ -10,12 +10,30 @@ export interface GuildConfig {
   treasuryRubles?: number;
   /** Подоходный налог с легальных начислений на личный счёт, % (0–100). */
   legalIncomeTaxPercent?: number;
+  /** НДС с покупок в магазине, % (0–100), включён в цену. */
+  shopVatPercent?: number;
   /** Комиссия при выводе с баланса ИП на личный счёт, % (0–100). */
   solePropWithdrawFeePercent?: number;
   /** Еженедельный налог с баланса бизнеса ИП (календарный понедельник), % (0–100). */
   solePropWeeklyCapitalTaxPercent?: number;
   /** Календарная дата (YYYY-MM-DD), когда уже начисляли еженедельный налог ИП. */
   solePropWeeklyTaxLastMskYmd?: string;
+  /** Индексация зарплат за квартал, % (применяется в янв/апр/июл/окт). */
+  salaryIndexingPercent?: number;
+  /** Накопленный множитель доходов от индексаций (старт 1). */
+  salaryIncomeMultiplier?: number;
+  /** Накопленный множитель цен магазина от инфляции (старт 1). */
+  shopPriceMultiplier?: number;
+  /** Последняя применённая месячная инфляция, %. */
+  lastMonthInflationPercent?: number;
+  /** YYYY-MM — последний обработанный макро-месяц. */
+  lastMacroMonthYm?: string;
+  /** YYYY-MM — последняя индексация зарплат. */
+  lastSalaryIndexingYm?: string;
+  /** Ключ квартала для накопления инфляции (например 2026-Q2). */
+  macroQuarterKey?: string;
+  /** Сумма инфляции за текущий макро-квартал, %. */
+  macroQuarterInflationAccumPercent?: number;
 }
 
 interface StoreShape {

@@ -16,17 +16,29 @@ import {
 } from "discord.js";
 import { getGuildConfig, patchGuildConfig } from "../guildConfig/store.js";
 import {
+  getSalaryIndexingPercentSetting,
+  getSalaryIncomeMultiplier,
+  getShopPriceMultiplier,
+} from "../economy/economyMacro.js";
+import {
   getLegalIncomeTaxPercent,
+  getShopVatPercent,
   getSolePropWeeklyCapitalTaxPercent,
   getSolePropWithdrawFeePercent,
 } from "../economy/taxTreasury.js";
+import { ensureEconomyTerminalPanel } from "../economy/panel.js";
 import { NEURO_BUTTON_ADMIN_SETTINGS_ROOT, NEURO_MAIN_ADMIN } from "./adminHub.js";
 
 const NEURO_SETTINGS_CHANNELS = "neuro:settings:channels";
 const NEURO_SETTINGS_TAXES = "neuro:settings:taxes";
+const NEURO_SETTINGS_MACRO = "neuro:settings:macro";
+const NEURO_MACRO_OPEN_INDEXING = "neuro:macro:open:indexing";
+const MODAL_NEURO_SALARY_INDEXING = "modal:neuro:salaryIndexing";
 const NEURO_TAX_GENERAL = "neuro:tax:general";
 const NEURO_TAX_IP = "neuro:tax:ip";
 const NEURO_TAX_OPEN_LEGAL = "neuro:tax:open:legal";
+const NEURO_TAX_OPEN_VAT = "neuro:tax:open:vat";
+const MODAL_NEURO_SHOP_VAT = "modal:neuro:shopVat";
 const NEURO_TAX_OPEN_IP_WD = "neuro:tax:open:ipWd";
 const NEURO_TAX_OPEN_IP_CAP = "neuro:tax:open:ipCap";
 
@@ -78,6 +90,7 @@ function buildSettingsRootEmbed(guildId: string): EmbedBuilder {
       [
         "**Каналы** — приветствия, панель нейроконтроля, терминал и лента экономики.",
         "**Налоги** — подоходный налог с легальных начислений, комиссия и налог ИП; казна страны.",
+        "**Макроэкономика** — индексация зарплат (квартал) и параметры инфляции цен.",
         "",
         `**Казна страны:** **${fmtTreasury(guildId)}** ₽`,
       ].join("\n"),
@@ -89,6 +102,7 @@ function buildSettingsRootRows(): ActionRowBuilder<ButtonBuilder>[] {
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_SETTINGS_CHANNELS).setLabel("Каналы").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(NEURO_SETTINGS_TAXES).setLabel("Налоги").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(NEURO_SETTINGS_MACRO).setLabel("Макро").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_MAIN_ADMIN).setLabel("Назад").setStyle(ButtonStyle.Secondary),
@@ -176,6 +190,7 @@ function buildTaxCategoriesRows(): ActionRowBuilder<ButtonBuilder>[] {
 
 function buildGeneralTaxEmbed(guildId: string): EmbedBuilder {
   const p = getLegalIncomeTaxPercent(guildId);
+  const vat = getShopVatPercent(guildId);
   return new EmbedBuilder()
     .setColor(SETTINGS_COLOR)
     .setTitle("Общие налоги")
@@ -183,6 +198,8 @@ function buildGeneralTaxEmbed(guildId: string): EmbedBuilder {
       [
         `**Подоходный налог (легальные работы):** **${p}** %`,
         "Удерживается с суммы, которая **зачисляется на личный счёт**: смены (кроме нелегала), **суточные** оклады офиса и ИП, кнопки «Связь» / «Совещание» у офиса.",
+        "",
+        `**НДС (магазин терминала):** **${vat}** % — включён в цену товаров, в казну.`,
         "",
         `**Казна страны:** **${fmtTreasury(guildId)}** ₽ (пополняется налогами и комиссиями).`,
       ].join("\n\n"),
@@ -192,7 +209,8 @@ function buildGeneralTaxEmbed(guildId: string): EmbedBuilder {
 function buildGeneralTaxRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(NEURO_TAX_OPEN_LEGAL).setLabel("Изменить налог, %").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(NEURO_TAX_OPEN_LEGAL).setLabel("Подоходный, %").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(NEURO_TAX_OPEN_VAT).setLabel("НДС, %").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_SETTINGS_TAXES).setLabel("Назад").setStyle(ButtonStyle.Secondary),
@@ -215,6 +233,37 @@ function buildIpTaxEmbed(guildId: string): EmbedBuilder {
         "Списывается с баланса бизнеса ИП по **понедельникам** (начало календарного дня), в казну. Один раз за календарный понедельник.",
       ].join("\n\n"),
     );
+}
+
+function buildMacroEmbed(guildId: string): EmbedBuilder {
+  const indexing = getSalaryIndexingPercentSetting(guildId);
+  const salaryMult = getSalaryIncomeMultiplier(guildId);
+  const priceMult = getShopPriceMultiplier(guildId);
+  return new EmbedBuilder()
+    .setColor(SETTINGS_COLOR)
+    .setTitle("Макроэкономика")
+    .setDescription(
+      [
+        `**Индексация (настройка):** **${indexing}** % за цикл`,
+        "Применяется **1 марта, 1 июня, 1 сентября, 1 декабря** (МСК): повышаются **все** ставки дохода; у рандомных работ **шире** минусы и **выше** плюсы, **шансы** не меняются.",
+        "",
+        `**Текущий множитель доходов:** **×${salaryMult.toFixed(4)}**`,
+        `**Текущий множитель цен магазина:** **×${priceMult.toFixed(4)}** (сим-карта и лотерея **без** инфляции)`,
+        "",
+        "Инфляция цен начисляется **ежемесячно** (случайный % вокруг индексации, чтобы за квартал покупательская способность в среднем сохранялась).",
+      ].join("\n\n"),
+    );
+}
+
+function buildMacroRows(): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(NEURO_MACRO_OPEN_INDEXING).setLabel("Индексация, %").setStyle(ButtonStyle.Primary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(NEURO_BUTTON_ADMIN_SETTINGS_ROOT).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
 }
 
 function buildIpTaxRows(): ActionRowBuilder<ButtonBuilder>[] {
@@ -242,9 +291,12 @@ export async function handleNeuroSettingsTreeButton(interaction: ButtonInteracti
     NEURO_BUTTON_ADMIN_SETTINGS_ROOT,
     NEURO_SETTINGS_CHANNELS,
     NEURO_SETTINGS_TAXES,
+    NEURO_SETTINGS_MACRO,
+    NEURO_MACRO_OPEN_INDEXING,
     NEURO_TAX_GENERAL,
     NEURO_TAX_IP,
     NEURO_TAX_OPEN_LEGAL,
+    NEURO_TAX_OPEN_VAT,
     NEURO_TAX_OPEN_IP_WD,
     NEURO_TAX_OPEN_IP_CAP,
   ]);
@@ -306,6 +358,48 @@ export async function handleNeuroSettingsTreeButton(interaction: ButtonInteracti
     return true;
   }
 
+  if (id === NEURO_SETTINGS_MACRO) {
+    await replyOrUpdateEphemeral(interaction, {
+      embeds: [buildMacroEmbed(gid)],
+      components: buildMacroRows(),
+    });
+    return true;
+  }
+
+  if (id === NEURO_MACRO_OPEN_INDEXING) {
+    const modal = new ModalBuilder().setCustomId(MODAL_NEURO_SALARY_INDEXING).setTitle("Индексация, % за цикл");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("pct")
+          .setLabel("Процент 0–50 за квартал")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(8)
+          .setValue(String(getSalaryIndexingPercentSetting(gid))),
+      ),
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (id === NEURO_TAX_OPEN_VAT) {
+    const modal = new ModalBuilder().setCustomId(MODAL_NEURO_SHOP_VAT).setTitle("НДС магазина, %");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("pct")
+          .setLabel("Процент 0–100 (в цене товара)")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(8)
+          .setValue(String(getShopVatPercent(gid))),
+      ),
+    );
+    await interaction.showModal(modal);
+    return true;
+  }
+
   if (id === NEURO_TAX_OPEN_LEGAL) {
     const modal = new ModalBuilder().setCustomId(MODAL_NEURO_LEGAL_TAX).setTitle("Подоходный налог, %");
     modal.addComponents(
@@ -362,7 +456,15 @@ export async function handleNeuroSettingsTreeButton(interaction: ButtonInteracti
 
 export async function handleNeuroTaxModalSubmit(interaction: ModalSubmitInteraction): Promise<boolean> {
   const id = interaction.customId;
-  if (id !== MODAL_NEURO_LEGAL_TAX && id !== MODAL_NEURO_IP_WD && id !== MODAL_NEURO_IP_CAP) return false;
+  if (
+    id !== MODAL_NEURO_LEGAL_TAX &&
+    id !== MODAL_NEURO_SHOP_VAT &&
+    id !== MODAL_NEURO_IP_WD &&
+    id !== MODAL_NEURO_IP_CAP &&
+    id !== MODAL_NEURO_SALARY_INDEXING
+  ) {
+    return false;
+  }
 
   if (!interaction.inGuild() || !interaction.guildId) {
     await interaction.reply({ content: "Только на сервере.", flags: MessageFlags.Ephemeral });
@@ -373,13 +475,36 @@ export async function handleNeuroTaxModalSubmit(interaction: ModalSubmitInteract
     return true;
   }
 
-  const pct = parsePercentInput(interaction.fields.getTextInputValue("pct"));
-  if (pct == null) {
+  const pctRaw = parsePercentInput(interaction.fields.getTextInputValue("pct"));
+  if (pctRaw == null) {
     await interaction.reply({ content: "Некорректное число. Пример: **10** или **12,5**.", flags: MessageFlags.Ephemeral });
     return true;
   }
 
   const gid = interaction.guildId;
+  if (id === MODAL_NEURO_SALARY_INDEXING) {
+    const pct = Math.min(50, pctRaw);
+    patchGuildConfig(gid, { salaryIndexingPercent: pct });
+    await ensureEconomyTerminalPanel(interaction.client);
+    await interaction.reply({
+      embeds: [buildMacroEmbed(gid)],
+      components: buildMacroRows(),
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  const pct = pctRaw;
+  if (id === MODAL_NEURO_SHOP_VAT) {
+    patchGuildConfig(gid, { shopVatPercent: pct });
+    await ensureEconomyTerminalPanel(interaction.client);
+    await interaction.reply({
+      embeds: [buildGeneralTaxEmbed(gid)],
+      components: buildGeneralTaxRows(),
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
   if (id === MODAL_NEURO_LEGAL_TAX) {
     patchGuildConfig(gid, { legalIncomeTaxPercent: pct });
     await interaction.reply({

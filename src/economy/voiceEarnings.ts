@@ -1,4 +1,5 @@
 import { mskCalendarDayKey } from "../time/msk.js";
+import { scalePositiveIncome } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { getEconomyUser, patchEconomyUser, type FocusPreset } from "./userStore.js";
 
@@ -87,7 +88,7 @@ export function applyVoiceEarnings(args: {
   const psAdded = Math.floor(psRaw * psShare);
 
   const rubBeforeFocus = rubFromMinutesWithDiminishing(already, minutes);
-  const rubAdded = rubBeforeFocus * rubShare;
+  const rubAdded = scalePositiveIncome(guildId, rubBeforeFocus * rubShare);
 
   const nextMinutesToday = already + minutes;
   patchEconomyUser(guildId, userId, {
