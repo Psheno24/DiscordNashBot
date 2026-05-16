@@ -1,4 +1,10 @@
-import { EmbedBuilder, MessageFlags, type Client, type ButtonInteraction } from "discord.js";
+import {
+  EmbedBuilder,
+  MessageFlags,
+  type Channel,
+  type Client,
+  type ButtonInteraction,
+} from "discord.js";
 import { neuroControlChannelId } from "../config.js";
 import { getGuildConfig } from "../guildConfig/store.js";
 import { loadNeurocontrol } from "./loadConfig.js";
@@ -11,6 +17,11 @@ const ROLES_COLOR = 0xb71c1c;
 
 function fmtTreasuryRub(n: number): string {
   return Math.floor(Math.max(0, n)).toLocaleString("ru-RU");
+}
+
+/** Канал из `.env` доступен всем гильдиям в кэше — обновляем панель только у владельца канала. */
+function isNeuroControlChannelForGuild(ch: Channel, guildId: string): boolean {
+  return "guildId" in ch && ch.guildId === guildId;
 }
 
 function buildPanelEmbed(cfg: NeurocontrolFile, guildId: string): EmbedBuilder {
@@ -66,6 +77,9 @@ export async function ensureNeuroPanel(client: Client) {
       console.warn("ИИ Управление: канал нейроконтроля недоступен или не текстовый:", chId);
       continue;
     }
+    if (!isNeuroControlChannelForGuild(ch, guild.id)) {
+      continue;
+    }
     if (!ch.isSendable()) {
       console.warn("ИИ Управление: нет прав отправлять в канал нейроконтроля:", chId);
       continue;
@@ -106,7 +120,9 @@ export async function refreshNeuroPanelGuild(client: Client, guildId: string): P
     return;
   }
   const ch = await client.channels.fetch(chId).catch(() => null);
-  if (!ch?.isTextBased() || ch.isDMBased() || !ch.isSendable()) return;
+  if (!ch?.isTextBased() || ch.isDMBased() || !isNeuroControlChannelForGuild(ch, guildId) || !ch.isSendable()) {
+    return;
+  }
   const payload = {
     embeds: [buildPanelEmbed(cfg, guildId)],
     components: buildNeuroMainPanelRows(),

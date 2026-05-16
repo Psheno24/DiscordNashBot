@@ -67,6 +67,7 @@ client.once(Events.ClientReady, async (c) => {
   setInterval(
     () => {
       void ensureEconomyTerminalPanel(c);
+      void ensureNeuroPanel(c);
     },
     60 * 60 * 1000,
   );
