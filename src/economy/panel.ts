@@ -4482,13 +4482,21 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
       embeds: [buildLotteryConfirmEmbed(mem, qty)],
       components: buildLotteryConfirmRows(qty),
     };
-    const source = interaction.message;
-    if (source?.editable) {
+    try {
       await interaction.deferUpdate();
-      await source.edit(confirmPayload);
+      await interaction.editReply(confirmPayload);
       return true;
+    } catch (e) {
+      console.error("lottery modal: deferUpdate+editReply failed:", e);
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.reply({ ...confirmPayload, flags: MessageFlags.Ephemeral });
+      } else {
+        await interaction.followUp({
+          content: "Не удалось обновить меню. Нажмите **Купить** ещё раз.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
     }
-    await interaction.reply({ ...confirmPayload, flags: MessageFlags.Ephemeral });
     return true;
   }
 
