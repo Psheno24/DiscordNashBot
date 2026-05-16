@@ -1,5 +1,5 @@
 import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
-import { processAllGuildsMacroMonth } from "./economy/economyMacro.js";
+import { ensureMacroScheduleV2Migration, processAllGuildsMacroMonth } from "./economy/economyMacro.js";
 import { discordToken } from "./config.js";
 import { registerMemberJoin } from "./listeners/memberJoin.js";
 import { setOnTreasuryMutated } from "./economy/taxTreasury.js";
@@ -54,7 +54,7 @@ client.once(Events.ClientReady, async (c) => {
     void refreshNeuroPanelGuild(c, gid);
   });
   await ensureNeuroPanel(c);
-  await processAllGuildsMacroMonth(c);
+  await ensureMacroScheduleV2Migration(c);
   await ensureEconomyTerminalPanel(c);
   await ensureEconomyFeedPanel(c);
   await ensureBetsHealth(c);

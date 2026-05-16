@@ -12,6 +12,7 @@ import {
   type HousingRentPlan,
   type PhoneDef,
 } from "./economyCatalog.js";
+import { isMskFirstCalendarDay, mskMonthFirstDayMs, mskTodayYmd } from "./mskCalendar.js";
 import { roundEconomyPrice } from "./economyRound.js";
 import { getShopVatPercent } from "./taxTreasury.js";
 
@@ -66,7 +67,81 @@ export function scalePositiveIncome(guildId: string, rub: number): number {
 }
 
 export function mskYearMonth(nowMs: number = Date.now()): string {
-  return new Date(nowMs).toLocaleDateString("sv-SE", { timeZone: "Europe/Moscow" }).slice(0, 7);
+  return mskTodayYmd(nowMs).slice(0, 7);
+}
+
+function addMonthsYm(ym: string, delta: number): string {
+  let y = Number.parseInt(ym.slice(0, 4), 10);
+  let m = Number.parseInt(ym.slice(5, 7), 10) + delta;
+  while (m > 12) {
+    m -= 12;
+    y += 1;
+  }
+  while (m < 1) {
+    m += 12;
+    y -= 1;
+  }
+  return `${y}-${String(m).padStart(2, "0")}`;
+}
+
+export function hasMacroInflationEverRun(guildId: string): boolean {
+  return getGuildConfig(guildId).lastMacroMonthYm != null;
+}
+
+export function hasMacroIndexingEverRun(guildId: string): boolean {
+  return getGuildConfig(guildId).lastSalaryIndexingYm != null;
+}
+
+/** Следующая полночь 1-го числа месяца (МСК) строго после `afterMs`. */
+export function nextMskMonthFirstDayMs(afterMs: number = Date.now()): number {
+  let ym = mskYearMonth(afterMs);
+  for (let i = 0; i < 36; i++) {
+    const at = mskMonthFirstDayMs(ym);
+    if (at > afterMs) return at;
+    ym = addMonthsYm(ym, 1);
+  }
+  return mskMonthFirstDayMs(addMonthsYm(ym, 0));
+}
+
+/** Следующая индексация: 1 марта / июня / сентября / декабря, 00:00 МСК. */
+export function nextSalaryIndexingMs(afterMs: number = Date.now()): number {
+  let ym = mskYearMonth(afterMs);
+  for (let i = 0; i < 36; i++) {
+    if (isSalaryIndexingMonthYm(ym)) {
+      const at = mskMonthFirstDayMs(ym);
+      if (at > afterMs) return at;
+    }
+    ym = addMonthsYm(ym, 1);
+  }
+  return mskMonthFirstDayMs(addMonthsYm(ym, 0));
+}
+
+function formatMskEventCountdown(atMs: number): string {
+  const sec = Math.floor(atMs / 1000);
+  return `будет через <t:${sec}:R> (<t:${sec}:f>)`;
+}
+
+/** Сброс цен и доходов к базе; история инфляции/индексации очищается. */
+export function resetGuildMacroBaseline(guildId: string): void {
+  patchGuildConfig(guildId, {
+    salaryIncomeMultiplier: DEFAULT_SALARY_INCOME_MULT,
+    shopPriceMultiplier: DEFAULT_SHOP_PRICE_MULT,
+    lastMonthInflationPercent: undefined,
+    lastMacroMonthYm: undefined,
+    lastSalaryIndexingYm: undefined,
+    macroQuarterKey: undefined,
+    macroQuarterInflationAccumPercent: undefined,
+  });
+}
+
+/** Однократно: откат ошибочных множителей и включение расписания «только 1-е число». */
+export async function ensureMacroScheduleV2Migration(client: import("discord.js").Client): Promise<void> {
+  for (const guild of client.guilds.cache.values()) {
+    const cfg = getGuildConfig(guild.id);
+    if (cfg.macroScheduleV2) continue;
+    resetGuildMacroBaseline(guild.id);
+    patchGuildConfig(guild.id, { macroScheduleV2: true });
+  }
 }
 
 /** Месяцы индексации: март, июнь, сентябрь, декабрь (МСК). */
@@ -108,22 +183,48 @@ function rollMonthlyInflationPercent(indexingSetting: number, monthInQ: 1 | 2 | 
 }
 
 /** Текст макропоказателей для публичного терминала. */
-export function buildMacroTerminalLines(guildId: string): string[] {
+export function buildMacroTerminalLines(guildId: string, nowMs: number = Date.now()): string[] {
   const tax = getGuildConfig(guildId).legalIncomeTaxPercent ?? 0;
   const incomeTax = Number.isFinite(tax) ? Math.min(100, Math.max(0, tax)) : 0;
   const indexing = getSalaryIndexingPercentSetting(guildId);
-  const inflation = getLastMonthInflationPercent(guildId);
-  const ym = mskYearMonth();
-  const monthLabel = new Date(`${ym}-15T12:00:00+03:00`).toLocaleDateString("ru-RU", {
-    month: "long",
-    year: "numeric",
-    timeZone: "Europe/Moscow",
-  });
+  const cfg = getGuildConfig(guildId);
+
+  let indexingLine: string;
+  if (!hasMacroIndexingEverRun(guildId)) {
+    const at = nextSalaryIndexingMs(nowMs);
+    indexingLine = `**Индексация:** **${indexing}** % (**1 марта**, **1 июня**, **1 сентября**, **1 декабря**) — ещё **не было** · первая ${formatMskEventCountdown(at)}`;
+  } else {
+    indexingLine = `**Индексация:** **${indexing}** % (**1 марта**, **1 июня**, **1 сентября**, **1 декабря**)`;
+    const nextIdx = nextSalaryIndexingMs(nowMs);
+    if (nextIdx > nowMs) {
+      indexingLine += ` · следующая ${formatMskEventCountdown(nextIdx)}`;
+    }
+  }
+
+  let inflationLine: string;
+  if (!hasMacroInflationEverRun(guildId)) {
+    const at = nextMskMonthFirstDayMs(nowMs);
+    inflationLine = `**Инфляция:** ещё **не было** · первая **1-го числа** в **00:00 МСК** · ${formatMskEventCountdown(at)}`;
+  } else {
+    const lastYm = cfg.lastMacroMonthYm ?? mskYearMonth(nowMs);
+    const monthLabel = new Date(`${lastYm}-15T12:00:00+03:00`).toLocaleDateString("ru-RU", {
+      month: "long",
+      year: "numeric",
+      timeZone: "Europe/Moscow",
+    });
+    const inflation = getLastMonthInflationPercent(guildId);
+    inflationLine = `**Инфляция за ${monthLabel}:** **${inflation}** %`;
+    const nextInf = nextMskMonthFirstDayMs(nowMs);
+    if (nextInf > nowMs) {
+      inflationLine += ` · следующая ${formatMskEventCountdown(nextInf)}`;
+    }
+  }
+
   return [
     `**Текущий подоходный налог:** **${incomeTax}** %`,
     `**НДС:** **${getShopVatPercent(guildId)}** % (включён в стоимость товаров)`,
-    `**Индексация:** **${indexing}** % ( **1 марта**, **1 июня**, **1 сентября**, **1 декабря** )`,
-    `**Инфляция за ${monthLabel}:** **${inflation}** %`,
+    indexingLine,
+    inflationLine,
   ];
 }
 
@@ -178,10 +279,15 @@ export function processGuildMacroMonthStart(guildId: string, ym: string, nowMs: 
   return { appliedInflation: true, appliedIndexing, inflationPercent: inflationPct };
 }
 
-export async function processAllGuildsMacroMonth(client: import("discord.js").Client): Promise<void> {
-  const ym = mskYearMonth();
+/** Инфляция и индексация — только в полночь **1-го** числа месяца (МСК). */
+export async function processAllGuildsMacroMonth(
+  client: import("discord.js").Client,
+  nowMs: number = Date.now(),
+): Promise<void> {
+  if (!isMskFirstCalendarDay(nowMs)) return;
+  const ym = mskYearMonth(nowMs);
   for (const guild of client.guilds.cache.values()) {
-    processGuildMacroMonthStart(guild.id, ym);
+    processGuildMacroMonthStart(guild.id, ym, nowMs);
   }
 }
 

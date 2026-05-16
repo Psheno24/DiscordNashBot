@@ -4,6 +4,20 @@ export function mskTodayYmd(nowMs: number = Date.now()): string {
   return new Date(nowMs).toLocaleDateString("sv-SE", { timeZone: "Europe/Moscow" });
 }
 
+export function mskDayOfMonth(nowMs: number = Date.now()): number {
+  return Number.parseInt(mskTodayYmd(nowMs).slice(8, 10), 10);
+}
+
+/** Первое число календарного месяца (МСК). */
+export function isMskFirstCalendarDay(nowMs: number = Date.now()): boolean {
+  return mskDayOfMonth(nowMs) === 1;
+}
+
+/** Полночь 1-го числа месяца YYYY-MM (МСК), unix ms. */
+export function mskMonthFirstDayMs(ym: string): number {
+  return Date.parse(`${ym}-01T00:00:00+03:00`);
+}
+
 /** Начало следующего календарного дня в зоне экономики, unix ms. */
 export function mskNextMidnightUtcMs(afterMs: number = Date.now()): number {
   const todayYmd = mskTodayYmd(afterMs);

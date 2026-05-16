@@ -34,6 +34,8 @@ export interface GuildConfig {
   macroQuarterKey?: string;
   /** Сумма инфляции за текущий макро-квартал, %. */
   macroQuarterInflationAccumPercent?: number;
+  /** Макро только по расписанию (1-е число МСК); после миграции v2 — сброс ошибочных множителей. */
+  macroScheduleV2?: boolean;
 }
 
 interface StoreShape {
