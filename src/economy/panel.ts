@@ -309,33 +309,65 @@ function buildMenuRow(): ActionRowBuilder<ButtonBuilder> {
   );
 }
 
-function buildProfileHubPropertyLine(u: ReturnType<typeof getEconomyUser>): string {
-  const phoneLabel = u.hasPhone ? getPhoneDef(u.phoneModelId)?.label ?? "есть" : "нет";
-  if (!u.hasPhone) {
-    return `Телефон (**нет**)`;
+function resolveVoiceLadderStep(psTotal: number): {
+  current: { roleName: string; voiceMinutesTotal: number };
+  next?: { roleName: string; voiceMinutesTotal: number };
+} | null {
+  let ladder: ReturnType<typeof loadVoiceLadder>["ladder"] | undefined;
+  try {
+    ladder = loadVoiceLadder().ladder;
+  } catch {
+    ladder = undefined;
   }
-  if (!u.courierSimNumber) {
-    return `Телефон (**${phoneLabel}**, сим **нет**) · престиж **${fmt(u.prestigePoints ?? 0)}**`;
+  if (!ladder?.length) return null;
+  let current = ladder[0]!;
+  for (const t of ladder) {
+    if (psTotal >= t.voiceMinutesTotal) current = t;
   }
-  return `Телефон (**${phoneLabel}**, сим **${u.courierSimNumber}**) — баланс сим **${fmt(u.simBalanceRub ?? 0)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`;
+  const idx = ladder.findIndex((t) => t.roleName === current.roleName && t.voiceMinutesTotal === current.voiceMinutesTotal);
+  const next = idx >= 0 ? ladder[idx + 1] : undefined;
+  return { current, next };
 }
 
-function buildProfileHubEmbed(member: GuildMember): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
-  return new EmbedBuilder()
-    .setColor(PROFILE_COLOR)
-    .setTitle("Профиль")
-    .setDescription(
-      [
-        `${progressName()}: **${fmt(u.psTotal)}**`,
-        `Баланс: **${fmt(u.rubles)}** ₽`,
-        "",
-        buildProfileHubPropertyLine(u),
-        "",
-        "Выбери вкладку ниже.",
-      ].join("\n"),
-    )
-    .setFooter({ text: `Запросил: ${member.user.tag}` });
+/** Строки прогресса по лестнице ролей для профиля (без двусмысленного «803 — до следующей 197»). */
+function buildVoiceLadderProgressLines(psTotal: number): string[] {
+  const ps = progressShort();
+  const step = resolveVoiceLadderStep(psTotal);
+  if (!step) {
+    return [`${progressName()} (прогресс роли): **${fmt(psTotal)}** ${ps}`];
+  }
+  const lines = [`${progressName()} (прогресс роли): **${fmt(psTotal)}** ${ps} **сейчас**`];
+  if (!step.next) {
+    lines.push(`Лестница ролей: **${step.current.roleName}** — **последняя ступень**`);
+    return lines;
+  }
+  const need = Math.max(0, step.next.voiceMinutesTotal - psTotal);
+  lines.push(
+    `Следующая роль **${step.next.roleName}**: не хватает **${fmt(need)}** ${ps} (порог **${fmt(step.next.voiceMinutesTotal)}** ${ps})`,
+  );
+  return lines;
+}
+
+function buildProfilePurchasesBlock(u: ReturnType<typeof getEconomyUser>): string[] {
+  const lines: string[] = [];
+  if (!u.hasPhone) {
+    lines.push("Телефон: **нет**");
+  } else {
+    const pl = getPhoneDef(u.phoneModelId)?.label ?? "есть";
+    if (!u.courierSimNumber) {
+      lines.push(`Телефон: **${pl}** (сим **нет**)`);
+    } else {
+      lines.push(`Телефон: **${pl}** (сим **${u.courierSimNumber}**, баланс **${fmt(u.simBalanceRub ?? 0)}** ₽)`);
+    }
+  }
+  const car = getCarDef(u.ownedCarId);
+  lines.push(`Авто: **${car?.label ?? "нет"}**`);
+  const hk = u.housingKind ?? "none";
+  const home =
+    hk === "rent" ? "аренда" : hk === "owned" ? (getApartmentDef(u.ownedApartmentId)?.label ?? "своё") : "нет";
+  lines.push(`Жильё: **${home}**`);
+  lines.push(`Престиж: **${fmt(u.prestigePoints ?? 0)}**`);
+  return lines;
 }
 
 function showTelegramBridgeInProfile(member: GuildMember): boolean {
@@ -592,36 +624,21 @@ function buildFocusRows(member: GuildMember, cur: FocusPreset): ActionRowBuilder
   ];
 }
 
-function buildProfilePurchasesLine(u: ReturnType<typeof getEconomyUser>): string {
-  const pl = u.hasPhone ? getPhoneDef(u.phoneModelId)?.label ?? "есть" : "нет";
-  const car = getCarDef(u.ownedCarId);
-  const hk = u.housingKind ?? "none";
-  const home =
-    hk === "rent" ? "аренда" : hk === "owned" ? (getApartmentDef(u.ownedApartmentId)?.label ?? "своё") : "нет";
-  if (!u.hasPhone) {
-    return `Телефон: **нет** · авто: **${car?.label ?? "нет"}** · жильё: **${home}** · престиж **${fmt(u.prestigePoints ?? 0)}**`;
-  }
-  if (!u.courierSimNumber) {
-    return `Телефон: **${pl}** (**нет сим**) · авто: **${car?.label ?? "нет"}** · жильё: **${home}** · престиж **${fmt(u.prestigePoints ?? 0)}**`;
-  }
-  return `Телефон: **${pl}** (**сим ${u.courierSimNumber}**, баланс **${fmt(u.simBalanceRub ?? 0)}** ₽) · авто: **${car?.label ?? "нет"}** · жильё: **${home}** · престиж **${fmt(u.prestigePoints ?? 0)}**`;
-}
-
 function buildProfileEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const jobName = u.jobId ? jobTitle(u.jobId) : "не выбрана";
 
   return new EmbedBuilder()
     .setColor(PROFILE_COLOR)
-    .setTitle("Профиль")
+    .setTitle(`Профиль (${member.displayName})`)
     .setDescription(
       [
-        `${progressName()} (прогресс роли): **${fmt(u.psTotal)}**`,
+        `Баланс ₽: **${fmt(u.rubles)}**`,
+        ...buildVoiceLadderProgressLines(u.psTotal),
         "",
         "**Покупки:**",
-        `- ${buildProfilePurchasesLine(u)}`,
+        ...buildProfilePurchasesBlock(u),
         "",
-        `Баланс ₽: **${fmt(u.rubles)}**`,
         `Фокус: **${focusLabel(u.focus)}**`,
         `Работа: **${jobName}**`,
       ].join("\n"),
@@ -683,18 +700,21 @@ function buildLadderEmbed(member: GuildMember): EmbedBuilder {
       .setFooter({ text: `Запросил: ${member.user.tag}` });
   }
 
-  let current = ladder[0]!;
-  for (const t of ladder) {
-    if (u.psTotal >= t.voiceMinutesTotal) current = t;
-  }
-  const idx = ladder.findIndex((t) => t.roleName === current.roleName && t.voiceMinutesTotal === current.voiceMinutesTotal);
-  const next = idx >= 0 ? ladder[idx + 1] : undefined;
+  const step = resolveVoiceLadderStep(u.psTotal);
+  const current = step?.current ?? ladder[0]!;
+  const next = step?.next;
 
   const lines: string[] = [];
-  lines.push(`${progressName()}: **${fmt(u.psTotal)}**`);
+  lines.push(`${progressName()}: **${fmt(u.psTotal)}** ${progressShort()} **сейчас**`);
   lines.push(`Текущая ступень: **${current.roleName}**`);
-  if (next) lines.push(`До следующей: **${fmt(Math.max(0, next.voiceMinutesTotal - u.psTotal))}** СР → **${next.roleName}**`);
-  else lines.push("Ты уже на **последней ступени**.");
+  if (next) {
+    const need = Math.max(0, next.voiceMinutesTotal - u.psTotal);
+    lines.push(
+      `Следующая роль **${next.roleName}**: не хватает **${fmt(need)}** ${progressShort()} (порог **${fmt(next.voiceMinutesTotal)}** ${progressShort()})`,
+    );
+  } else {
+    lines.push("Ты уже на **последней ступени**.");
+  }
   lines.push("");
   lines.push("Пороги:");
   for (const t of ladder) {
@@ -3245,7 +3265,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_BUTTON_PROFILE) {
-    await replyOrUpdate(interaction, { embeds: [buildProfileHubEmbed(member)], components: buildProfileHubRows(member, "info") });
+    await replyOrUpdate(interaction, { embeds: [buildProfileEmbed(member)], components: buildProfileHubRows(member, "info") });
     return true;
   }
 
@@ -3304,7 +3324,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_TG_BACK_PROFILE) {
     if (!(await assertTelegramGuildOwner(interaction, member))) return true;
-    await replyOrUpdate(interaction, { embeds: [buildProfileHubEmbed(member)], components: buildProfileHubRows(member, "info") });
+    await replyOrUpdate(interaction, { embeds: [buildProfileEmbed(member)], components: buildProfileHubRows(member, "info") });
     return true;
   }
 
