@@ -95,6 +95,8 @@ export interface EconomyUser {
   housingRentPrestigeGranted?: boolean;
   /** Купленная квартира (если housingKind === "owned"). */
   ownedApartmentId?: string;
+  /** Когда куплена текущая квартира (unix ms) — для выкупа при переезде. */
+  ownedApartmentPurchasedAtMs?: number;
   /** Следующее списание коммуналки (unix ms). */
   housingUtilityNextDueMs?: number;
   /** Последняя обработка жилья по суточному тику (YYYY-MM-DD). */
@@ -334,6 +336,9 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     typeof (u as any)?.ownedApartmentId === "string" && VALID_APT_ID.has((u as any).ownedApartmentId)
       ? (u as any).ownedApartmentId
       : undefined;
+  let ownedApartmentPurchasedAtMs = Number.isFinite((u as any)?.ownedApartmentPurchasedAtMs)
+    ? Math.max(0, Math.floor((u as any).ownedApartmentPurchasedAtMs))
+    : undefined;
   const housingUtilityNextDueMs = Number.isFinite((u as any)?.housingUtilityNextDueMs)
     ? Math.max(0, Math.floor((u as any).housingUtilityNextDueMs))
     : undefined;
@@ -410,6 +415,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     housingRentTotalPaidRub,
     housingRentPrestigeGranted,
     ownedApartmentId,
+    ownedApartmentPurchasedAtMs,
     housingUtilityNextDueMs,
     housingLastMskYmd,
     courierSimNumber,

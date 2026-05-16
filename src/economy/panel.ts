@@ -58,7 +58,10 @@ import {
 } from "./tier3Jobs.js";
 import {
   APARTMENT_MODELS,
+  APARTMENT_TRADE_IN_RATE,
+  APARTMENT_TRADE_IN_RATE_AFTER_MONTH,
   CAR_MODELS,
+  CAR_TRADE_IN_RATE,
   COURIER_SIM_MONTHLY_FEE_RUB,
   COURIER_SIM_MONTHLY_PERIOD_MS,
   getApartmentDef,
@@ -74,6 +77,10 @@ import {
   housingRentPlanPeriodMs,
   housingRentPlanPriceRub,
   PHONE_MODELS,
+  PHONE_TRADE_IN_RATE,
+  shopApartmentPurchaseCostRub,
+  shopCarPurchaseCostRub,
+  shopPhonePurchaseCostRub,
   type HousingRentPlan,
 } from "./economyCatalog.js";
 import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub } from "./economyHousing.js";
@@ -207,6 +214,16 @@ function fmt(n: number): string {
   const isWhole = Math.abs(rounded - Math.round(rounded)) < 1e-9;
   const x = isWhole ? Math.round(rounded) : rounded;
   return x.toLocaleString("ru-RU", isWhole ? { maximumFractionDigits: 0 } : { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+}
+
+const DISCORD_BUTTON_LABEL_MAX = 80;
+
+function shopItemButtonLabel(name: string, costRub: number): string {
+  const suffix = `${fmt(costRub)} ₽`;
+  const full = `${name} (${suffix})`;
+  if (full.length <= DISCORD_BUTTON_LABEL_MAX) return full;
+  const maxName = DISCORD_BUTTON_LABEL_MAX - suffix.length - 4;
+  return `${name.slice(0, Math.max(1, maxName))}… (${suffix})`;
 }
 
 function rentPlanLabelRu(p: HousingRentPlan | undefined): string {
@@ -1276,7 +1293,7 @@ function buildShopPhoneEmbed(member: GuildMember): EmbedBuilder {
     `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`,
     cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет телефона**",
     "",
-    "Выберите модель. При **апгрейде** доплачивается разница в цене, престиж меняется на дельту моделей.",
+    `При **апгрейде** текущий телефон **выкупается** (**${Math.round(PHONE_TRADE_IN_RATE * 100)}%** цены), доплата — остаток стоимости новой модели. Престиж меняется на **дельту** моделей.`,
     "",
     ...PHONE_MODELS.map((p) => `• **${p.label}** — **${fmt(p.priceRub)}** ₽ (+**${p.prestigeDelta}** престижа)`),
   ];
@@ -1293,12 +1310,12 @@ function buildShopPhoneRows(member: GuildMember): ActionRowBuilder<ButtonBuilder
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((p) => {
-          const cost = cur ? Math.max(0, p.priceRub - cur.priceRub) : p.priceRub;
+          const cost = shopPhonePurchaseCostRub(cur, p, Boolean(u.hasPhone));
           const downgrade = Boolean(cur && p.priceRub < cur.priceRub);
           const disabled = downgrade || u.rubles < cost || (cur?.id === p.id && Boolean(u.hasPhone));
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_PHONE_BUY_PREFIX}${p.id}`)
-            .setLabel(`${p.label} (${cost ? fmt(cost) : "0"} ₽)`)
+            .setLabel(shopItemButtonLabel(p.label, cost))
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(disabled);
         }),
@@ -1321,7 +1338,7 @@ function buildShopCarEmbed(member: GuildMember): EmbedBuilder {
     `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`,
     cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет авто**",
     "",
-    "Покупка **заменяет** текущее авто: платите разницу в цене, престиж меняется на **дельту** моделей. С **авто** аренда вела не нужна.",
+    `Покупка **заменяет** текущее авто: прежнее **выкупается** (**${Math.round(CAR_TRADE_IN_RATE * 100)}%** цены), доплата — остаток. Престиж — **дельта** моделей. С **авто** аренда вела не нужна.`,
     "",
     ...CAR_MODELS.map(
       (c) =>
@@ -1340,12 +1357,12 @@ function buildShopCarRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((c) => {
-          const cost = cur ? Math.max(0, c.priceRub - cur.priceRub) : c.priceRub;
+          const cost = shopCarPurchaseCostRub(cur, c);
           const downgrade = Boolean(cur && c.priceRub < cur.priceRub);
           const disabled = downgrade || u.rubles < cost || (cur?.id === c.id && Boolean(u.ownedCarId));
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_CAR_BUY_PREFIX}${c.id}`)
-            .setLabel(`${c.label.split(" ")[0] ?? c.label} (${fmt(cost)})`)
+            .setLabel(shopItemButtonLabel(c.label.split(" ")[0] ?? c.label, cost))
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(disabled);
         }),
@@ -1546,8 +1563,13 @@ function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
       "- **" + (getApartmentDef(u.ownedApartmentId)?.label ?? "-") + "**",
       "- Коммуналка раз в **30 дней** (начало календарного дня).",
       "- Продажа: **" + Math.round(APARTMENT_SELL_REFUND_RATE * 100) + "%** цены на руки; престиж от квартиры **снимается**.",
+      "- Переезд: выкуп **" +
+        Math.round(APARTMENT_TRADE_IN_RATE * 100) +
+        "%** (первые **30** сут. владения) или **" +
+        Math.round(APARTMENT_TRADE_IN_RATE_AFTER_MONTH * 100) +
+        "%** после.",
       "",
-      "**Смена квартиры** - кнопки ниже (платите разницу). **Аренда** в этом разделе недоступна.",
+      "**Смена квартиры** — кнопки ниже (автовыкуп текущей). **Аренда** в этом разделе недоступна.",
     );
   } else if (hk === "rent") {
     lines.push(
@@ -1565,7 +1587,7 @@ function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
       "",
       "При **первом** заселении: **+" + String(HOUSING_RENT_PRESTIGE_ONE_TIME) + "** престижа (снимается при съезде).",
       "",
-      "**Купить квартиру** - кнопки ниже (полная цена, пока нет своей).",
+      "**Купить квартиру** — кнопки ниже (полная цена, пока нет своей).",
     );
   }
   lines.push("", "**Квартиры:**");
@@ -1637,6 +1659,7 @@ function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder
   const curApt = getApartmentDef(u.ownedApartmentId);
   const nowApt = Date.now();
   const rentRef = hk === "rent" ? housingRentUnusedRefundRub(u, nowApt) : 0;
+  const aptPurchasedAt = hk === "owned" ? u.ownedApartmentPurchasedAtMs : undefined;
   if (hk === "owned" && curApt) {
     const refund = Math.floor(curApt.priceRub * APARTMENT_SELL_REFUND_RATE);
     rows.push(
@@ -1653,12 +1676,15 @@ function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((a) => {
-          const cost = hk === "owned" && curApt ? Math.max(0, a.priceRub - curApt.priceRub) : a.priceRub;
+          const cost =
+            hk === "owned" && curApt
+              ? shopApartmentPurchaseCostRub(curApt, a, aptPurchasedAt, nowApt)
+              : a.priceRub;
           const downgrade = Boolean(hk === "owned" && curApt && a.priceRub < curApt.priceRub);
           const disabled = downgrade || u.rubles + rentRef < cost || (hk === "owned" && curApt?.id === a.id);
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_APT_BUY_PREFIX}${a.id}`)
-            .setLabel(`${a.label.slice(0, 12)}…`)
+            .setLabel(shopItemButtonLabel(a.label, cost))
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(disabled);
         }),
@@ -3400,7 +3426,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     const u = getEconomyUser(member.guild.id, member.id);
     const cur = getPhoneDef(u.phoneModelId);
-    const cost = cur ? Math.max(0, defP.priceRub - cur.priceRub) : defP.priceRub;
+    const cost = shopPhonePurchaseCostRub(cur, defP, Boolean(u.hasPhone));
     const prestigeDelta = defP.prestigeDelta - (cur?.prestigeDelta ?? 0);
     if (cur && defP.priceRub < cur.priceRub) {
       await interaction.reply({ content: "Понижение модели **недоступно**.", flags: MessageFlags.Ephemeral });
@@ -3439,7 +3465,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     const u = getEconomyUser(member.guild.id, member.id);
     const cur = getCarDef(u.ownedCarId);
-    const cost = cur ? Math.max(0, defC.priceRub - cur.priceRub) : defC.priceRub;
+    const cost = shopCarPurchaseCostRub(cur, defC);
     const prestigeDelta = defC.prestigeDelta - (cur?.prestigeDelta ?? 0);
     if (cur && defC.priceRub < cur.priceRub) {
       await interaction.reply({ content: "Понижение класса **недоступно**.", flags: MessageFlags.Ephemeral });
@@ -3632,13 +3658,16 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const u = getEconomyUser(member.guild.id, member.id);
     const hk = u.housingKind ?? "none";
     const curA = getApartmentDef(u.ownedApartmentId);
-    const cost = hk === "owned" && curA ? Math.max(0, defA.priceRub - curA.priceRub) : defA.priceRub;
+    const now = Date.now();
+    const cost =
+      hk === "owned" && curA
+        ? shopApartmentPurchaseCostRub(curA, defA, u.ownedApartmentPurchasedAtMs, now)
+        : defA.priceRub;
     const prestigeDelta = defA.prestigeDelta - (curA?.prestigeDelta ?? 0);
     if (hk === "owned" && curA && defA.priceRub < curA.priceRub) {
       await interaction.reply({ content: "Переезд на более дешёвую квартиру **недоступен**.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    const now = Date.now();
     const rentRefund = hk === "rent" ? housingRentUnusedRefundRub(u, now) : 0;
     if (u.rubles + rentRefund < cost) {
       await interaction.reply({
@@ -3655,6 +3684,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       rubles: u.rubles + rentRefund - cost,
       housingKind: "owned",
       ownedApartmentId: defA.id,
+      ownedApartmentPurchasedAtMs: now,
       housingUtilityNextDueMs: now + HOUSING_CALENDAR_MONTH_MS,
       housingRentNextDueMs: undefined,
       housingRentPlan: undefined,
@@ -3699,6 +3729,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       rubles: u.rubles + refund,
       housingKind: "none",
       ownedApartmentId: undefined,
+      ownedApartmentPurchasedAtMs: undefined,
       housingUtilityNextDueMs: undefined,
       prestigePoints: nextPrestige,
       ...quitJob,
