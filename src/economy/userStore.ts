@@ -8,6 +8,7 @@ import {
   housingRentPlanPriceRub,
   type HousingRentPlan,
 } from "./economyCatalog.js";
+import { SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS } from "./shiftPayCoeff.js";
 
 export type FocusPreset = "role" | "balance" | "money";
 
@@ -61,10 +62,10 @@ export interface EconomyUser {
   /** Последний выход на смену по каждой профессии — КД считается от смены на **этой** работе. */
   lastWorkAtByJob?: Partial<Record<JobId, number>>;
 
-  /** Календарный день (YYYY-MM-DD), для которого считается `workShiftsToday` (доставка/склад/офис). */
+  /** Календарный день (YYYY-MM-DD), для которого считается `workShiftCdAccMs`. */
   workShiftMskYmd?: string;
-  /** Счётчик смен за текущие календарные сутки для коэффициента выплаты (доставка / склад / офис тир-3). */
-  workShiftsToday?: number;
+  /** Сумма КД (мс) завершённых смен за текущие календарные сутки — лимит выплаты по накопленному КД. */
+  workShiftCdAccMs?: number;
 
   /** Куплен телефон в магазине (нужен на доставке). */
   hasPhone?: boolean;
@@ -300,9 +301,13 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     typeof (u as any)?.workShiftMskYmd === "string" && /^\d{4}-\d{2}-\d{2}$/.test((u as any).workShiftMskYmd)
       ? (u as any).workShiftMskYmd
       : undefined;
-  const workShiftsToday = Number.isFinite((u as any)?.workShiftsToday)
-    ? Math.max(0, Math.floor((u as any).workShiftsToday))
+  let workShiftCdAccMs = Number.isFinite((u as any)?.workShiftCdAccMs)
+    ? Math.max(0, Math.floor((u as any).workShiftCdAccMs))
     : undefined;
+  if (workShiftCdAccMs == null && Number.isFinite((u as any)?.workShiftsToday)) {
+    const n = Math.max(0, Math.floor((u as any).workShiftsToday));
+    workShiftCdAccMs = n > 0 ? Math.min(n * SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS) : 0;
+  }
 
   const legacySimShifts = Number.isFinite((u as any)?.courierSimShiftsLeft) ? Math.max(0, Math.floor((u as any).courierSimShiftsLeft)) : 0;
   const legacyBikeShifts = Number.isFinite((u as any)?.courierBikeShiftsLeft) ? Math.max(0, Math.floor((u as any).courierBikeShiftsLeft)) : 0;
@@ -442,7 +447,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     solePropStaffReadyAt,
     solePropControlReadyAt,
     workShiftMskYmd,
-    workShiftsToday,
+    workShiftCdAccMs,
   };
 
   return out;

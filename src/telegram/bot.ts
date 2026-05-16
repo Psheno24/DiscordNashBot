@@ -257,8 +257,8 @@ function screenWork(member: GuildMember): ScreenPayload {
   return { text: economyFormatWorkMenuScreen(member), markup: workMenuKeyboard(member) };
 }
 
-function screenTier(tier: "t1" | "t2" | "t3"): ScreenPayload {
-  return { text: economyFormatJobListScreen(tier), markup: tierListKeyboard(tier) };
+function screenTier(member: GuildMember, tier: "t1" | "t2" | "t3"): ScreenPayload {
+  return { text: economyFormatJobListScreen(member.guild.id, tier), markup: tierListKeyboard(tier) };
 }
 
 function screenJob(member: GuildMember, jobId: JobId): ScreenPayload {
@@ -513,8 +513,10 @@ async function routeCallback(
     return;
   }
   if (data === "wt1" || data === "wt2" || data === "wt3") {
+    const ctx = await requireLink(client, tgUserId, chatId, token, cq);
+    if (!ctx) return;
     const tier = data === "wt1" ? "t1" : data === "wt2" ? "t2" : "t3";
-    await presentPanel(tgUserId, token, chatId, screenTier(tier), { messageId, ack: cq });
+    await presentPanel(tgUserId, token, chatId, screenTier(ctx.member, tier), { messageId, ack: cq });
     return;
   }
   if (data === "sk") {

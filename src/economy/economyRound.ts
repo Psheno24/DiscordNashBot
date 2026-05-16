@@ -1,4 +1,4 @@
-/** Округление всех сумм экономики (₽). */
+/** Округление сумм экономики (₽): цены в магазине, зарплаты, штрафы. */
 export function roundEconomyPrice(rub: number): number {
   const n = Math.max(0, Math.floor(rub));
   if (n < 100) return Math.round(n / 100) * 100;

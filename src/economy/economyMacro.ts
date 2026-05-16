@@ -52,13 +52,13 @@ export function scaledShopPrice(guildId: string, baseRub: number, fixed: boolean
   return roundEconomyPrice(baseRub * getShopPriceMultiplier(guildId));
 }
 
-/** Доход/штраф с учётом индексации зарплат: плюс растёт, минус глубже. */
+/** Доход/штраф с учётом индексации зарплат (округление как у цен в магазине). */
 export function scaleSignedIncome(guildId: string, rub: number): number {
   if (rub === 0) return 0;
   const m = getSalaryIncomeMultiplier(guildId);
-  if (m === 1) return Math.floor(rub);
-  if (rub > 0) return Math.floor(rub * m);
-  return Math.floor(rub * m);
+  const scaled = rub * m;
+  if (scaled > 0) return roundEconomyPrice(scaled);
+  return -roundEconomyPrice(Math.abs(scaled));
 }
 
 export function scalePositiveIncome(guildId: string, rub: number): number {
