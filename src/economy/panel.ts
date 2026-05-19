@@ -96,6 +96,10 @@ import {
   buildShopCarListRows,
   buildShopHouseListEmbed,
   buildShopHouseListRows,
+  buildShopHousePickEmbed,
+  buildShopHousePickRows,
+  buildShopHouseRentEmbed,
+  buildShopHouseRentRows,
   buildShopHubEmbed,
   buildShopHubRows,
   buildShopOriginPickEmbed,
@@ -112,6 +116,7 @@ import {
   ECON_SHOP_HOUSE,
   ECON_SHOP_HOUSE_LEAVE,
   ECON_SHOP_HOUSE_ORIGIN_PREFIX,
+  ECON_SHOP_HOUSE_RENT_MENU,
   ECON_SHOP_HOUSE_RENT_1D,
   ECON_SHOP_HOUSE_RENT_30D,
   ECON_SHOP_HOUSE_RENT_7D,
@@ -1213,8 +1218,8 @@ async function replyAfterRentPlanPurchase(
 ): Promise<void> {
   if (mode === "shop") {
     await replyOrUpdate(interaction, {
-      embeds: [buildShopHouseListEmbed(member, "soviet")],
-      components: buildShopHouseListRows(member, "soviet"),
+      embeds: [buildShopHouseRentEmbed(member)],
+      components: buildShopHouseRentRows(member),
     });
   } else {
     await replyOrUpdate(interaction, { embeds: [buildMyRentEditEmbed(member)], components: buildMyRentEditRows(member) });
@@ -3169,20 +3174,29 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_SHOP_HOUSE) {
     await replyOrUpdate(interaction, {
-      embeds: [buildShopOriginPickEmbed("Жильё", member)],
-      components: buildShopOriginPickRows("house", ECON_SHOP_HUB),
+      embeds: [buildShopHousePickEmbed(member)],
+      components: buildShopHousePickRows(ECON_SHOP_HUB),
+    });
+    return true;
+  }
+
+  if (id === ECON_SHOP_HOUSE_RENT_MENU) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopHouseRentEmbed(member)],
+      components: buildShopHouseRentRows(member),
     });
     return true;
   }
 
   if (id.startsWith(ECON_SHOP_HOUSE_ORIGIN_PREFIX)) {
     const origin = parseOriginFromSuffix(id.slice(ECON_SHOP_HOUSE_ORIGIN_PREFIX.length));
-    if (!origin) return true;
-    await replyOrUpdate(interaction, {
-      embeds: [buildShopHouseListEmbed(member, origin)],
-      components: buildShopHouseListRows(member, origin),
-    });
-    return true;
+    if (origin) {
+      await replyOrUpdate(interaction, {
+        embeds: [buildShopHouseListEmbed(member, origin)],
+        components: buildShopHouseListRows(member, origin),
+      });
+      return true;
+    }
   }
 
   if (id === ECON_SHOP_ANIMALS) {
@@ -3247,8 +3261,8 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       });
     } else {
       await replyOrUpdate(interaction, {
-        embeds: [buildShopHouseListEmbed(member, "soviet")],
-        components: buildShopHouseListRows(member, "soviet"),
+        embeds: [buildShopHouseRentEmbed(member)],
+        components: buildShopHouseRentRows(member),
       });
     }
     return true;
