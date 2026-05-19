@@ -35,7 +35,6 @@ import {
   lastWorkAtForJob,
   listEconomyUsers,
   patchEconomyUser,
-  type FocusPreset,
   type EconomyUser,
   type JobId,
   type SkillId,
@@ -70,12 +69,12 @@ import {
   getApartmentDef,
   getCarDef,
   getPhoneDef,
+  getPetDef,
   APARTMENT_SELL_REFUND_RATE,
   HOUSING_CALENDAR_MONTH_MS,
   HOUSING_RENT_DAY_PKG_RUB,
   HOUSING_RENT_DAILY_MONTH_EQUIV_RUB,
   HOUSING_RENT_MONTH_PKG_RUB,
-  HOUSING_RENT_PRESTIGE_ONE_TIME,
   HOUSING_RENT_WEEK_PKG_RUB,
   housingRentPlanPeriodMs,
   housingRentPlanPriceRub,
@@ -86,7 +85,49 @@ import {
   shopPhonePurchaseCostRub,
   type HousingRentPlan,
 } from "./economyCatalog.js";
-import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub } from "./economyHousing.js";
+import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub, userHasActiveHousing } from "./economyHousing.js";
+import { clearSovietHousingRentPatch } from "./economyHousingUtil.js";
+import { applyPrestigeToShiftRub, shiftPsApplies, shiftPsFromDomestic } from "./economyModifiers.js";
+import {
+  applyRentPlanPurchase,
+  buildShopAnimalsEmbed,
+  buildShopAnimalsRows,
+  buildShopCarListEmbed,
+  buildShopCarListRows,
+  buildShopHouseListEmbed,
+  buildShopHouseListRows,
+  buildShopHubEmbed,
+  buildShopHubRows,
+  buildShopOriginPickEmbed,
+  buildShopOriginPickRows,
+  buildShopPhoneListEmbed,
+  buildShopPhoneListRows,
+  ECON_SHOP_ANIMALS,
+  ECON_SHOP_APT_BUY_PREFIX,
+  ECON_SHOP_APT_SELL_FOREIGN,
+  ECON_SHOP_APT_SELL_SOVIET,
+  ECON_SHOP_CAR,
+  ECON_SHOP_CAR_BUY_PREFIX,
+  ECON_SHOP_CAR_ORIGIN_PREFIX,
+  ECON_SHOP_HOUSE,
+  ECON_SHOP_HOUSE_LEAVE,
+  ECON_SHOP_HOUSE_ORIGIN_PREFIX,
+  ECON_SHOP_HOUSE_RENT_1D,
+  ECON_SHOP_HOUSE_RENT_30D,
+  ECON_SHOP_HOUSE_RENT_7D,
+  ECON_SHOP_HUB,
+  ECON_SHOP_PET_BUY_PREFIX,
+  ECON_SHOP_PHONE,
+  ECON_SHOP_PHONE_BUY_PREFIX,
+  ECON_SHOP_PHONE_ORIGIN_PREFIX,
+  parseOriginFromSuffix,
+  purchaseApartment,
+  purchaseCar,
+  purchasePet,
+  purchasePhone,
+  sellForeignApartment,
+  sellSovietApartment,
+} from "./economyShopUi.js";
 import { tier3RankTitle } from "./tier3RankTitles.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
@@ -149,16 +190,7 @@ export const ECON_BUTTON_PLAYERS = "econ:players";
 export const ECON_BUTTON_WORK = "econ:work";
 export const ECON_BUTTON_SKILLS = "econ:skills";
 export const ECON_BUTTON_SHOP = "econ:shop";
-const ECON_SHOP_HUB = "econ:shop:hub";
-const ECON_SHOP_PHONE = "econ:shop:phone";
-const ECON_SHOP_PHONE_BUY_PREFIX = "econ:shop:phoneBuy:";
-const ECON_SHOP_CAR = "econ:shop:car";
-const ECON_SHOP_CAR_BUY_PREFIX = "econ:shop:carBuy:";
-const ECON_SHOP_HOUSE = "econ:shop:house";
-const ECON_SHOP_HOUSE_RENT_1D = "econ:shop:house:rent:1d";
-const ECON_SHOP_HOUSE_RENT_7D = "econ:shop:house:rent:7d";
-const ECON_SHOP_HOUSE_RENT_30D = "econ:shop:house:rent:30d";
-const ECON_SHOP_HOUSE_LEAVE = "econ:shop:house:leave";
+const ECON_SHOP_LOTTERY = "econ:shop:lottery";
 /** Экран «Жильё» в главном меню (не магазин): только арендатор. */
 const ECON_HOUSING_EDIT = "econ:housing:edit";
 const ECON_HOUSING_BACK = "econ:housing:back";
@@ -167,12 +199,9 @@ const ECON_HOUSING_EXT_PREFIX = "econ:housing:ext:";
 const ECON_SHOP_HOUSE_RENEW_AFTER_REQ_PREFIX = "econ:shop:house:renewReq:";
 const ECON_SHOP_HOUSE_RENEW_AFTER_CNF_PREFIX = "econ:shop:house:renewCnf:";
 const ECON_SHOP_HOUSE_RENEW_AFTER_CAN = "econ:shop:house:renewCan";
-const ECON_SHOP_APT_BUY_PREFIX = "econ:shop:aptBuy:";
-const ECON_SHOP_APT_SELL = "econ:shop:apt:sell";
 const ECON_SHOP_SIM = "econ:shop:sim";
 const ECON_SHOP_SIM_NEW = "econ:shop:sim:new";
 const ECON_SHOP_SIM_TOPUP_OPEN = "econ:shop:sim:topupOpen";
-const ECON_SHOP_LOTTERY = "econ:shop:lottery";
 const ECON_SHOP_LOTTERY_BUY_OPEN = "econ:shop:lottery:buyOpen";
 const ECON_LOTTERY_CONFIRM_PREFIX = "econ:lottery:confirm:";
 const ECON_LOTTERY_CANCEL = "econ:lottery:cancel";
@@ -186,7 +215,6 @@ const ASSEMBLER_BASE_CD_MS = 3 * 60 * 60 * 1000;
 const ASSEMBLER_MIN_CD_MS = Math.round(1.75 * 60 * 60 * 1000);
 
 const ECON_PROFILE_BUTTON_INFO = "econ:profile:info";
-const ECON_PROFILE_BUTTON_FOCUS = "econ:profile:focus";
 const ECON_PROFILE_BUTTON_LADDER = "econ:profile:ladder";
 const ECON_PROFILE_BUTTON_BETS_HISTORY = "econ:profile:betsHistory";
 /** Экран привязки Telegram (если задан TELEGRAM_BOT_TOKEN). */
@@ -201,9 +229,6 @@ const ECON_PROFILE_BETS_PAGE_PREFIX = "econ:profile:betsPage:";
 /** Записей на страницу (лимит описания эмбеда ~4096 символов). */
 const PROFILE_BETS_PAGE_SIZE = 7;
 
-const ECON_BUTTON_FOCUS_ROLE = "econ:focus:role";
-const ECON_BUTTON_FOCUS_BALANCE = "econ:focus:balance";
-const ECON_BUTTON_FOCUS_MONEY = "econ:focus:money";
 const ECON_WORK_BUTTON_STARTERS = "econ:work:starters";
 const ECON_WORK_BUTTON_JOB_PREFIX = "econ:work:job:";
 const ECON_WORK_BUTTON_TAKE_PREFIX = "econ:work:take:";
@@ -268,12 +293,6 @@ function rentPlanLabelRu(p: HousingRentPlan | undefined): string {
   if (p === "day") return "1 сутки";
   if (p === "week") return "7 суток";
   return "30 суток";
-}
-
-function focusLabel(f: FocusPreset): string {
-  if (f === "role") return "Роль (СР)";
-  if (f === "money") return "Деньги (₽)";
-  return "Баланс";
 }
 
 function progressName(): string {
@@ -410,10 +429,15 @@ function buildProfilePurchasesBlock(u: ReturnType<typeof getEconomyUser>): strin
   const car = getCarDef(u.ownedCarId);
   lines.push(`Авто: **${car?.label ?? "нет"}**`);
   const hk = u.housingKind ?? "none";
-  const home =
-    hk === "rent" ? "аренда" : hk === "owned" ? (getApartmentDef(u.ownedApartmentId)?.label ?? "своё") : "нет";
-  lines.push(`Жильё: **${home}**`);
-  lines.push(`Престиж: **${fmt(u.prestigePoints ?? 0)}**`);
+  const homeSov =
+    hk === "rent" ? "аренда (сов.)" : hk === "owned" ? (getApartmentDef(u.ownedApartmentId)?.label ?? "сов.") : "нет (сов.)";
+  const homeFor =
+    u.housingForeignKind === "owned"
+      ? getApartmentDef(u.ownedForeignApartmentId)?.label ?? "зам."
+      : "нет (зам.)";
+  lines.push(`Жильё: **${homeSov}** · **${homeFor}**`);
+  lines.push(`Престиж: **${fmt(u.prestigePoints ?? 0)}** · Быт: **${fmt(u.domesticPoints ?? 0)}**`);
+  if (u.ownedPetId) lines.push(`Питомец: **${getPetDef(u.ownedPetId)?.label ?? "—"}**`);
   return lines;
 }
 
@@ -422,17 +446,13 @@ function showTelegramBridgeInProfile(member: GuildMember): boolean {
   return member.guild.ownerId === member.id || isTelegramHubGranted(member.guild.id, member.id);
 }
 
-function buildProfileHubRows(member: GuildMember, active: "info" | "focus" | "ladder" | "bets"): ActionRowBuilder<ButtonBuilder>[] {
+function buildProfileHubRows(member: GuildMember, active: "info" | "ladder" | "bets"): ActionRowBuilder<ButtonBuilder>[] {
   const rows: ActionRowBuilder<ButtonBuilder>[] = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(ECON_PROFILE_BUTTON_INFO)
         .setLabel("Инфо")
         .setStyle(active === "info" ? ButtonStyle.Primary : ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId(ECON_PROFILE_BUTTON_FOCUS)
-        .setLabel("Фокус")
-        .setStyle(active === "focus" ? ButtonStyle.Primary : ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(ECON_PROFILE_BUTTON_LADDER)
         .setLabel("Лестница")
@@ -648,32 +668,6 @@ function buildProfileBetsTabComponents(member: GuildMember, page: number): Actio
   return rows;
 }
 
-function buildFocusRows(member: GuildMember, cur: FocusPreset): ActionRowBuilder<ButtonBuilder>[] {
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(ECON_BUTTON_FOCUS_ROLE)
-        .setLabel("Роль")
-        .setEmoji("🎖️")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(cur === "role"),
-      new ButtonBuilder()
-        .setCustomId(ECON_BUTTON_FOCUS_BALANCE)
-        .setLabel("Баланс")
-        .setEmoji("⚖️")
-        .setStyle(ButtonStyle.Danger)
-        .setDisabled(cur === "balance"),
-      new ButtonBuilder()
-        .setCustomId(ECON_BUTTON_FOCUS_MONEY)
-        .setLabel("Деньги")
-        .setEmoji("💰")
-        .setStyle(ButtonStyle.Success)
-        .setDisabled(cur === "money"),
-    ),
-    ...buildProfileHubRows(member, "focus"),
-  ];
-}
-
 function buildProfileEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const jobName = u.jobId ? jobTitle(u.jobId) : "не выбрана";
@@ -689,46 +683,8 @@ function buildProfileEmbed(member: GuildMember): EmbedBuilder {
         "**Покупки:**",
         ...buildProfilePurchasesBlock(u),
         "",
-        `Фокус: **${focusLabel(u.focus)}**`,
+        "Голос даёт **100%** в **СР** (без ₽). **Быт** усиливает СР с голоса и за смены.",
         `Работа: **${jobName}**`,
-      ].join("\n"),
-    )
-    .setFooter({ text: `Запросил: ${member.user.tag}` });
-}
-
-function buildFocusEmbed(member: GuildMember): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const ps = progressShort();
-  return new EmbedBuilder()
-    .setColor(PROFILE_COLOR)
-    .setTitle("Фокус добычи")
-    .setDescription(
-      [
-        "Когда ты сидишь в голосовых каналах сервера, бот начисляет тебе **две вещи**: прогресс по **роли** (в баллах **" + ps + "**) и **рубли** на баланс.",
-        "",
-        "**Фокус** — это не отдельная награда, а то, **во что «переводится» основная доля** времени в голосе: либо ты упираешься в рост по лестнице ролей, либо чаще получаешь ₽, либо держишься посередине.",
-        "",
-        "**Три режима:**",
-        "",
-        `• **Роль (${ps})** — режим «качать ступень». Большая часть усилий уходит в **${progressName()}** и продвижение по голосовой лестнице. **Рубли за голос** в этом режиме почти не копятся — если цель только деньги, этот вариант неудобен.`,
-        "",
-        `• **Баланс** — «и то, и другое». И **${ps}**, и **₽** начисляются в **умеренном** соотношении: ни резко не теряешь прогресс роли, ни совсем без денег не остаёшься. Удобный вариант по умолчанию.`,
-        "",
-        `• **Деньги (₽)** — режим «заработать». За то же время в голосе ты получаешь **больше рублей**, зато **${ps}** идут **заметно медленнее**, чем на фокусе «Роль». Подходит, когда лестница ролей не в приоритете.`,
-        "",
-        "**Про время в голосе:**",
-        "Чтобы награда не росла бесконечно при суточном «живании» в голосе, за **один календарный день** действует **ступенчатое ослабление** эффективности минуты (одинаково для **" +
-          ps +
-          "** и для базовой части **₽**, на неё потом ещё накладывается выбранный фокус):",
-        "— первые **до 3 часов** в голосе за день (0–180 мин) считаются **полностью**;",
-        "— следующие **до 6 часов** суммарно за день (180–360 мин) — **вдвое слабее**;",
-        "— всё **свыше 6 часов** за день (360+ мин) — **ещё слабее** (примерно **в пять раз** слабее, чем первые три часа).",
-        "_Сутки для этих порогов — **один календарный день** экономики._",
-        `От этого зависит и скорость роста **${ps}**, и то, сколько **₽** ты получишь за голос — в зависимости от выбранного фокуса.`,
-        "",
-        `**Твой текущий фокус:** **${focusLabel(u.focus)}**`,
-        "",
-        "Нажми кнопку ниже, чтобы сменить режим.",
       ].join("\n"),
     )
     .setFooter({ text: `Запросил: ${member.user.tag}` });
@@ -765,6 +721,10 @@ function buildLadderEmbed(member: GuildMember): EmbedBuilder {
   } else {
     lines.push("Ты уже на **последней ступени**.");
   }
+  lines.push("");
+  lines.push(
+    "Дополнительно **СР** дают **смены** (кроме нелегала и ИП) и **быт**; с **полным** советским сетом и активными сменами прогресс может быть **в 3–4 раза** быстрее, чем только голос **~2 ч/день**.",
+  );
   lines.push("");
   lines.push("Пороги:");
   for (const t of ladder) {
@@ -1241,188 +1201,10 @@ function jobUsesVariablePayout(jobId: JobId): boolean {
 }
 
 function hasTier2PlusHousing(u: EconomyUser, now: number): boolean {
-  if ((u.housingKind ?? "none") === "owned" && u.ownedApartmentId) return true;
-  if (u.housingKind === "rent" && u.housingRentNextDueMs != null && now < u.housingRentNextDueMs) return true;
-  return false;
-}
-
-function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
-  const gid = member.guild.id;
-  const u = getEconomyUser(gid, member.id);
-  const simLine = u.hasPhone
-    ? `• Симка${u.courierSimNumber ? " **(куплено)**" : ""} — первая **${SHOP_SIM_NEW_PRICE_RUB}** ₽ (+**${SHOP_SIM_START_BALANCE_RUB}** ₽ на баланс), замена **${SHOP_SIM_NEW_PRICE_RUB}** ₽`
-    : `• Симка — сначала **телефон**`;
-  const phoneHint = u.hasPhone
-    ? `• Телефон — **${getPhoneDef(u.phoneModelId)?.label ?? "есть"}** (апгрейд в подменю)`
-    : `• Телефон — модели **от ${fmt(inflatedCatalogPhonePrice(gid, "phone_budget"))}** ₽`;
-  const carLine = u.ownedCarId ? `• Авто — **${getCarDef(u.ownedCarId)?.label ?? "есть"}**` : "• Авто — **нет**";
-  const hk = u.housingKind ?? "none";
-  const houseLine =
-    hk === "rent"
-      ? `• Жильё — **аренда** (от **${fmt(inflatedHousingRentPrice(gid, "day"))}** ₽/сут. до **${fmt(inflatedHousingRentPrice(gid, "month"))}** ₽/30 сут.)`
-      : hk === "owned"
-        ? `• Жильё — **своя квартира** (${getApartmentDef(u.ownedApartmentId)?.label ?? "—"})`
-        : "• Жильё — **нет**";
-  const lines = [
-    `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`,
-    "",
-    "**Список товаров:**",
-    phoneHint,
-    simLine,
-    carLine,
-    houseLine,
-    `• **Лотерейный билет** — **${fmt(LOTTERY_TICKET_PRICE_RUB)}** ₽ (цена **не** растёт от инфляции)`,
-  ];
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
-}
-
-function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
-  const u = getEconomyUser(member.guild.id, member.id);
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_PHONE).setLabel("Телефон").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(ECON_SHOP_SIM)
-        .setLabel("Симка")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!u.hasPhone),
-      new ButtonBuilder().setCustomId(ECON_SHOP_CAR).setLabel("Авто").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE).setLabel("Жильё").setStyle(ButtonStyle.Secondary),
-    ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY).setLabel("Лотерея").setStyle(ButtonStyle.Success),
-    ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
-  ];
-}
-
-function buildShopPhoneEmbed(member: GuildMember): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPhoneDef(u.phoneModelId);
-  const lines = [
-    `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`,
-    cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет телефона**",
-    "",
-    `При **апгрейде** текущий телефон **выкупается** (**${Math.round(PHONE_TRADE_IN_RATE * 100)}%** цены), доплата — остаток стоимости новой модели. Престиж меняется на **дельту** моделей.`,
-    "",
-    ...PHONE_MODELS.map(
-      (p) =>
-        `• **${p.label}** — **${fmt(inflatedCatalogPhonePrice(member.guild.id, p.id))}** ₽ (+**${p.prestigeDelta}** престижа)`,
-    ),
-  ];
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Телефон").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
-}
-
-function buildShopPhoneRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPhoneDef(u.phoneModelId);
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  const chunk = 5;
-  for (let i = 0; i < PHONE_MODELS.length; i += chunk) {
-    const slice = PHONE_MODELS.slice(i, i + chunk);
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        ...slice.map((p) => {
-          const cost = inflatedPhonePurchaseCost(member.guild.id, cur, p, Boolean(u.hasPhone));
-          const downgrade = Boolean(cur && p.priceRub < cur.priceRub);
-          const disabled = downgrade || u.rubles < cost || (cur?.id === p.id && Boolean(u.hasPhone));
-          return new ButtonBuilder()
-            .setCustomId(`${ECON_SHOP_PHONE_BUY_PREFIX}${p.id}`)
-            .setLabel(shopItemButtonLabel(p.label, cost))
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(disabled);
-        }),
-      ),
-    );
-  }
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_HUB).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
-  );
-  return rows;
-}
-
-function buildShopCarEmbed(member: GuildMember): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getCarDef(u.ownedCarId);
-  const lines = [
-    `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}**`,
-    cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет авто**",
-    "",
-    `Покупка **заменяет** текущее авто: прежнее **выкупается** (**${Math.round(CAR_TRADE_IN_RATE * 100)}%** цены), доплата — остаток. Престиж — **дельта** моделей. С **авто** аренда вела не нужна.`,
-    "",
-    ...CAR_MODELS.map(
-      (c) =>
-        `• **${c.label}** — **${fmt(inflatedCatalogCarPrice(member.guild.id, c.id))}** ₽ (+**${fmt(c.prestigeDelta)}** пр.) · КД доставки **${(c.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч`,
-    ),
-  ];
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Авто").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
-}
-
-function buildShopCarRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getCarDef(u.ownedCarId);
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let i = 0; i < CAR_MODELS.length; i += 3) {
-    const slice = CAR_MODELS.slice(i, i + 3);
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        ...slice.map((c) => {
-          const cost = inflatedCarPurchaseCost(member.guild.id, cur, c);
-          const downgrade = Boolean(cur && inflatedCatalogCarPrice(member.guild.id, c.id) < inflatedCatalogCarPrice(member.guild.id, cur.id));
-          const disabled = downgrade || u.rubles < cost || (cur?.id === c.id && Boolean(u.ownedCarId));
-          return new ButtonBuilder()
-            .setCustomId(`${ECON_SHOP_CAR_BUY_PREFIX}${c.id}`)
-            .setLabel(shopItemButtonLabel(c.label.split(" ")[0] ?? c.label, cost))
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(disabled);
-        }),
-      ),
-    );
-  }
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_HUB).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
-  );
-  return rows;
+  return userHasActiveHousing(u, now);
 }
 
 type HousingRentRefreshMode = "shop" | "myRentEdit";
-
-function applyRentPlanPurchase(member: GuildMember, plan: HousingRentPlan): { ok: true } | { ok: false; reply: string } {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const hk = u.housingKind ?? "none";
-  if (hk === "owned") return { ok: false, reply: "У вас **своя квартира** — аренда недоступна." };
-  const price = inflatedHousingRentPrice(member.guild.id, plan);
-  const periodMs = housingRentPlanPeriodMs(plan);
-  if (u.rubles < price) return { ok: false, reply: `Нужно **${fmt(price)}** ₽.` };
-  const now = Date.now();
-  const baseEnd = hk === "rent" && u.housingRentNextDueMs && u.housingRentNextDueMs > now ? u.housingRentNextDueMs : now;
-  const nextDue = baseEnd + periodMs;
-  const prestigeGain = u.housingRentPrestigeGranted ? 0 : HOUSING_RENT_PRESTIGE_ONE_TIME;
-  const chainStart = hk === "rent" ? (u.housingRentChainStartedAtMs ?? now) : now;
-  const totalPaid = (hk === "rent" ? (u.housingRentTotalPaidRub ?? 0) : 0) + price;
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles - price,
-    housingKind: "rent",
-    housingRentNextDueMs: nextDue,
-    housingRentPlan: plan,
-    housingRentLastPaidRub: price,
-    housingRentLastPeriodMs: periodMs,
-    housingRentChainStartedAtMs: chainStart,
-    housingRentTotalPaidRub: totalPaid,
-    housingRentPrestigeGranted: true,
-    prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeGain),
-  });
-  remitShopPurchaseVatToTreasury(member.guild.id, price);
-  return { ok: true };
-}
 
 async function replyAfterRentPlanPurchase(
   interaction: ButtonInteraction,
@@ -1430,7 +1212,10 @@ async function replyAfterRentPlanPurchase(
   mode: HousingRentRefreshMode,
 ): Promise<void> {
   if (mode === "shop") {
-    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopHouseListEmbed(member, "soviet")],
+      components: buildShopHouseListRows(member, "soviet"),
+    });
   } else {
     await replyOrUpdate(interaction, { embeds: [buildMyRentEditEmbed(member)], components: buildMyRentEditRows(member) });
   }
@@ -1562,167 +1347,6 @@ function buildMyRentEditRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_HOUSING_BACK).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
-  );
-  return rows;
-}
-
-function buildShopHouseEmbed(member: GuildMember): EmbedBuilder {
-  const gid = member.guild.id;
-  const u = getEconomyUser(gid, member.id);
-  const hk = u.housingKind ?? "none";
-  const lines: string[] = [
-    "Баланс: **" + fmt(u.rubles) + "** \u20bd, престиж **" + fmt(u.prestigePoints ?? 0) + "**",
-    "",
-    "**Требование для работ тир 2+:** **аренда** с запасом срока или **своя квартира**.",
-    "",
-  ];
-  if (hk === "owned") {
-    lines.push(
-      "**Своя квартира**",
-      "- **" + (getApartmentDef(u.ownedApartmentId)?.label ?? "-") + "**",
-      "- Коммуналка раз в **30 дней** (начало календарного дня).",
-      "- Продажа: **" + Math.round(APARTMENT_SELL_REFUND_RATE * 100) + "%** цены на руки; престиж от квартиры **снимается**.",
-      "- Переезд: выкуп **" +
-        Math.round(APARTMENT_TRADE_IN_RATE * 100) +
-        "%** (первые **30** сут. владения) или **" +
-        Math.round(APARTMENT_TRADE_IN_RATE_AFTER_MONTH * 100) +
-        "%** после.",
-      "",
-      "**Смена квартиры** — кнопки ниже (автовыкуп текущей). **Аренда** в этом разделе недоступна.",
-    );
-  } else if (hk === "rent") {
-    lines.push(
-      "**Аренда уже оформлена.**",
-      "Здесь можно **продлить** оплаченный срок или **купить** квартиру (неиспользованное время с аренды вернётся на счёт **пропорционально**).",
-      "",
-      "Срок окончания, автопродление после него и **съезд** — кнопка **Жильё** в главном меню терминала.",
-    );
-  } else {
-    lines.push(
-      "**Снять жильё в аренду** - выберите пакет ниже:",
-      "- **30 суток** - **" + fmt(inflatedHousingRentPrice(gid, "month")) + "** \u20bd",
-      "- **7 суток** - **" + fmt(inflatedHousingRentPrice(gid, "week")) + "** \u20bd",
-      "- **1 сутки** - **" + fmt(inflatedHousingRentPrice(gid, "day")) + "** \u20bd",
-      "",
-      "При **первом** заселении: **+" + String(HOUSING_RENT_PRESTIGE_ONE_TIME) + "** престижа (снимается при съезде).",
-      "",
-      "**Купить квартиру** — кнопки ниже (полная цена, пока нет своей).",
-    );
-  }
-  lines.push("", "**Квартиры:**");
-  for (const a of APARTMENT_MODELS) {
-    lines.push(
-      "- **" +
-        a.label +
-        "** - **" +
-        fmt(inflatedCatalogApartmentPrice(gid, a.id)) +
-        "** \u20bd, коммуналка **" +
-        fmt(inflatedApartmentUtilityRub(gid, a.id)) +
-        "** / мес, +**" +
-        fmt(a.prestigeDelta) +
-        "** пр.",
-    );
-  }
-  return new EmbedBuilder()
-    .setColor(PANEL_COLOR)
-    .setTitle("Магазин \u00b7 Жиль\u0451")
-    .setDescription(lines.join("\n"))
-    .setFooter({ text: "Запросил: " + member.user.tag });
-}
-
-function buildShopHouseRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
-  const gid = member.guild.id;
-  const u = getEconomyUser(gid, member.id);
-  const hk = u.housingKind ?? "none";
-  const rentDay = inflatedHousingRentPrice(gid, "day");
-  const rentWeek = inflatedHousingRentPrice(gid, "week");
-  const rentMonth = inflatedHousingRentPrice(gid, "month");
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  if (hk === "rent") {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(ECON_SHOP_HOUSE_RENT_1D)
-          .setLabel(`+1 сут. (${fmt(rentDay)} ₽)`)
-          .setStyle(ButtonStyle.Primary)
-          .setDisabled(u.rubles < rentDay),
-        new ButtonBuilder()
-          .setCustomId(ECON_SHOP_HOUSE_RENT_7D)
-          .setLabel(`+7 сут. (${fmt(rentWeek)} ₽)`)
-          .setStyle(ButtonStyle.Primary)
-          .setDisabled(u.rubles < rentWeek),
-        new ButtonBuilder()
-          .setCustomId(ECON_SHOP_HOUSE_RENT_30D)
-          .setLabel(`+30 сут. (${fmt(rentMonth)} ₽)`)
-          .setStyle(ButtonStyle.Success)
-          .setDisabled(u.rubles < rentMonth),
-      ),
-    );
-  } else if (hk !== "owned") {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(ECON_SHOP_HOUSE_RENT_1D)
-          .setLabel(`Снять 1 сут. (${fmt(rentDay)} ₽)`)
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(u.rubles < rentDay),
-        new ButtonBuilder()
-          .setCustomId(ECON_SHOP_HOUSE_RENT_7D)
-          .setLabel(`Снять 7 сут. (${fmt(rentWeek)} ₽)`)
-          .setStyle(ButtonStyle.Primary)
-          .setDisabled(u.rubles < rentWeek),
-        new ButtonBuilder()
-          .setCustomId(ECON_SHOP_HOUSE_RENT_30D)
-          .setLabel(`Снять 30 сут. (${fmt(rentMonth)} ₽)`)
-          .setStyle(ButtonStyle.Success)
-          .setDisabled(u.rubles < rentMonth),
-      ),
-    );
-  }
-  const curApt = getApartmentDef(u.ownedApartmentId);
-  const nowApt = Date.now();
-  const rentRef = hk === "rent" ? housingRentUnusedRefundRub(u, nowApt, gid) : 0;
-  const aptPurchasedAt = hk === "owned" ? u.ownedApartmentPurchasedAtMs : undefined;
-  if (hk === "owned" && curApt) {
-    const refund = Math.floor(inflatedCatalogApartmentPrice(gid, curApt.id) * APARTMENT_SELL_REFUND_RATE);
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
-          .setCustomId(ECON_SHOP_APT_SELL)
-          .setLabel(`Продать квартиру (+${fmt(refund)} ₽)`)
-          .setStyle(ButtonStyle.Danger),
-      ),
-    );
-  }
-  for (let i = 0; i < APARTMENT_MODELS.length; i += 3) {
-    const slice = APARTMENT_MODELS.slice(i, i + 3);
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        ...slice.map((a) => {
-          const cost =
-            hk === "owned" && curApt
-              ? inflatedApartmentPurchaseCost(gid, curApt, a, aptPurchasedAt, nowApt)
-              : inflatedCatalogApartmentPrice(gid, a.id);
-          const downgrade = Boolean(
-            hk === "owned" &&
-              curApt &&
-              inflatedCatalogApartmentPrice(gid, a.id) < inflatedCatalogApartmentPrice(gid, curApt.id),
-          );
-          const disabled = downgrade || u.rubles + rentRef < cost || (hk === "owned" && curApt?.id === a.id);
-          return new ButtonBuilder()
-            .setCustomId(`${ECON_SHOP_APT_BUY_PREFIX}${a.id}`)
-            .setLabel(shopItemButtonLabel(a.label, cost))
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(disabled);
-        }),
-      ),
-    );
-  }
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_HUB).setLabel("Назад").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
     ),
   );
@@ -2860,23 +2484,23 @@ function isEconomyButton(id: string): boolean {
       ECON_TG_NEW_CODE,
       ECON_TG_NEW_CONFIRM,
       ECON_TG_NEW_CANCEL,
-      ECON_PROFILE_BUTTON_FOCUS,
       ECON_PROFILE_BUTTON_LADDER,
       ECON_PROFILE_BUTTON_BETS_HISTORY,
-      ECON_BUTTON_FOCUS_ROLE,
-      ECON_BUTTON_FOCUS_BALANCE,
-      ECON_BUTTON_FOCUS_MONEY,
       ECON_BUTTON_WORK,
       ECON_BUTTON_SHOP,
       ECON_SHOP_HUB,
       ECON_SHOP_PHONE,
+      ECON_SHOP_CAR,
+      ECON_SHOP_HOUSE,
+      ECON_SHOP_ANIMALS,
       ECON_SHOP_SIM,
       ECON_SHOP_SIM_NEW,
       ECON_SHOP_SIM_TOPUP_OPEN,
       ECON_SHOP_LOTTERY,
       ECON_SHOP_LOTTERY_BUY_OPEN,
       ECON_LOTTERY_CANCEL,
-      ECON_SHOP_APT_SELL,
+      ECON_SHOP_APT_SELL_SOVIET,
+      ECON_SHOP_APT_SELL_FOREIGN,
       ECON_COURIER_BIKE_1D,
       ECON_COURIER_BIKE_3D,
       ECON_COURIER_BIKE_7D,
@@ -3058,6 +2682,15 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     }
   }
 
+  const prestige = u.prestigePoints ?? 0;
+  if (jobTotal > 0) {
+    const beforePrestige = jobTotal;
+    jobTotal = applyPrestigeToShiftRub(jobTotal, prestige);
+    if (jobTotal > beforePrestige) {
+      notes.push(`престиж к выплате: **+${fmt(jobTotal - beforePrestige)}** ₽`);
+    }
+  }
+
   let spamPatch: Partial<EconomyUser> = {};
   const shiftCdMs = effectiveShiftCooldownMs(u, jobId, now);
   if (shiftPayCoeffApplies(shiftCdMs)) {
@@ -3095,8 +2728,15 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
   rublesNext += payToWallet;
   rublesNext = Math.max(0, rublesNext);
 
+  let psGain = 0;
+  if (shiftPsApplies(jobId)) {
+    psGain = shiftPsFromDomestic(jobId, u.domesticPoints ?? 0);
+    if (psGain > 0) notes.push(`**+${fmt(psGain)}** СР (быт)`);
+  }
+
   const patch: Partial<EconomyUser> = {
     rubles: rublesNext,
+    psTotal: u.psTotal + psGain,
     simBalanceRub: simBalNext,
     courierPhonePaidUntilMs: phoneUntilNext,
     lastWorkAtByJob: { ...(u.lastWorkAtByJob ?? {}), [jobId]: now },
@@ -3105,12 +2745,14 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
   };
   patchEconomyUser(guildId, member.id, patch);
   const walletDeltaRub = rublesNext - u.rubles;
+  const feedParts = [formatDelta(walletDeltaRub)];
+  if (psGain > 0) feedParts.push(`+${fmt(psGain)} СР`);
   appendFeedEvent({
     ts: now,
     guildId,
     type: "job:shift",
     actorUserId: member.id,
-    text: `${member.toString()} вышел на смену: **${def.title}** — ${formatDelta(walletDeltaRub)}`,
+    text: `${member.toString()} вышел на смену: **${def.title}** — ${feedParts.join(", ")}`,
   });
   await ensureEconomyFeedPanel(client);
   return { ok: true, walletDeltaRub, notes };
@@ -3402,12 +3044,6 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
-  if (id === ECON_PROFILE_BUTTON_FOCUS) {
-    const u = getEconomyUser(member.guild.id, member.id);
-    await replyOrUpdate(interaction, { embeds: [buildFocusEmbed(member)], components: buildFocusRows(member, u.focus) });
-    return true;
-  }
-
   if (id === ECON_PROFILE_BUTTON_LADDER) {
     await replyOrUpdate(interaction, { embeds: [buildLadderEmbed(member)], components: buildProfileHubRows(member, "ladder") });
     return true;
@@ -3458,7 +3094,20 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_SHOP_PHONE) {
-    await replyOrUpdate(interaction, { embeds: [buildShopPhoneEmbed(member)], components: buildShopPhoneRows(member) });
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopOriginPickEmbed("Телефон", member)],
+      components: buildShopOriginPickRows("phone", ECON_SHOP_HUB),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PHONE_ORIGIN_PREFIX)) {
+    const origin = parseOriginFromSuffix(id.slice(ECON_SHOP_PHONE_ORIGIN_PREFIX.length));
+    if (!origin) return true;
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPhoneListEmbed(member, origin)],
+      components: buildShopPhoneListRows(member, origin),
+    });
     return true;
   }
 
@@ -3469,38 +3118,33 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await interaction.reply({ content: "Неизвестная модель телефона.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    const u = getEconomyUser(member.guild.id, member.id);
-    const cur = getPhoneDef(u.phoneModelId);
-    const cost = inflatedPhonePurchaseCost(member.guild.id, cur, defP, Boolean(u.hasPhone));
-    const prestigeDelta = defP.prestigeDelta - (cur?.prestigeDelta ?? 0);
-    if (
-      cur &&
-      inflatedCatalogPhonePrice(member.guild.id, defP.id) < inflatedCatalogPhonePrice(member.guild.id, cur.id)
-    ) {
-      await interaction.reply({ content: "Понижение модели **недоступно**.", flags: MessageFlags.Ephemeral });
+    const r = purchasePhone(member, pid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (u.rubles < cost) {
-      await interaction.reply({ content: `Нужно ещё **${fmt(cost)}** ₽.`, flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    if (cur?.id === defP.id && u.hasPhone) {
-      await interaction.reply({ content: "У вас уже эта модель.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    patchEconomyUser(member.guild.id, member.id, {
-      rubles: u.rubles - cost,
-      hasPhone: true,
-      phoneModelId: defP.id,
-      prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeDelta),
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPhoneListEmbed(member, defP.origin)],
+      components: buildShopPhoneListRows(member, defP.origin),
     });
-    remitShopPurchaseVatToTreasury(member.guild.id, cost);
-    await replyOrUpdate(interaction, { embeds: [buildShopPhoneEmbed(member)], components: buildShopPhoneRows(member) });
     return true;
   }
 
   if (id === ECON_SHOP_CAR) {
-    await replyOrUpdate(interaction, { embeds: [buildShopCarEmbed(member)], components: buildShopCarRows(member) });
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopOriginPickEmbed("Авто", member)],
+      components: buildShopOriginPickRows("car", ECON_SHOP_HUB),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_CAR_ORIGIN_PREFIX)) {
+    const origin = parseOriginFromSuffix(id.slice(ECON_SHOP_CAR_ORIGIN_PREFIX.length));
+    if (!origin) return true;
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopCarListEmbed(member, origin)],
+      components: buildShopCarListRows(member, origin),
+    });
     return true;
   }
 
@@ -3511,38 +3155,49 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await interaction.reply({ content: "Неизвестная модель авто.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    const u = getEconomyUser(member.guild.id, member.id);
-    const cur = getCarDef(u.ownedCarId);
-    const cost = inflatedCarPurchaseCost(member.guild.id, cur, defC);
-    const prestigeDelta = defC.prestigeDelta - (cur?.prestigeDelta ?? 0);
-    if (
-      cur &&
-      inflatedCatalogCarPrice(member.guild.id, defC.id) < inflatedCatalogCarPrice(member.guild.id, cur.id)
-    ) {
-      await interaction.reply({ content: "Понижение класса **недоступно**.", flags: MessageFlags.Ephemeral });
+    const r = purchaseCar(member, cid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (u.rubles < cost) {
-      await interaction.reply({ content: `Нужно ещё **${fmt(cost)}** ₽.`, flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    if (cur?.id === defC.id) {
-      await interaction.reply({ content: "У вас уже это авто.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    patchEconomyUser(member.guild.id, member.id, {
-      rubles: u.rubles - cost,
-      ownedCarId: defC.id,
-      prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeDelta),
-      courierBikeUntilMs: undefined,
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopCarListEmbed(member, defC.origin)],
+      components: buildShopCarListRows(member, defC.origin),
     });
-    remitShopPurchaseVatToTreasury(member.guild.id, cost);
-    await replyOrUpdate(interaction, { embeds: [buildShopCarEmbed(member)], components: buildShopCarRows(member) });
     return true;
   }
 
   if (id === ECON_SHOP_HOUSE) {
-    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopOriginPickEmbed("Жильё", member)],
+      components: buildShopOriginPickRows("house", ECON_SHOP_HUB),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_HOUSE_ORIGIN_PREFIX)) {
+    const origin = parseOriginFromSuffix(id.slice(ECON_SHOP_HOUSE_ORIGIN_PREFIX.length));
+    if (!origin) return true;
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopHouseListEmbed(member, origin)],
+      components: buildShopHouseListRows(member, origin),
+    });
+    return true;
+  }
+
+  if (id === ECON_SHOP_ANIMALS) {
+    await replyOrUpdate(interaction, { embeds: [buildShopAnimalsEmbed(member)], components: buildShopAnimalsRows(member) });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PET_BUY_PREFIX)) {
+    const petId = id.slice(ECON_SHOP_PET_BUY_PREFIX.length);
+    const r = purchasePet(member, petId);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [buildShopAnimalsEmbed(member)], components: buildShopAnimalsRows(member) });
     return true;
   }
 
@@ -3580,19 +3235,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await interaction.reply({ content: "Вы **не** на аренде.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    const lost = u.housingRentPrestigeGranted ? HOUSING_RENT_PRESTIGE_ONE_TIME : 0;
     const quitJob = economyUserClearTier2PlusJobPatch(u);
     patchEconomyUser(member.guild.id, member.id, {
-      housingKind: "none",
-      housingRentNextDueMs: undefined,
-      housingRentPlan: undefined,
-      housingRentRenewalPlan: undefined,
-      housingRentLastPaidRub: undefined,
-      housingRentLastPeriodMs: undefined,
-      housingRentChainStartedAtMs: undefined,
-      housingRentTotalPaidRub: undefined,
-      housingRentPrestigeGranted: false,
-      prestigePoints: Math.max(0, (u.prestigePoints ?? 0) - lost),
+      ...clearSovietHousingRentPatch(),
       ...quitJob,
     });
     if (id === ECON_HOUSING_LEAVE) {
@@ -3601,7 +3246,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         components: buildTerminalPanelRows(member),
       });
     } else {
-      await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+      await replyOrUpdate(interaction, {
+        embeds: [buildShopHouseListEmbed(member, "soviet")],
+        components: buildShopHouseListRows(member, "soviet"),
+      });
     }
     return true;
   }
@@ -3706,99 +3354,51 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await interaction.reply({ content: "Неизвестная квартира.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    const u = getEconomyUser(member.guild.id, member.id);
-    const hk = u.housingKind ?? "none";
-    const curA = getApartmentDef(u.ownedApartmentId);
-    const now = Date.now();
-    const gidA = member.guild.id;
-    const cost =
-      hk === "owned" && curA
-        ? inflatedApartmentPurchaseCost(gidA, curA, defA, u.ownedApartmentPurchasedAtMs, now)
-        : inflatedCatalogApartmentPrice(gidA, defA.id);
-    const prestigeDelta = defA.prestigeDelta - (curA?.prestigeDelta ?? 0);
-    if (
-      hk === "owned" &&
-      curA &&
-      inflatedCatalogApartmentPrice(gidA, defA.id) < inflatedCatalogApartmentPrice(gidA, curA.id)
-    ) {
-      await interaction.reply({ content: "Переезд на более дешёвую квартиру **недоступен**.", flags: MessageFlags.Ephemeral });
+    const r = purchaseApartment(member, aid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
       return true;
     }
-    const rentRefund = hk === "rent" ? housingRentUnusedRefundRub(u, now, gidA) : 0;
-    if (u.rubles + rentRefund < cost) {
-      await interaction.reply({
-        content: `Нужно ещё **${fmt(Math.max(0, cost - rentRefund))}** ₽ (с учётом возврата с аренды **${fmt(rentRefund)}** ₽).`,
-        flags: MessageFlags.Ephemeral,
-      });
-      return true;
-    }
-    if (hk === "owned" && curA?.id === defA.id) {
-      await interaction.reply({ content: "У вас уже эта квартира.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    patchEconomyUser(member.guild.id, member.id, {
-      rubles: u.rubles + rentRefund - cost,
-      housingKind: "owned",
-      ownedApartmentId: defA.id,
-      ownedApartmentPurchasedAtMs: now,
-      housingUtilityNextDueMs: now + HOUSING_CALENDAR_MONTH_MS,
-      housingRentNextDueMs: undefined,
-      housingRentPlan: undefined,
-      housingRentRenewalPlan: undefined,
-      housingRentLastPaidRub: undefined,
-      housingRentLastPeriodMs: undefined,
-      housingRentChainStartedAtMs: undefined,
-      housingRentTotalPaidRub: undefined,
-      housingRentPrestigeGranted: false,
-      prestigePoints: Math.max(0, (u.prestigePoints ?? 0) + prestigeDelta),
-    });
-    remitShopPurchaseVatToTreasury(member.guild.id, cost);
-    if (rentRefund > 0) {
+    if (r.refund > 0) {
       appendFeedEvent({
-        ts: now,
+        ts: Date.now(),
         guildId: member.guild.id,
         type: "job:passive",
         actorUserId: member.id,
-        text: `${member.toString()} купил квартиру **${defA.label}** с аренды: возврат **+${fmt(rentRefund)}** ₽ за неиспользованное время.`,
+        text: `${member.toString()} купил **${defA.label}**: возврат с аренды **+${fmt(r.refund)}** ₽.`,
       });
       await ensureEconomyFeedPanel(interaction.client);
     }
-    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopHouseListEmbed(member, defA.origin)],
+      components: buildShopHouseListRows(member, defA.origin),
+    });
     return true;
   }
 
-  if (id === ECON_SHOP_APT_SELL) {
-    const u = getEconomyUser(member.guild.id, member.id);
-    if ((u.housingKind ?? "none") !== "owned") {
-      await interaction.reply({ content: "Продать можно только **свою** квартиру.", flags: MessageFlags.Ephemeral });
+  if (id === ECON_SHOP_APT_SELL_SOVIET) {
+    const r = sellSovietApartment(member);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
       return true;
     }
-    const curA = getApartmentDef(u.ownedApartmentId);
-    if (!curA) {
-      await interaction.reply({ content: "Квартира не найдена в данных.", flags: MessageFlags.Ephemeral });
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopHouseListEmbed(member, "soviet")],
+      components: buildShopHouseListRows(member, "soviet"),
+    });
+    return true;
+  }
+
+  if (id === ECON_SHOP_APT_SELL_FOREIGN) {
+    const r = sellForeignApartment(member);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
       return true;
     }
-    const refund = Math.floor(inflatedCatalogApartmentPrice(member.guild.id, curA.id) * APARTMENT_SELL_REFUND_RATE);
-    const nextPrestige = Math.max(0, (u.prestigePoints ?? 0) - curA.prestigeDelta);
-    const quitJob = economyUserClearTier2PlusJobPatch(u);
-    patchEconomyUser(member.guild.id, member.id, {
-      rubles: u.rubles + refund,
-      housingKind: "none",
-      ownedApartmentId: undefined,
-      ownedApartmentPurchasedAtMs: undefined,
-      housingUtilityNextDueMs: undefined,
-      prestigePoints: nextPrestige,
-      ...quitJob,
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopHouseListEmbed(member, "foreign")],
+      components: buildShopHouseListRows(member, "foreign"),
     });
-    appendFeedEvent({
-      ts: Date.now(),
-      guildId: member.guild.id,
-      type: "job:passive",
-      actorUserId: member.id,
-      text: `${member.toString()} продал квартиру **${curA.label}**: **+${fmt(refund)}** ₽ (**${Math.round(APARTMENT_SELL_REFUND_RATE * 100)}%**), престиж **−${fmt(curA.prestigeDelta)}**.`,
-    });
-    await ensureEconomyFeedPanel(interaction.client);
-    await replyOrUpdate(interaction, { embeds: [buildShopHouseEmbed(member)], components: buildShopHouseRows(member) });
     return true;
   }
 
@@ -4392,13 +3992,6 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     await replyOrUpdate(interaction, { embeds: [buildSkillsEmbed(member)], components: buildSkillsRows(member) });
-    return true;
-  }
-
-  if ([ECON_BUTTON_FOCUS_ROLE, ECON_BUTTON_FOCUS_BALANCE, ECON_BUTTON_FOCUS_MONEY].includes(id)) {
-    const next: FocusPreset = id === ECON_BUTTON_FOCUS_ROLE ? "role" : id === ECON_BUTTON_FOCUS_MONEY ? "money" : "balance";
-    patchEconomyUser(member.guild.id, member.id, { focus: next });
-    await replyOrUpdate(interaction, { embeds: [buildFocusEmbed(member)], components: buildFocusRows(member, next) });
     return true;
   }
 

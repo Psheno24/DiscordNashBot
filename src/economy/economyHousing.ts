@@ -3,7 +3,6 @@ import { appendFeedEvent } from "./feedStore.js";
 import {
   getApartmentDef,
   HOUSING_CALENDAR_MONTH_MS,
-  HOUSING_RENT_PRESTIGE_ONE_TIME,
   housingRentPlanPeriodMs,
   housingRentPlanPriceRub,
   type HousingRentPlan,
@@ -49,9 +48,17 @@ export function jobRequiresHousingForEmployment(jobId: string | undefined): bool
   return TIER2_JOB_IDS.has(jobId) || isTier3JobId(jobId);
 }
 
+export function userHasActiveHousing(u: EconomyUser, nowMs: number = Date.now()): boolean {
+  if (u.housingKind === "rent" && u.housingRentNextDueMs != null && nowMs < u.housingRentNextDueMs) return true;
+  if (u.housingKind === "owned" && u.ownedApartmentId) return true;
+  if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId) return true;
+  return false;
+}
+
 /** Сброс работы тир 2+ при потере жилья или съезде (вместе с полями тир-3). */
 export function economyUserClearTier2PlusJobPatch(u: EconomyUser): Partial<EconomyUser> {
   if (!jobRequiresHousingForEmployment(u.jobId)) return {};
+  if (userHasActiveHousing(u)) return {};
   return {
     jobId: undefined,
     jobChosenAt: undefined,
@@ -60,10 +67,59 @@ export function economyUserClearTier2PlusJobPatch(u: EconomyUser): Partial<Econo
   };
 }
 
+function processForeignUtility(
+  guildId: string,
+  userId: string,
+  u: EconomyUser,
+  todayYmd: string,
+  nowMs: number,
+): void {
+  if (u.housingForeignKind !== "owned" || !u.ownedForeignApartmentId) return;
+  if (u.housingForeignLastMskYmd === todayYmd) return;
+
+  const mark = { housingForeignLastMskYmd: todayYmd };
+  if (u.housingForeignUtilityNextDueMs != null && nowMs >= u.housingForeignUtilityNextDueMs) {
+    const apt = getApartmentDef(u.ownedForeignApartmentId);
+    const util = inflatedApartmentUtilityRub(guildId, u.ownedForeignApartmentId);
+    if (util > 0 && u.rubles >= util) {
+      patchEconomyUser(guildId, userId, {
+        rubles: u.rubles - util,
+        housingForeignUtilityNextDueMs: u.housingForeignUtilityNextDueMs + HOUSING_CALENDAR_MONTH_MS,
+        ...mark,
+      });
+      remitShopPurchaseVatToTreasury(guildId, util);
+      appendFeedEvent({
+        ts: nowMs,
+        guildId,
+        type: "job:passive",
+        actorUserId: userId,
+        text: `Коммуналка (**${apt?.label ?? "заморское жильё"}**): **−${util.toLocaleString("ru-RU")}** ₽.`,
+      });
+    } else if (util > 0) {
+      patchEconomyUser(guildId, userId, { ...mark });
+      appendFeedEvent({
+        ts: nowMs,
+        guildId,
+        type: "job:passive",
+        actorUserId: userId,
+        text: `**Коммуналка (зам.) не списана** — недостаточно ₽.`,
+      });
+    } else {
+      patchEconomyUser(guildId, userId, { ...mark });
+    }
+    return;
+  }
+  patchEconomyUser(guildId, userId, { ...mark });
+}
+
 /** Списание аренды / коммуналки в начале календарного дня (по полю housingLastMskYmd). */
 export function processHousingMskMidnightForUser(guildId: string, userId: string, todayYmd: string, nowMs: number): void {
-  const u = getEconomyUser(guildId, userId);
-  if (u.housingKind !== "rent" && u.housingKind !== "owned") return;
+  let u = getEconomyUser(guildId, userId);
+  processForeignUtility(guildId, userId, u, todayYmd, nowMs);
+  u = getEconomyUser(guildId, userId);
+
+  const hasSoviet = u.housingKind === "rent" || u.housingKind === "owned";
+  if (!hasSoviet) return;
   if (u.housingLastMskYmd === todayYmd) return;
 
   const mark: { housingLastMskYmd: string } = { housingLastMskYmd: todayYmd };
@@ -92,8 +148,6 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
         text: `Аренда жилья: **−${renewRub.toLocaleString("ru-RU")}** ₽ (продлено по текущему пакету).`,
       });
     } else {
-      const p = u.prestigePoints ?? 0;
-      const lost = u.housingRentPrestigeGranted ? HOUSING_RENT_PRESTIGE_ONE_TIME : 0;
       const quit = economyUserClearTier2PlusJobPatch(u);
       patchEconomyUser(guildId, userId, {
         housingKind: "none",
@@ -104,8 +158,6 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
         housingRentLastPeriodMs: undefined,
         housingRentChainStartedAtMs: undefined,
         housingRentTotalPaidRub: undefined,
-        housingRentPrestigeGranted: false,
-        prestigePoints: Math.max(0, p - lost),
         ...quit,
         ...mark,
       });
@@ -114,7 +166,7 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
         guildId,
         type: "job:passive",
         actorUserId: userId,
-        text: `**Аренда прекращена** (не хватило ₽).${lost ? ` Престиж **−${lost}**.` : ""}${
+        text: `**Аренда прекращена** (не хватило ₽).${
           Object.keys(quit).length ? " Работа **тир 2+** сброшена — нужно снова оформить жильё." : ""
         }`,
       });

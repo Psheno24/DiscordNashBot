@@ -16,6 +16,7 @@ import {
   tier3PromotionRank,
   type Tier3JobId,
 } from "./tier3Jobs.js";
+import { processPetMskMidnightForUser } from "./economyAnimals.js";
 import { tier3RankTitle } from "./tier3RankTitles.js";
 
 /**
@@ -51,6 +52,9 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
     const entries = listEconomyUsers(guild.id);
     for (const { userId } of entries) {
       processHousingMskMidnightForUser(guild.id, userId, today, now);
+      const member = await guild.members.fetch(userId).catch(() => null);
+      const mention = member ? member.toString() : `Пользователь ${userId}`;
+      processPetMskMidnightForUser(guild.id, userId, today, now, mention);
     }
     processWeeklySolePropCapitalTax(guild.id, today, now);
     for (const { userId } of entries) {

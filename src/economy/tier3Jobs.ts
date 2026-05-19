@@ -1,4 +1,4 @@
-import { solePropPrestigeIncomeMult } from "./economyCatalog.js";
+import { prestigePassiveIncomeMult } from "./economyModifiers.js";
 import type { EconomyUser, JobId, SkillId } from "./userStore.js";
 import { mskPreviousDayYmd, mskTodayYmd } from "./mskCalendar.js";
 
@@ -128,7 +128,7 @@ export function computeTier3PassiveRub(input: {
   // ip: линейный сдвиг от риска; случайный джиттер только при dial >= 1
   const cap = Math.max(0, Math.min(SOLE_PROP_CAP_MAX, input.solePropCapitalRub));
   const dial = Math.min(SOLE_PROP_RISK_MAX, Math.max(SOLE_PROP_RISK_MIN, input.solePropRiskDial));
-  const prestigeMult = solePropPrestigeIncomeMult(input.prestigePoints ?? 0);
+  const prestigeMult = prestigePassiveIncomeMult(input.prestigePoints ?? 0);
   /** ₽ за единицу капитала на балансе бизнеса. */
   const solePropCapPerRubNight = 0.0045;
   const base = input.def.passiveBaseRub + cap * solePropCapPerRubNight;
