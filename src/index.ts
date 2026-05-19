@@ -37,6 +37,7 @@ import {
   welcomePreviewCommandName,
 } from "./welcomePreview.js";
 import { startTelegramSidecar } from "./telegram/bot.js";
+import { grantTelegramHubCommandName, handleGrantTelegramHubCommand } from "./telegram/ownerCommands.js";
 
 const client = new Client({
   intents: [
@@ -99,6 +100,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
       if (interaction.commandName === giveMoneyCommandName || interaction.commandName === takeMoneyCommandName) {
         await handleMoneyOwnerSlashCommand(interaction);
+        return;
+      }
+      if (interaction.commandName === grantTelegramHubCommandName) {
+        await handleGrantTelegramHubCommand(interaction);
         return;
       }
     }

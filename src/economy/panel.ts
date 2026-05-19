@@ -16,6 +16,7 @@ import {
   createTelegramLinkCode,
   getLastIssuedTelegramCode,
   getLinkedTelegramIdForDiscord,
+  isTelegramHubGranted,
 } from "../telegram/bridgeStore.js";
 import { isTelegramBridgeConfigured } from "../telegram/env.js";
 import { economyFeedChannelId, economyTerminalChannelId } from "../config.js";
@@ -417,7 +418,8 @@ function buildProfilePurchasesBlock(u: ReturnType<typeof getEconomyUser>): strin
 }
 
 function showTelegramBridgeInProfile(member: GuildMember): boolean {
-  return member.guild.ownerId === member.id && isTelegramBridgeConfigured();
+  if (!isTelegramBridgeConfigured()) return false;
+  return member.guild.ownerId === member.id || isTelegramHubGranted(member.guild.id, member.id);
 }
 
 function buildProfileHubRows(member: GuildMember, active: "info" | "focus" | "ladder" | "bets"): ActionRowBuilder<ButtonBuilder>[] {
@@ -524,14 +526,16 @@ function buildTelegramHubRows(member: GuildMember, view: "hub" | "confirmNew"): 
   ];
 }
 
-async function assertTelegramGuildOwner(interaction: ButtonInteraction, member: GuildMember): Promise<boolean> {
+async function assertTelegramHubAccess(interaction: ButtonInteraction, member: GuildMember): Promise<boolean> {
   if (!isTelegramBridgeConfigured()) {
     await interaction.reply({ content: "Telegram для бота не настроен.", flags: MessageFlags.Ephemeral });
     return false;
   }
-  if (member.guild.ownerId !== member.id) {
+  const allowed =
+    member.guild.ownerId === member.id || isTelegramHubGranted(member.guild.id, member.id);
+  if (!allowed) {
     await interaction.reply({
-      content: "Раздел Telegram доступен только **владельцу сервера**.",
+      content: "Раздел Telegram в профиле вам не выдан. Обратитесь к **владельцу сервера**.",
       flags: MessageFlags.Ephemeral,
     });
     return false;
@@ -3335,7 +3339,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_PROFILE_BUTTON_TG) {
-    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    if (!(await assertTelegramHubAccess(interaction, member))) return true;
     await replyOrUpdate(interaction, {
       embeds: [buildTelegramHubEmbed(member)],
       components: buildTelegramHubRows(member, "hub"),
@@ -3344,13 +3348,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_TG_BACK_PROFILE) {
-    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    if (!(await assertTelegramHubAccess(interaction, member))) return true;
     await replyOrUpdate(interaction, { embeds: [buildProfileEmbed(member)], components: buildProfileHubRows(member, "info") });
     return true;
   }
 
   if (id === ECON_TG_MENU_ROOT) {
-    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    if (!(await assertTelegramHubAccess(interaction, member))) return true;
     await replyOrUpdate(interaction, {
       embeds: [buildTerminalPanelEmbed(member.guild.name)],
       components: buildTerminalPanelRows(member),
@@ -3359,7 +3363,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_TG_NEW_CODE) {
-    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    if (!(await assertTelegramHubAccess(interaction, member))) return true;
     const gid = member.guild.id;
     const uid = member.id;
     const last = getLastIssuedTelegramCode(gid, uid);
@@ -3380,7 +3384,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_TG_NEW_CONFIRM) {
-    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    if (!(await assertTelegramHubAccess(interaction, member))) return true;
     createTelegramLinkCode(member.guild.id, member.id, TG_LINK_CODE_TTL_MS);
     await replyOrUpdate(interaction, {
       embeds: [buildTelegramHubEmbed(member)],
@@ -3390,7 +3394,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_TG_NEW_CANCEL) {
-    if (!(await assertTelegramGuildOwner(interaction, member))) return true;
+    if (!(await assertTelegramHubAccess(interaction, member))) return true;
     await replyOrUpdate(interaction, {
       embeds: [buildTelegramHubEmbed(member)],
       components: buildTelegramHubRows(member, "hub"),

@@ -46,6 +46,8 @@ interface StoreShape {
   lastIssuedCodeByDiscord: Record<string, LastIssuedTelegramCode>;
   notifyLatchByTelegramId: Record<string, NotifyLatch>;
   uiByTelegramId: Record<string, TelegramUiState>;
+  /** guildId → discord user id с кнопкой «Telegram» в профиле (владелец всегда имеет доступ). */
+  telegramHubGrantedByGuild?: Record<string, string[]>;
 }
 
 export function discordPairKey(guildId: string, discordUserId: string): string {
@@ -78,6 +80,10 @@ function normalizeStore(raw: Partial<StoreShape>): StoreShape {
       : {};
   const uiByTelegramId =
     raw.uiByTelegramId && typeof raw.uiByTelegramId === "object" ? raw.uiByTelegramId : {};
+  const telegramHubGrantedByGuild =
+    raw.telegramHubGrantedByGuild && typeof raw.telegramHubGrantedByGuild === "object"
+      ? raw.telegramHubGrantedByGuild
+      : {};
   return {
     pendingCodes,
     linksByTelegramId,
@@ -85,6 +91,7 @@ function normalizeStore(raw: Partial<StoreShape>): StoreShape {
     lastIssuedCodeByDiscord,
     notifyLatchByTelegramId,
     uiByTelegramId,
+    telegramHubGrantedByGuild,
   };
 }
 
@@ -98,6 +105,7 @@ function readStore(): StoreShape {
       lastIssuedCodeByDiscord: {},
       notifyLatchByTelegramId: {},
       uiByTelegramId: {},
+      telegramHubGrantedByGuild: {},
     };
   }
   try {
@@ -111,6 +119,7 @@ function readStore(): StoreShape {
       lastIssuedCodeByDiscord: {},
       notifyLatchByTelegramId: {},
       uiByTelegramId: {},
+      telegramHubGrantedByGuild: {},
     };
   }
 }
@@ -213,4 +222,20 @@ export function patchTelegramUiState(telegramUserId: string, patch: Partial<Tele
   const cur = s.uiByTelegramId[id] ?? {};
   s.uiByTelegramId[id] = { ...cur, ...patch };
   writeStore(s);
+}
+
+export function isTelegramHubGranted(guildId: string, discordUserId: string): boolean {
+  const list = readStore().telegramHubGrantedByGuild?.[guildId] ?? [];
+  return list.includes(discordUserId);
+}
+
+/** Выдать доступ к разделу Telegram в профиле терминала. Возвращает false, если уже был. */
+export function grantTelegramHubAccess(guildId: string, discordUserId: string): boolean {
+  const s = readStore();
+  if (!s.telegramHubGrantedByGuild) s.telegramHubGrantedByGuild = {};
+  const list = s.telegramHubGrantedByGuild[guildId] ?? [];
+  if (list.includes(discordUserId)) return false;
+  s.telegramHubGrantedByGuild[guildId] = [...list, discordUserId];
+  writeStore(s);
+  return true;
 }
