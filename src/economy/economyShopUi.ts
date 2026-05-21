@@ -8,8 +8,13 @@ import {
 } from "discord.js";
 import {
   APARTMENT_SELL_REFUND_RATE,
+  APARTMENT_TRADE_IN_RATE,
+  APARTMENT_TRADE_IN_RATE_AFTER_MONTH,
+  CAR_TRADE_IN_RATE,
   HOUSING_CALENDAR_MONTH_MS,
   PET_MODELS,
+  PET_TRADE_IN_RATE,
+  PHONE_TRADE_IN_RATE,
   apartmentsByOrigin,
   carsByOrigin,
   getApartmentDef,
@@ -81,6 +86,22 @@ function statLabel(item: { origin: CatalogOrigin; prestigeDelta: number; domesti
   return `+**${fmt(item.prestigeDelta)}** престижа`;
 }
 
+function tradeInPctLabel(rate: number): string {
+  return `${Math.round(rate * 100)}%`;
+}
+
+/** Пояснение зачёта при покупке лучшего в той же ветке (цены на кнопках уже с учётом зачёта). */
+function shopUpgradeTradeInLine(rate: number): string {
+  return `Апгрейд на **лучшее** в этой ветке: зачёт **${tradeInPctLabel(rate)}** каталожной цены текущего (на кнопках — итог к оплате).`;
+}
+
+function shopApartmentTradeInLines(): string[] {
+  return [
+    `Переезд на **лучшее** жильё той же ветки: зачёт **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE)}** каталожной цены; если владели **30+ суток** — **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE_AFTER_MONTH)}**.`,
+    `**Продать** — возврат **${tradeInPctLabel(APARTMENT_SELL_REFUND_RATE)}** каталожной цены.`,
+  ];
+}
+
 export function shopItemButtonLabel(short: string, cost: number): string {
   const s = short.length > 18 ? `${short.slice(0, 16)}…` : short;
   return `${s} · ${fmt(cost)}₽`;
@@ -98,6 +119,8 @@ export function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
         "",
         "**Советское** — быт (СР за смены и голос). **Заморское** — престиж (доп. ₽ на работах).",
         "Жильё: можно **советское** и **заморское** одновременно. Телефон и авто — **одно** из двух веток.",
+        "",
+        "Апгрейд на лучшее в той же ветке уменьшает цену за счёт текущего: телефон **50%**, авто **75%**, жильё **90–120%**, питомец **50%** (подробнее в разделе).",
       ].join("\n"),
     );
 }
@@ -271,6 +294,8 @@ export function buildShopPhoneListEmbed(member: GuildMember, origin: CatalogOrig
         `Баланс: **${fmt(u.rubles)}** ₽`,
         cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет**",
         "",
+        shopUpgradeTradeInLine(PHONE_TRADE_IN_RATE),
+        "",
         ...lines,
       ].join("\n"),
     );
@@ -319,7 +344,16 @@ export function buildShopCarListEmbed(member: GuildMember, origin: CatalogOrigin
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle(`Авто · ${originTitle(origin)}`)
-    .setDescription([`Баланс: **${fmt(u.rubles)}** ₽`, cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет**", "", ...lines].join("\n"));
+    .setDescription(
+      [
+        `Баланс: **${fmt(u.rubles)}** ₽`,
+        cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет**",
+        "",
+        shopUpgradeTradeInLine(CAR_TRADE_IN_RATE),
+        "",
+        ...lines,
+      ].join("\n"),
+    );
 }
 
 export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
@@ -367,6 +401,7 @@ export function buildShopHouseListEmbed(member: GuildMember, origin: CatalogOrig
   } else if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId) {
     lines.push(`Своё: **${getApartmentDef(u.ownedForeignApartmentId)?.label ?? "—"}**`, "");
   }
+  lines.push("", ...shopApartmentTradeInLines(), "");
   for (const a of apartmentsByOrigin(origin)) {
     lines.push(`• **${a.label}** — **${fmt(inflatedCatalogApartmentPrice(member.guild.id, a.id))}** ₽ (${statLabel(a)})`);
   }
@@ -459,7 +494,7 @@ export function buildShopAnimalsEmbed(member: GuildMember): EmbedBuilder {
       [
         `Баланс: **${fmt(u.rubles)}** ₽`,
         cur ? `Питомец: **${cur.label}**` : "Питомец: **нет**",
-        "При покупке нового старый продаётся за **50%** цены.",
+        shopUpgradeTradeInLine(PET_TRADE_IN_RATE),
         "Уход в **00:00 МСК**: списание ₽ и начисление СР; без денег на содержание бонус СР **не начисляется**.",
         "Жильё для питомцев — только **собственность** (аренда не подходит).",
         "",
