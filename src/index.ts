@@ -38,6 +38,12 @@ import {
 } from "./welcomePreview.js";
 import { startTelegramSidecar } from "./telegram/bot.js";
 import { grantTelegramHubCommandName, handleGrantTelegramHubCommand } from "./telegram/ownerCommands.js";
+import {
+  handleProfileCardPrivateCommand,
+  handleProfileCardPublicCommand,
+  profileCardPrivateCommandName,
+  profileCardPublicCommandName,
+} from "./economy/profileCardCommands.js";
 
 const client = new Client({
   intents: [
@@ -104,6 +110,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
       if (interaction.commandName === grantTelegramHubCommandName) {
         await handleGrantTelegramHubCommand(interaction);
+        return;
+      }
+      if (interaction.commandName === profileCardPrivateCommandName) {
+        await handleProfileCardPrivateCommand(interaction);
+        return;
+      }
+      if (interaction.commandName === profileCardPublicCommandName) {
+        await handleProfileCardPublicCommand(interaction);
         return;
       }
     }

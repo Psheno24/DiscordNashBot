@@ -171,6 +171,9 @@ export interface EconomyUser {
   solePropStaffReadyAt?: number;
   /** КД «Контроль» ИП. */
   solePropControlReadyAt?: number;
+
+  /** Цвет рамки карточки профиля (магазин → оформление). */
+  profileCardColor?: string;
 }
 
 interface StoreShape {
@@ -559,6 +562,10 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     solePropControlReadyAt,
     workShiftMskYmd,
     workShiftCdAccMs,
+    profileCardColor:
+      typeof (u as any)?.profileCardColor === "string" && (u as any).profileCardColor.length > 0
+        ? (u as any).profileCardColor
+        : undefined,
   };
 
   return out;

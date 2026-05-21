@@ -104,6 +104,7 @@ export function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
 
 export const ECON_SHOP_SIM = "econ:shop:sim";
 export const ECON_SHOP_LOTTERY = "econ:shop:lottery";
+export const ECON_SHOP_APPEARANCE = "econ:shop:appearance";
 
 export function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
@@ -121,6 +122,7 @@ export function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBu
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_SHOP_ANIMALS).setLabel("Животные").setStyle(ButtonStyle.Success),
       new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY).setLabel("Лотерея").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(ECON_SHOP_APPEARANCE).setLabel("Оформление").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId("econ:menu").setLabel("Главное меню").setStyle(ButtonStyle.Secondary),

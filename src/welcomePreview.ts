@@ -9,6 +9,7 @@ import {
 import { discordToken } from "./config.js";
 import { randomJoinCopy, randomLeaveCopy } from "./copy/ussrMemberActivity.js";
 import { grantTelegramHubCommand } from "./telegram/ownerCommands.js";
+import { profileCardSlashCommandsJson } from "./economy/profileCardCommands.js";
 import { embedInfo, embedWarn } from "./theme.js";
 
 /** Имя слэш-команды (латиница, требование Discord). */
@@ -74,6 +75,7 @@ export async function registerMemberActivityPreviewCommands(client: Client) {
     giveMoneyCommand.toJSON(),
     takeMoneyCommand.toJSON(),
     grantTelegramHubCommand.toJSON(),
+    ...profileCardSlashCommandsJson(),
   ];
 
   for (const guild of client.guilds.cache.values()) {

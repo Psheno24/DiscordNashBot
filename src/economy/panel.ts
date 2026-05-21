@@ -132,7 +132,15 @@ import {
   purchasePhone,
   sellForeignApartment,
   sellSovietApartment,
+  ECON_SHOP_APPEARANCE,
 } from "./economyShopUi.js";
+import {
+  buildShopAppearanceEmbed,
+  buildShopAppearanceRows,
+  handleAppearanceShopButton,
+  isAppearanceShopButton,
+  replyWithProfileCardImage,
+} from "./economyShopAppearanceUi.js";
 import { tier3RankTitle } from "./tier3RankTitles.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
@@ -220,6 +228,7 @@ const ASSEMBLER_BASE_CD_MS = 3 * 60 * 60 * 1000;
 const ASSEMBLER_MIN_CD_MS = Math.round(1.75 * 60 * 60 * 1000);
 
 const ECON_PROFILE_BUTTON_INFO = "econ:profile:info";
+const ECON_PROFILE_BUTTON_CARD = "econ:profile:card";
 const ECON_PROFILE_BUTTON_LADDER = "econ:profile:ladder";
 const ECON_PROFILE_BUTTON_BETS_HISTORY = "econ:profile:betsHistory";
 /** Экран привязки Telegram (если задан TELEGRAM_BOT_TOKEN). */
@@ -458,6 +467,10 @@ function buildProfileHubRows(member: GuildMember, active: "info" | "ladder" | "b
         .setCustomId(ECON_PROFILE_BUTTON_INFO)
         .setLabel("Инфо")
         .setStyle(active === "info" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(ECON_PROFILE_BUTTON_CARD)
+        .setLabel("Карточка")
+        .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(ECON_PROFILE_BUTTON_LADDER)
         .setLabel("Лестница")
@@ -2493,8 +2506,10 @@ function isEconomyButton(id: string): boolean {
       ECON_PROFILE_BUTTON_BETS_HISTORY,
       ECON_BUTTON_WORK,
       ECON_BUTTON_SHOP,
+      ECON_SHOP_APPEARANCE,
       ECON_SHOP_HUB,
       ECON_SHOP_PHONE,
+      ECON_PROFILE_BUTTON_CARD,
       ECON_SHOP_CAR,
       ECON_SHOP_HOUSE,
       ECON_SHOP_ANIMALS,
@@ -2910,6 +2925,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     cid.startsWith(ECON_WORK_BUTTON_JOB_DETAIL_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_JOB_DETAIL_CLOSE_PREFIX) ||
     cid.startsWith("econ:shop") ||
+    isAppearanceShopButton(cid) ||
     cid.startsWith(ECON_LOTTERY_CONFIRM_PREFIX) ||
     cid.startsWith("econ:housing:") ||
     cid.startsWith(ECON_SKILL_BUTTON_PREFIX) ||
@@ -2983,6 +2999,16 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_PROFILE_BUTTON_INFO) {
     await replyOrUpdate(interaction, { embeds: [buildProfileEmbed(member)], components: buildProfileHubRows(member, "info") });
     return true;
+  }
+
+  if (id === ECON_PROFILE_BUTTON_CARD) {
+    await replyWithProfileCardImage(interaction, member);
+    return true;
+  }
+
+  if (isAppearanceShopButton(id)) {
+    const handled = await handleAppearanceShopButton(interaction, member);
+    if (handled) return true;
   }
 
   if (id === ECON_PROFILE_BUTTON_TG) {
