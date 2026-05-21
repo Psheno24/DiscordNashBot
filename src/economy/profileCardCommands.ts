@@ -79,10 +79,9 @@ async function sendProfileCard(
   await interaction.deferReply({ flags: ephemeral ? MessageFlags.Ephemeral : undefined });
 
   try {
-    const { embed, file } = await buildProfileCardMessagePayload(target);
+    const { file, content } = await buildProfileCardMessagePayload(target);
     await interaction.editReply({
-      content: ephemeral ? undefined : `${target}`,
-      embeds: [embed],
+      content: ephemeral ? (content ?? undefined) : `${target}`,
       files: [file],
       allowedMentions: ephemeral ? { parse: [] } : { users: [target.id] },
     });

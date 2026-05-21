@@ -93,27 +93,26 @@ function buildColorPreviewBuyRows(colorId: ProfileFrameColorId): ActionRowBuilde
   ];
 }
 
+/** Без embed — иначе у Discord слева цветная полоса; только вложение-картинка. */
 export async function buildProfileCardMessagePayload(
   target: GuildMember,
   options: ProfileCardRenderOptions = {},
-): Promise<{ embed: EmbedBuilder; file: AttachmentBuilder }> {
+): Promise<{ file: AttachmentBuilder; content?: string }> {
   const png = await renderProfileCardPng(target, options);
   const file = new AttachmentBuilder(png, { name: "profile-card.png" });
-  const u = getEconomyUser(target.guild.id, target.id);
-  const accent = getProfileFrameColor(options.previewColorId ?? u.profileCardColor).accent;
-  const colorDef = getProfileFrameColor(options.previewColorId ?? u.profileCardColor);
-  const embed = new EmbedBuilder()
-    .setColor(parseInt(accent.slice(1), 16))
-    .setImage("attachment://profile-card.png");
-  if (options.watermark) {
-    embed.setDescription(
-      [
-        `**Превью · ${colorDef.label}** · ${target.displayName}`,
-        `_Водяной знак «ПРЕВЬЮ» — только пример. После **Купить** рамка сохранится без него._`,
-      ].join("\n"),
-    );
+  if (!options.watermark) {
+    return { file };
   }
-  return { embed, file };
+  const colorDef = getProfileFrameColor(
+    options.previewColorId ?? getEconomyUser(target.guild.id, target.id).profileCardColor,
+  );
+  return {
+    file,
+    content: [
+      `**Превью · ${colorDef.label}** · ${target.displayName}`,
+      `_Водяной знак «ПРЕВЬЮ» — только пример. После **Купить** рамка сохранится без него._`,
+    ].join("\n"),
+  };
 }
 
 const PROFILE_CARD_RENDER_FAIL =
@@ -128,12 +127,12 @@ export async function replyWithProfileCardImage(
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   }
   try {
-    const { embed, file } = await buildProfileCardMessagePayload(member, options);
+    const { file, content } = await buildProfileCardMessagePayload(member, options);
     const components = options.watermark && options.previewColorId
       ? buildColorPreviewBuyRows(options.previewColorId)
       : [];
     await interaction.editReply({
-      embeds: [embed],
+      content: content ?? undefined,
       files: [file],
       components,
     });
