@@ -739,6 +739,38 @@ function foreignAptTierIndex(aptId: string | undefined): number {
   return FOREIGN_APT_ORDER.indexOf(aptId as ApartmentId);
 }
 
+function apartmentLabelBySovietIndex(idx: number): string | undefined {
+  if (idx < 0) return undefined;
+  const id = SOVIET_APT_ORDER[idx];
+  return id ? getApartmentDef(id)?.label : undefined;
+}
+
+function apartmentLabelByForeignIndex(idx: number): string | undefined {
+  if (idx < 0) return undefined;
+  const id = FOREIGN_APT_ORDER[idx];
+  return id ? getApartmentDef(id)?.label : undefined;
+}
+
+/** Краткое описание требований питомца для витрины магазина. */
+export function petRequirementsLine(pet: PetDef): string {
+  const parts: string[] = [];
+  if (pet.requiresPhone) parts.push("**телефон** (любой)");
+  if (pet.minDomestic > 0) parts.push(`быт **≥ ${pet.minDomestic.toLocaleString("ru-RU")}**`);
+
+  const sovLbl = apartmentLabelBySovietIndex(pet.minSovietAptIndex);
+  const forLbl = apartmentLabelByForeignIndex(pet.minForeignAptIndex);
+  if (sovLbl && forLbl) {
+    parts.push(`своя кв. **${sovLbl}** (сов.) **или** **${forLbl}** (зам.)`);
+  } else if (sovLbl) {
+    parts.push(`своя кв. (сов.) **${sovLbl}** или выше`);
+  } else if (forLbl) {
+    parts.push(`своя кв. (зам.) **${forLbl}** или выше`);
+  }
+
+  if (parts.length === 0) return "без особых требований";
+  return parts.join(" · ");
+}
+
 export function petOwnershipBlockReason(u: {
   hasPhone?: boolean;
   domesticPoints?: number;

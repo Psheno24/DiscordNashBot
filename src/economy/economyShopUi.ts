@@ -20,6 +20,7 @@ import {
   patchStatsFromShop,
   petOwnershipBlockReason,
   petPurchaseCostRub,
+  petRequirementsLine,
   phonesByOrigin,
   shopApartmentPurchaseCostRub,
   shopCarPurchaseCostRub,
@@ -442,10 +443,13 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
 export function buildShopAnimalsEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = getPetDef(u.ownedPetId);
-  const lines = PET_MODELS.map(
-    (p) =>
-      `• **${p.label}** — покупка **${fmt(scaledShopPrice(member.guild.id, p.purchaseRub))}** ₽, **${fmt(p.dailyUpkeepRub)}** ₽/сут, **+${p.dailyPsRub}** СР/сут`,
-  );
+  const lines = PET_MODELS.map((p) => {
+    const cost = scaledShopPrice(member.guild.id, petPurchaseCostRub(cur, p));
+    return [
+      `• **${p.label}** — покупка **${fmt(cost)}** ₽, **${fmt(p.dailyUpkeepRub)}** ₽/сут, **+${p.dailyPsRub}** СР/сут`,
+      `  Требования: ${petRequirementsLine(p)}`,
+    ].join("\n");
+  });
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Животные")
@@ -454,6 +458,8 @@ export function buildShopAnimalsEmbed(member: GuildMember): EmbedBuilder {
         `Баланс: **${fmt(u.rubles)}** ₽`,
         cur ? `Питомец: **${cur.label}**` : "Питомец: **нет**",
         "При покупке нового старый продаётся за **50%** цены.",
+        "Уход в **00:00 МСК**: списание ₽ и начисление СР; без денег на содержание бонус СР **не начисляется**.",
+        "Жильё для питомцев — только **собственность** (аренда не подходит).",
         "",
         ...lines,
       ].join("\n"),
