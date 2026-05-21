@@ -102,16 +102,15 @@ export async function buildProfileCardMessagePayload(
   const u = getEconomyUser(target.guild.id, target.id);
   const accent = getProfileFrameColor(options.previewColorId ?? u.profileCardColor).accent;
   const colorDef = getProfileFrameColor(options.previewColorId ?? u.profileCardColor);
-  const title = options.watermark
-    ? `Превью · ${colorDef.label} · ${target.displayName}`
-    : `Карточка · ${target.displayName}`;
   const embed = new EmbedBuilder()
     .setColor(parseInt(accent.slice(1), 16))
-    .setTitle(title)
     .setImage("attachment://profile-card.png");
   if (options.watermark) {
     embed.setDescription(
-      `_Водяной знак «ПРЕВЬЮ» — только пример. После **Купить** рамка сохранится без него._`,
+      [
+        `**Превью · ${colorDef.label}** · ${target.displayName}`,
+        `_Водяной знак «ПРЕВЬЮ» — только пример. После **Купить** рамка сохранится без него._`,
+      ].join("\n"),
     );
   }
   return { embed, file };

@@ -5,18 +5,27 @@ import type { ProfileFrameColorId } from "./profileThemes.js";
 import { getEconomyUser } from "./userStore.js";
 import type { GuildMember } from "discord.js";
 
-/** 2× для чёткого текста в превью Discord. */
-const SCALE = 2;
-const s = (n: number) => Math.round(n * SCALE);
+/** Как изначально (Discord сам масштабирует превью). */
+const W = 820;
+const H = 420;
 
-const W = s(820);
-const H = s(420);
+const FONT_NAME = 30;
+const FONT_BODY = 19;
+const FONT_SMALL = 13;
+const FONT_BADGE = 14;
+const FONT_WATERMARK = 52;
+
+const AVATAR_SIZE = 140;
+const AVATAR_X = 32;
+const AVATAR_Y = 108;
+const TEXT_X = 188;
+const LINE_H = 24;
+const GAP_SECTION = 8;
+
 const FONT_FAMILY = "ProfileDejaVu";
 
 export type ProfileCardRenderOptions = {
-  /** Цвет рамки для примерки (без сохранения). */
   previewColorId?: ProfileFrameColorId;
-  /** Водяной знак «ПРЕВЬЮ» (пример до покупки). */
   watermark?: boolean;
 };
 
@@ -48,57 +57,57 @@ function drawAvatar(ctx: SKRSContext2D, img: Image, x: number, y: number, size: 
   const cy = y + r;
   ctx.save();
   ctx.beginPath();
-  ctx.arc(cx, cy, r - s(2), 0, Math.PI * 2);
+  ctx.arc(cx, cy, r - 2, 0, Math.PI * 2);
   ctx.closePath();
   ctx.clip();
   ctx.drawImage(img, x, y, size, size);
   ctx.restore();
   ctx.strokeStyle = "#ffffff44";
-  ctx.lineWidth = s(2);
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(cx, cy, r - s(2), 0, Math.PI * 2);
+  ctx.arc(cx, cy, r - 2, 0, Math.PI * 2);
   ctx.stroke();
 }
 
 function drawTopBadge(ctx: SKRSContext2D, text: string, x: number, y: number, fill: string, stroke: string): void {
-  ctx.font = `bold ${s(13)}px "${FONT_FAMILY}Bold"`;
-  const padX = s(10);
+  ctx.font = `bold ${FONT_BADGE}px "${FONT_FAMILY}Bold"`;
+  const padX = 10;
   const tw = ctx.measureText(text).width;
   const bw = tw + padX * 2;
-  const bh = s(22);
-  drawRoundedRect(ctx, x, y, bw, bh, s(6));
+  const bh = 24;
+  drawRoundedRect(ctx, x, y, bw, bh, 6);
   ctx.fillStyle = fill;
   ctx.fill();
   ctx.strokeStyle = stroke;
-  ctx.lineWidth = s(2);
+  ctx.lineWidth = 2;
   ctx.stroke();
   ctx.fillStyle = "#0a0a0a";
-  ctx.fillText(text, x + padX, y + s(16));
+  ctx.fillText(text, x + padX, y + 17);
 }
 
 function drawFrameEffects(ctx: SKRSContext2D, content: ProfileCardContent, accent: string): void {
-  const pad = s(8);
-  drawRoundedRect(ctx, pad, pad, W - pad * 2, H - pad * 2, s(14));
+  const pad = 8;
+  drawRoundedRect(ctx, pad, pad, W - pad * 2, H - pad * 2, 14);
   ctx.strokeStyle = accent;
-  ctx.lineWidth = s(4);
+  ctx.lineWidth = 4;
   ctx.stroke();
 
   if (content.isTopRub) {
     ctx.strokeStyle = "#ffd700";
-    ctx.lineWidth = s(5);
-    drawRoundedRect(ctx, pad - s(2), pad - s(2), W - pad * 2 + s(4), H - pad * 2 + s(4), s(16));
+    ctx.lineWidth = 5;
+    drawRoundedRect(ctx, pad - 2, pad - 2, W - pad * 2 + 4, H - pad * 2 + 4, 16);
     ctx.stroke();
-    drawTopBadge(ctx, "★ TOP ₽", W - s(150), s(18), "#ffd700cc", "#ffd700");
+    drawTopBadge(ctx, "★ TOP ₽", W - 158, 16, "#ffd700cc", "#ffd700");
   }
   if (content.isTopPs) {
     ctx.strokeStyle = "#00e5ff";
-    ctx.lineWidth = content.isTopRub ? s(3) : s(5);
+    ctx.lineWidth = content.isTopRub ? 3 : 5;
     if (!content.isTopRub) {
-      drawRoundedRect(ctx, pad - s(2), pad - s(2), W - pad * 2 + s(4), H - pad * 2 + s(4), s(16));
+      drawRoundedRect(ctx, pad - 2, pad - 2, W - pad * 2 + 4, H - pad * 2 + 4, 16);
       ctx.stroke();
     }
-    const bx = content.isTopRub ? W - s(150) : W - s(140);
-    const by = content.isTopRub ? s(46) : s(18);
+    const bx = content.isTopRub ? W - 158 : W - 148;
+    const by = content.isTopRub ? 44 : 16;
     drawTopBadge(ctx, "★ TOP СР", bx, by, "#00e5ffcc", "#00e5ff");
   }
 }
@@ -106,7 +115,7 @@ function drawFrameEffects(ctx: SKRSContext2D, content: ProfileCardContent, accen
 function drawWatermark(ctx: SKRSContext2D, accent: string): void {
   ctx.save();
   ctx.globalAlpha = 0.38;
-  ctx.font = `bold ${s(56)}px "${FONT_FAMILY}Bold"`;
+  ctx.font = `bold ${FONT_WATERMARK}px "${FONT_FAMILY}Bold"`;
   ctx.fillStyle = accent;
   ctx.textAlign = "center";
   ctx.translate(W / 2, H / 2);
@@ -136,47 +145,46 @@ export async function renderProfileCardPng(
   ctx.fillStyle = "#0e0e12";
   ctx.fillRect(0, 0, W, H);
 
-  drawRoundedRect(ctx, s(12), s(12), W - s(24), H - s(24), s(12));
+  drawRoundedRect(ctx, 12, 12, W - 24, H - 24, 12);
   ctx.fillStyle = content.background;
   ctx.fill();
 
   drawFrameEffects(ctx, content, content.accent);
 
   try {
-    const avatarUrl = member.user.displayAvatarURL({ extension: "png", size: 512 });
+    const avatarUrl = member.user.displayAvatarURL({ extension: "png", size: 256 });
     const avatar = await fetchAvatar(avatarUrl);
-    drawAvatar(ctx, avatar, s(36), s(118), s(132));
+    drawAvatar(ctx, avatar, AVATAR_X, AVATAR_Y, AVATAR_SIZE);
   } catch {
     ctx.fillStyle = "#333";
-    drawRoundedRect(ctx, s(36), s(118), s(132), s(132), s(66));
+    drawRoundedRect(ctx, AVATAR_X, AVATAR_Y, AVATAR_SIZE, AVATAR_SIZE, AVATAR_SIZE / 2);
     ctx.fill();
     ctx.fillStyle = "#888";
-    ctx.font = `${s(14)}px "${FONT_FAMILY}"`;
-    ctx.fillText("нет фото", s(62), s(188));
+    ctx.font = `${FONT_BODY}px "${FONT_FAMILY}"`;
+    ctx.fillText("нет фото", AVATAR_X + 36, AVATAR_Y + 76);
   }
 
-  const textX = s(196);
-  let y = s(56);
+  let y = 50;
   ctx.fillStyle = "#f0f0f0";
-  ctx.font = `bold ${s(24)}px "${FONT_FAMILY}Bold"`;
-  ctx.fillText(content.displayName, textX, y);
+  ctx.font = `bold ${FONT_NAME}px "${FONT_FAMILY}Bold"`;
+  ctx.fillText(content.displayName, TEXT_X, y);
 
-  y += s(36);
-  ctx.font = `${s(16)}px "${FONT_FAMILY}"`;
+  y += 34;
+  ctx.font = `${FONT_BODY}px "${FONT_FAMILY}"`;
   for (const line of content.lines) {
     if (line === "") {
-      y += s(10);
+      y += GAP_SECTION;
       continue;
     }
     ctx.fillStyle = line.startsWith("СР:") || line.startsWith("₽:") ? content.accent : "#d0d0d8";
     if (line.startsWith("Престиж:") || line.startsWith("Быт:")) ctx.fillStyle = "#e8e8f0";
-    ctx.fillText(line, textX, y);
-    y += s(26);
+    ctx.fillText(line, TEXT_X, y);
+    y += LINE_H;
   }
 
   ctx.fillStyle = "#ffffff55";
-  ctx.font = `${s(12)}px "${FONT_FAMILY}"`;
-  ctx.fillText("НЕЙРОКОМ · досье", s(24), H - s(28));
+  ctx.font = `${FONT_SMALL}px "${FONT_FAMILY}"`;
+  ctx.fillText("НЕЙРОКОМ · досье", 20, H - 22);
 
   if (options.watermark) {
     drawWatermark(ctx, content.accent);
