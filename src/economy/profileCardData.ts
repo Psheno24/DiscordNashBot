@@ -1,13 +1,13 @@
 import { getApartmentDef, getCarDef, getPetDef, getPhoneDef } from "./economyCatalog.js";
 import { economyJobTitle } from "./jobTitles.js";
 import { computeGuildEconomyRanks, formatServerPlace, type GuildEconomyRanks } from "./profileCardRanks.js";
-import { resolveProfileCardStyle, type ProfileCardBackgroundId } from "./profileThemes.js";
+import { resolveProfileCardStyle, type ProfileFrameColorId } from "./profileThemes.js";
 import type { EconomyUser } from "./userStore.js";
 import type { GuildMember } from "discord.js";
 
 export interface ProfileCardContent {
   displayName: string;
-  frameColorId: ProfileCardBackgroundId;
+  frameColorId: ProfileFrameColorId;
   accent: string;
   background: string;
   isTopPs: boolean;
@@ -50,12 +50,12 @@ export function buildProfileCardContent(
   member: GuildMember,
   u: EconomyUser,
   ranks?: GuildEconomyRanks,
-  previewBackgroundId?: ProfileCardBackgroundId,
+  previewFrameColorId?: ProfileFrameColorId,
 ): ProfileCardContent {
   const guildId = member.guild.id;
   const userId = member.id;
   const r = ranks ?? computeGuildEconomyRanks(guildId);
-  const style = resolveProfileCardStyle(u.profileCardColor, previewBackgroundId);
+  const style = resolveProfileCardStyle(u.profileCardColor, previewFrameColorId);
 
   const psPlace = r.psPlaceByUserId.get(userId) ?? r.totalPlayers;
   const rubPlace = r.rubPlaceByUserId.get(userId) ?? r.totalPlayers;

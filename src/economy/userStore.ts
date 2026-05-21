@@ -172,7 +172,7 @@ export interface EconomyUser {
   /** КД «Контроль» ИП. */
   solePropControlReadyAt?: number;
 
-  /** Фон карточки под текстом (магазин → оформление). */
+  /** Цвет рамки карточки (магазин → оформление). */
   profileCardColor?: string;
 }
 
