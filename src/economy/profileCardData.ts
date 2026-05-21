@@ -50,11 +50,12 @@ export function buildProfileCardContent(
   member: GuildMember,
   u: EconomyUser,
   ranks?: GuildEconomyRanks,
+  previewColorId?: ProfileFrameColorId,
 ): ProfileCardContent {
   const guildId = member.guild.id;
   const userId = member.id;
   const r = ranks ?? computeGuildEconomyRanks(guildId);
-  const frame = getProfileFrameColor(u.profileCardColor);
+  const frame = getProfileFrameColor(previewColorId ?? u.profileCardColor);
 
   const psPlace = r.psPlaceByUserId.get(userId) ?? r.totalPlayers;
   const rubPlace = r.rubPlaceByUserId.get(userId) ?? r.totalPlayers;
