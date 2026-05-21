@@ -1,13 +1,13 @@
 import { getApartmentDef, getCarDef, getPetDef, getPhoneDef } from "./economyCatalog.js";
 import { economyJobTitle } from "./jobTitles.js";
 import { computeGuildEconomyRanks, formatServerPlace, type GuildEconomyRanks } from "./profileCardRanks.js";
-import { getProfileFrameColor, type ProfileFrameColorId } from "./profileThemes.js";
+import { resolveProfileCardStyle, type ProfileCardBackgroundId } from "./profileThemes.js";
 import type { EconomyUser } from "./userStore.js";
 import type { GuildMember } from "discord.js";
 
 export interface ProfileCardContent {
   displayName: string;
-  frameColorId: ProfileFrameColorId;
+  frameColorId: ProfileCardBackgroundId;
   accent: string;
   background: string;
   isTopPs: boolean;
@@ -50,12 +50,12 @@ export function buildProfileCardContent(
   member: GuildMember,
   u: EconomyUser,
   ranks?: GuildEconomyRanks,
-  previewColorId?: ProfileFrameColorId,
+  previewBackgroundId?: ProfileCardBackgroundId,
 ): ProfileCardContent {
   const guildId = member.guild.id;
   const userId = member.id;
   const r = ranks ?? computeGuildEconomyRanks(guildId);
-  const frame = getProfileFrameColor(previewColorId ?? u.profileCardColor);
+  const style = resolveProfileCardStyle(u.profileCardColor, previewBackgroundId);
 
   const psPlace = r.psPlaceByUserId.get(userId) ?? r.totalPlayers;
   const rubPlace = r.rubPlaceByUserId.get(userId) ?? r.totalPlayers;
@@ -80,9 +80,9 @@ export function buildProfileCardContent(
 
   return {
     displayName: truncateLine(member.displayName, 28),
-    frameColorId: frame.id,
-    accent: frame.accent,
-    background: frame.background,
+    frameColorId: style.frameColorId,
+    accent: style.accent,
+    background: style.background,
     isTopPs: r.topPsUserId === userId,
     isTopRub: r.topRubUserId === userId,
     lines,

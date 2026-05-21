@@ -1,7 +1,7 @@
 import { createCanvas, GlobalFonts, loadImage, type Image, type SKRSContext2D } from "@napi-rs/canvas";
 import { createRequire } from "node:module";
 import { buildProfileCardContent, type ProfileCardContent } from "./profileCardData.js";
-import type { ProfileFrameColorId } from "./profileThemes.js";
+import type { ProfileCardBackgroundId } from "./profileThemes.js";
 import { getEconomyUser } from "./userStore.js";
 import type { GuildMember } from "discord.js";
 
@@ -25,7 +25,7 @@ const GAP_SECTION = 8;
 const FONT_FAMILY = "ProfileDejaVu";
 
 export type ProfileCardRenderOptions = {
-  previewColorId?: ProfileFrameColorId;
+  previewBackgroundId?: ProfileCardBackgroundId;
   watermark?: boolean;
 };
 
@@ -138,7 +138,7 @@ export async function renderProfileCardPng(
 ): Promise<Buffer> {
   ensureFonts();
   const u = getEconomyUser(member.guild.id, member.id);
-  const content = buildProfileCardContent(member, u, undefined, options.previewColorId);
+  const content = buildProfileCardContent(member, u, undefined, options.previewBackgroundId);
   const canvas = createCanvas(W, H);
   const ctx = canvas.getContext("2d");
 

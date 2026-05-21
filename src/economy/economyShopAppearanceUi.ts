@@ -11,11 +11,11 @@ import {
 import { appendFeedEvent } from "./feedStore.js";
 import { renderProfileCardPng, type ProfileCardRenderOptions } from "./profileCardRender.js";
 import {
-  getProfileFrameColor,
-  isProfileFrameColorId,
+  getProfileCardBackground,
+  isProfileCardBackgroundId,
+  PROFILE_CARD_BACKGROUNDS,
   PROFILE_COLOR_CHANGE_PRICE_RUB,
-  PROFILE_FRAME_COLORS,
-  type ProfileFrameColorId,
+  type ProfileCardBackgroundId,
 } from "./profileThemes.js";
 import { getEconomyUser, patchEconomyUser } from "./userStore.js";
 const ECON_SHOP_HUB_BACK = "econ:shop:hub";
@@ -24,9 +24,9 @@ const PANEL_COLOR = 0x2b2d31;
 
 export const ECON_SHOP_APPEARANCE = "econ:shop:appearance";
 export const ECON_SHOP_APPEARANCE_CARD = "econ:shop:appearance:card";
-/** Примерить цвет рамки (без оплаты). */
+/** Примерить фон карточки (без оплаты). */
 export const ECON_SHOP_APPEARANCE_COLOR_TRY_PREFIX = "econ:shop:appearance:try:";
-/** Купить выбранный цвет после примерки. */
+/** Купить выбранный фон после примерки. */
 export const ECON_SHOP_APPEARANCE_COLOR_BUY_PREFIX = "econ:shop:appearance:buy:";
 
 function fmt(n: number): string {
@@ -35,27 +35,29 @@ function fmt(n: number): string {
 
 export function buildShopAppearanceEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getProfileFrameColor(u.profileCardColor);
+  const cur = getProfileCardBackground(u.profileCardColor);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Оформление")
     .setDescription(
       [
         `Баланс: **${fmt(u.rubles)}** ₽`,
-        `Рамка сейчас: **${cur.label}**`,
+        `Фон карточки: **${cur.label}**`,
         "",
-        "1. Нажмите **цвет** — **примерка** с водяным знаком.",
-        `2. Если нравится — **Купить** (**${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)}** ₽).`,
+        "Меняется только **фон под текстом**. Рамка и строки **СР** / **₽** — всегда алые.",
         "",
-        "**Моя карточка** — как выглядит досье **сейчас** (без превью).",
-        "Топ-1 по **СР** / **₽** — метка на рамке.",
+        "1. **Примерить** цвет — превью с водяным знаком.",
+        `2. **Купить** (**${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)}** ₽).`,
+        "",
+        "**Моя карточка** — досье как сейчас.",
+        "Топ-1 по **СР** / **₽** — метки на рамке.",
       ].join("\n"),
     );
 }
 
 export function buildShopAppearanceRows(): ActionRowBuilder<ButtonBuilder>[] {
   const colorRow = new ActionRowBuilder<ButtonBuilder>();
-  for (const c of PROFILE_FRAME_COLORS) {
+  for (const c of PROFILE_CARD_BACKGROUNDS) {
     const short = c.label.length > 12 ? `${c.label.slice(0, 10)}…` : c.label;
     colorRow.addComponents(
       new ButtonBuilder()
@@ -78,7 +80,7 @@ export function buildShopAppearanceRows(): ActionRowBuilder<ButtonBuilder>[] {
   ];
 }
 
-function buildColorPreviewBuyRows(colorId: ProfileFrameColorId): ActionRowBuilder<ButtonBuilder>[] {
+function buildColorPreviewBuyRows(colorId: ProfileCardBackgroundId): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
@@ -103,14 +105,14 @@ export async function buildProfileCardMessagePayload(
   if (!options.watermark) {
     return { file };
   }
-  const colorDef = getProfileFrameColor(
-    options.previewColorId ?? getEconomyUser(target.guild.id, target.id).profileCardColor,
+  const bgDef = getProfileCardBackground(
+    options.previewBackgroundId ?? getEconomyUser(target.guild.id, target.id).profileCardColor,
   );
   return {
     file,
     content: [
-      `**Превью · ${colorDef.label}** · ${target.displayName}`,
-      `_Водяной знак «ПРЕВЬЮ» — только пример. После **Купить** рамка сохранится без него._`,
+      `**Превью фона · ${bgDef.label}** · ${target.displayName}`,
+      `_Водяной знак «ПРЕВЬЮ» — только пример. После **Купить** фон сохранится без него._`,
     ].join("\n"),
   };
 }
@@ -128,8 +130,8 @@ export async function replyWithProfileCardImage(
   }
   try {
     const { file, content } = await buildProfileCardMessagePayload(member, options);
-    const components = options.watermark && options.previewColorId
-      ? buildColorPreviewBuyRows(options.previewColorId)
+    const components = options.watermark && options.previewBackgroundId
+      ? buildColorPreviewBuyRows(options.previewBackgroundId)
       : [];
     await interaction.editReply({
       content: content ?? undefined,
@@ -166,21 +168,21 @@ export async function handleAppearanceShopButton(interaction: ButtonInteraction,
 
   if (id.startsWith(ECON_SHOP_APPEARANCE_COLOR_TRY_PREFIX)) {
     const colorId = id.slice(ECON_SHOP_APPEARANCE_COLOR_TRY_PREFIX.length);
-    if (!isProfileFrameColorId(colorId)) {
-      await interaction.reply({ content: "Неизвестный цвет.", flags: MessageFlags.Ephemeral });
+    if (!isProfileCardBackgroundId(colorId)) {
+      await interaction.reply({ content: "Неизвестный фон.", flags: MessageFlags.Ephemeral });
       return true;
     }
     const u = getEconomyUser(member.guild.id, member.id);
-    const def = getProfileFrameColor(colorId);
+    const def = getProfileCardBackground(colorId);
     if (u.profileCardColor === colorId) {
       await interaction.reply({
-        content: `Цвет **${def.label}** уже активен. Откройте **«Моя карточка»**.`,
+        content: `Фон **${def.label}** уже активен. Откройте **«Моя карточка»**.`,
         flags: MessageFlags.Ephemeral,
       });
       return true;
     }
     await replyWithProfileCardImage(interaction, member, {
-      previewColorId: colorId,
+      previewBackgroundId: colorId,
       watermark: true,
     });
     return true;
@@ -188,15 +190,15 @@ export async function handleAppearanceShopButton(interaction: ButtonInteraction,
 
   if (id.startsWith(ECON_SHOP_APPEARANCE_COLOR_BUY_PREFIX)) {
     const colorId = id.slice(ECON_SHOP_APPEARANCE_COLOR_BUY_PREFIX.length);
-    if (!isProfileFrameColorId(colorId)) {
-      await interaction.reply({ content: "Неизвестный цвет.", flags: MessageFlags.Ephemeral });
+    if (!isProfileCardBackgroundId(colorId)) {
+      await interaction.reply({ content: "Неизвестный фон.", flags: MessageFlags.Ephemeral });
       return true;
     }
     const u = getEconomyUser(member.guild.id, member.id);
-    const def = getProfileFrameColor(colorId);
+    const def = getProfileCardBackground(colorId);
     if (u.profileCardColor === colorId) {
       await interaction.reply({
-        content: `Цвет **${def.label}** уже куплен и активен.`,
+        content: `Фон **${def.label}** уже активен.`,
         flags: MessageFlags.Ephemeral,
       });
       return true;
@@ -217,7 +219,7 @@ export async function handleAppearanceShopButton(interaction: ButtonInteraction,
       guildId: member.guild.id,
       type: "job:shift",
       actorUserId: member.id,
-      text: `${member.toString()} купил цвет карточки **${def.label}** (−${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)} ₽).`,
+      text: `${member.toString()} купил фон карточки **${def.label}** (−${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)} ₽).`,
     });
     await replyWithProfileCardImage(interaction, member, {});
     return true;
