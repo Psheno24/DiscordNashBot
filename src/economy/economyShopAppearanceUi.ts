@@ -50,7 +50,7 @@ export function buildShopAppearanceEmbed(member: GuildMember): EmbedBuilder {
         `2. **Купить** (**${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)}** ₽).`,
         "",
         "**Моя карточка** — досье как сейчас.",
-        "Топ-1 по **СР** / **₽** — метки на рамке.",
+        "Топ-1 по **СР** / **₽** — значки **★ TOP** на карточке.",
       ].join("\n"),
     );
 }

@@ -93,19 +93,9 @@ function drawFrameEffects(ctx: SKRSContext2D, content: ProfileCardContent, accen
   ctx.stroke();
 
   if (content.isTopRub) {
-    ctx.strokeStyle = "#ffd700";
-    ctx.lineWidth = 5;
-    drawRoundedRect(ctx, pad - 2, pad - 2, W - pad * 2 + 4, H - pad * 2 + 4, 16);
-    ctx.stroke();
     drawTopBadge(ctx, "★ TOP ₽", W - 158, 16, "#ffd700cc", "#ffd700");
   }
   if (content.isTopPs) {
-    ctx.strokeStyle = "#00e5ff";
-    ctx.lineWidth = content.isTopRub ? 3 : 5;
-    if (!content.isTopRub) {
-      drawRoundedRect(ctx, pad - 2, pad - 2, W - pad * 2 + 4, H - pad * 2 + 4, 16);
-      ctx.stroke();
-    }
     const bx = content.isTopRub ? W - 158 : W - 148;
     const by = content.isTopRub ? 44 : 16;
     drawTopBadge(ctx, "★ TOP СР", bx, by, "#00e5ffcc", "#00e5ff");
