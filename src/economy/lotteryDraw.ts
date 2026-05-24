@@ -112,13 +112,14 @@ export function runLotteryDrawForGuild(guild: Guild, periodYmd: string, nowMs: n
     byUser.set(p.userId, (byUser.get(p.userId) ?? 0) + p.rub);
   }
 
-  const feedLines: string[] = [];
+  const feedWinners: { userId: string; credit: number }[] = [];
   for (const [userId, total] of byUser) {
     const u = getEconomyUser(guild.id, userId);
     const credit = applyUnregisteredVehiclePenalty(u, total);
     patchEconomyUser(guild.id, userId, { rubles: u.rubles + credit });
-    feedLines.push(`<@${userId}>: лотерея **+${credit.toLocaleString("ru-RU")}** ₽`);
+    feedWinners.push({ userId, credit });
   }
+  feedWinners.sort((a, b) => b.credit - a.credit);
 
   const nextPeriod = lotteryPeriodMskYmd(nowMs + 60_000);
   const nextJackpot = ensureJackpotFloor(jackpot);
@@ -129,23 +130,29 @@ export function runLotteryDrawForGuild(guild: Guild, periodYmd: string, nowMs: n
     ticketsSold: 0,
   });
 
-  if (feedLines.length) {
+  const jackpotLine = `**Джекпот** → **${nextJackpot.toLocaleString("ru-RU")}** ₽`;
+  const header = `**Розыгрыш лотереи** (${periodYmd}, 21:00 МСК)`;
+
+  if (feedWinners.length) {
+    const winnerLines = feedWinners.map(
+      (w) => `<@${w.userId}> — **+${w.credit.toLocaleString("ru-RU")}** ₽`,
+    );
     appendFeedEvent({
       ts: nowMs,
       guildId: guild.id,
       type: "job:shift",
-      text: `**Розыгрыш лотереи** (${periodYmd}, 21:00 МСК): ${feedLines.join(" · ")}. Джекпот на следующий период: **${nextJackpot.toLocaleString("ru-RU")}** ₽`,
+      text: [header, ...winnerLines, "", jackpotLine].join("\n"),
     });
   } else {
     appendFeedEvent({
       ts: nowMs,
       guildId: guild.id,
       type: "job:shift",
-      text: `**Розыгрыш лотереи** (${periodYmd}, 21:00 МСК): без выигрышей. Джекпот: **${nextJackpot.toLocaleString("ru-RU")}** ₽`,
+      text: [header, "Без выигрышей.", "", jackpotLine].join("\n"),
     });
   }
 
-  return feedLines;
+  return feedWinners.map((w) => `<@${w.userId}>: лотерея **+${w.credit.toLocaleString("ru-RU")}** ₽`);
 }
 
 const drawnPeriods = new Set<string>();
