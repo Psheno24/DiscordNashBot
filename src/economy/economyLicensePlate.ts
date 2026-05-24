@@ -226,7 +226,8 @@ const REGION_SET = new Set(VEHICLE_PLATE_REGION_CODES);
 const LETTER_SET = new Set<string>(VEHICLE_PLATE_LETTERS);
 
 export const SHOP_PLATE_REGISTER_BASE_RUB = 10_000;
-export const SHOP_PLATE_CHANGE_NUMBER_BASE_RUB = 2_000;
+export const SHOP_PLATE_CHANGE_DIGITS_BASE_RUB = 2_000;
+export const SHOP_PLATE_CHANGE_LETTERS_BASE_RUB = 3_000;
 export const SHOP_PLATE_CHANGE_REGION_BASE_RUB = 5_000;
 
 /** Штраф к положительному заработку: −10%. */
@@ -255,12 +256,21 @@ export function pickRandomPlateRegion(): string {
   return pickRandom(VEHICLE_PLATE_REGION_CODES);
 }
 
-export function rollRandomVehiclePlateSerial(): Pick<VehiclePlateParts, "l1" | "digits" | "l2"> {
+/** Случайные 3 цифры (000–999, повторы допустимы). */
+export function rollRandomVehiclePlateDigits(): string {
+  return pickRandomPlateDigits();
+}
+
+/** Случайные буквы серии (повторы допустимы). */
+export function rollRandomVehiclePlateLetters(): Pick<VehiclePlateParts, "l1" | "l2"> {
   return {
     l1: pickRandomPlateLetter(),
-    digits: pickRandomPlateDigits(),
     l2: `${pickRandomPlateLetter()}${pickRandomPlateLetter()}`,
   };
+}
+
+export function rollRandomVehiclePlateSerial(): Pick<VehiclePlateParts, "l1" | "digits" | "l2"> {
+  return { ...rollRandomVehiclePlateLetters(), digits: rollRandomVehiclePlateDigits() };
 }
 
 export function rollRandomVehiclePlateParts(): VehiclePlateParts {

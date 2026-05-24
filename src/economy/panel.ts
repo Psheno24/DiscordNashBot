@@ -139,11 +139,13 @@ import {
   buildShopCarSellConfirmEmbed,
   buildShopCarSellConfirmRows,
   registerVehiclePlate,
-  changeVehiclePlateNumber,
+  changeVehiclePlateDigits,
+  changeVehiclePlateLetters,
   changeVehiclePlateRegion,
   ECON_SHOP_PLATE,
   ECON_SHOP_PLATE_REGISTER,
-  ECON_SHOP_PLATE_NUMBER,
+  ECON_SHOP_PLATE_DIGITS,
+  ECON_SHOP_PLATE_LETTERS,
   ECON_SHOP_PLATE_REGION,
   ECON_SHOP_CAR_SELL,
   ECON_SHOP_CAR_SELL_CONFIRM,
@@ -2541,7 +2543,8 @@ function isEconomyButton(id: string): boolean {
       ECON_SHOP_CAR,
       ECON_SHOP_PLATE,
       ECON_SHOP_PLATE_REGISTER,
-      ECON_SHOP_PLATE_NUMBER,
+      ECON_SHOP_PLATE_DIGITS,
+      ECON_SHOP_PLATE_LETTERS,
       ECON_SHOP_PLATE_REGION,
       ECON_SHOP_CAR_SELL,
       ECON_SHOP_CAR_SELL_CONFIRM,
@@ -3273,8 +3276,22 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
-  if (id === ECON_SHOP_PLATE_NUMBER) {
-    const r = changeVehiclePlateNumber(member);
+  if (id === ECON_SHOP_PLATE_DIGITS) {
+    const r = changeVehiclePlateDigits(member);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPlateEmbed(member)],
+      components: buildShopPlateRows(member),
+    });
+    await interaction.followUp({ content: `Новый номер: **${r.plate}**`, flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id === ECON_SHOP_PLATE_LETTERS) {
+    const r = changeVehiclePlateLetters(member);
     if (!r.ok) {
       await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
       return true;

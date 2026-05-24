@@ -37,7 +37,8 @@ import {
 } from "./economyCatalog.js";
 import {
   SHOP_CAR_PLATE_HINT_LINES,
-  SHOP_PLATE_CHANGE_NUMBER_BASE_RUB,
+  SHOP_PLATE_CHANGE_DIGITS_BASE_RUB,
+  SHOP_PLATE_CHANGE_LETTERS_BASE_RUB,
   SHOP_PLATE_CHANGE_REGION_BASE_RUB,
   SHOP_PLATE_REGISTER_BASE_RUB,
   clearVehiclePlatePatch,
@@ -45,8 +46,9 @@ import {
   formatVehiclePlateFromUser,
   parseVehiclePlateParts,
   pickRandomPlateRegion,
+  rollRandomVehiclePlateDigits,
+  rollRandomVehiclePlateLetters,
   rollRandomVehiclePlateParts,
-  rollRandomVehiclePlateSerial,
   userHasOwnedCar,
   userHasVehiclePlate,
   vehiclePlatePartsToPatch,
@@ -80,7 +82,8 @@ export const ECON_SHOP_CAR_ORIGIN_PREFIX = "econ:shop:car:";
 export const ECON_SHOP_CAR_BUY_PREFIX = "econ:shop:carBuy:";
 export const ECON_SHOP_PLATE = "econ:shop:plate";
 export const ECON_SHOP_PLATE_REGISTER = "econ:shop:plate:reg";
-export const ECON_SHOP_PLATE_NUMBER = "econ:shop:plate:num";
+export const ECON_SHOP_PLATE_DIGITS = "econ:shop:plate:dig";
+export const ECON_SHOP_PLATE_LETTERS = "econ:shop:plate:let";
 export const ECON_SHOP_PLATE_REGION = "econ:shop:plate:regio";
 export const ECON_SHOP_CAR_SELL = "econ:shop:car:sell";
 export const ECON_SHOP_CAR_SELL_CONFIRM = "econ:shop:car:sell:ok";
@@ -264,7 +267,8 @@ export function buildShopPlateEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const gid = member.guild.id;
   const regCost = inflatedPlateShopPrice(gid, SHOP_PLATE_REGISTER_BASE_RUB);
-  const numCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_NUMBER_BASE_RUB);
+  const digCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
+  const letCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
   const regioCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
   const plate = formatVehiclePlateFromUser(u);
   const lines = [
@@ -272,11 +276,13 @@ export function buildShopPlateEmbed(member: GuildMember): EmbedBuilder {
     "",
     "При покупке **любого** авто нужно оформить **госномер**. Иначе — штраф **10%** к заработку на работах, сменах и прочих начислениях.",
     "Номер **сохраняется** при замене авто на лучшее; при **продаже** авто госномер **теряется**.",
+    "Буквы и цифры в серии **могут повторяться** (например **А 777 АА**).",
     "",
     plate ? `Текущий номер: **${plate}**` : "Госномер: **не оформлен**",
     "",
-    `• **Оформить** — **${fmt(regCost)}** ₽ (случайный номер и регион)`,
-    `• **Сменить номер** — **${fmt(numCost)}** ₽ (только цифры и буквы до «|»)`,
+    `• **Оформить** — **${fmt(regCost)}** ₽ (случайная серия и регион)`,
+    `• **Сменить цифры** — **${fmt(digCost)}** ₽`,
+    `• **Сменить буквы** — **${fmt(letCost)}** ₽`,
     `• **Сменить регион** — **${fmt(regioCost)}** ₽`,
   ];
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Гос.номер").setDescription(lines.join("\n"));
@@ -288,26 +294,44 @@ export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<Button
   const hasCar = userHasOwnedCar(u);
   const hasPlate = userHasVehiclePlate(u);
   const regCost = inflatedPlateShopPrice(gid, SHOP_PLATE_REGISTER_BASE_RUB);
-  const numCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_NUMBER_BASE_RUB);
+  const digCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
+  const letCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
   const regioCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
+
+  const digitsBtn = new ButtonBuilder()
+    .setCustomId(ECON_SHOP_PLATE_DIGITS)
+    .setLabel(`Цифры · ${fmt(digCost)}₽`)
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(!hasPlate || u.rubles < digCost);
+  const lettersBtn = new ButtonBuilder()
+    .setCustomId(ECON_SHOP_PLATE_LETTERS)
+    .setLabel(`Буквы · ${fmt(letCost)}₽`)
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(!hasPlate || u.rubles < letCost);
+  const regionBtn = new ButtonBuilder()
+    .setCustomId(ECON_SHOP_PLATE_REGION)
+    .setLabel(`Регион · ${fmt(regioCost)}₽`)
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(!hasPlate || u.rubles < regioCost);
+
+  const mainRow = new ActionRowBuilder<ButtonBuilder>();
+  if (!hasPlate) {
+    mainRow.addComponents(
       new ButtonBuilder()
         .setCustomId(ECON_SHOP_PLATE_REGISTER)
         .setLabel(`Оформить · ${fmt(regCost)}₽`)
         .setStyle(ButtonStyle.Success)
-        .setDisabled(!hasCar || hasPlate || u.rubles < regCost),
-      new ButtonBuilder()
-        .setCustomId(ECON_SHOP_PLATE_NUMBER)
-        .setLabel(`Сменить номер · ${fmt(numCost)}₽`)
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!hasPlate || u.rubles < numCost),
-      new ButtonBuilder()
-        .setCustomId(ECON_SHOP_PLATE_REGION)
-        .setLabel(`Сменить регион · ${fmt(regioCost)}₽`)
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!hasPlate || u.rubles < regioCost),
-    ),
+        .setDisabled(!hasCar || u.rubles < regCost),
+      ButtonBuilder.from(digitsBtn).setDisabled(true),
+      ButtonBuilder.from(lettersBtn).setDisabled(true),
+      ButtonBuilder.from(regionBtn).setDisabled(true),
+    );
+  } else {
+    mainRow.addComponents(digitsBtn, lettersBtn, regionBtn);
+  }
+
+  return [
+    mainRow,
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_SHOP_CAR).setLabel("Назад").setStyle(ButtonStyle.Secondary),
     ),
@@ -795,13 +819,28 @@ export function registerVehiclePlate(member: GuildMember): { ok: true; plate: st
   return { ok: true, plate: formatVehiclePlate(parts) };
 }
 
-export function changeVehiclePlateNumber(member: GuildMember): { ok: true; plate: string } | { ok: false; reply: string } {
+export function changeVehiclePlateDigits(member: GuildMember): { ok: true; plate: string } | { ok: false; reply: string } {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = parseVehiclePlateParts(u);
   if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
-  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_NUMBER_BASE_RUB);
+  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  const next = { ...rollRandomVehiclePlateSerial(), region: cur.region };
+  const next = { ...cur, digits: rollRandomVehiclePlateDigits() };
+  patchEconomyUser(member.guild.id, member.id, {
+    rubles: u.rubles - cost,
+    ...vehiclePlatePartsToPatch(next),
+  });
+  remitShopPurchaseVatToTreasury(member.guild.id, cost);
+  return { ok: true, plate: formatVehiclePlate(next) };
+}
+
+export function changeVehiclePlateLetters(member: GuildMember): { ok: true; plate: string } | { ok: false; reply: string } {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = parseVehiclePlateParts(u);
+  if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
+  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
+  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  const next = { ...cur, ...rollRandomVehiclePlateLetters() };
   patchEconomyUser(member.guild.id, member.id, {
     rubles: u.rubles - cost,
     ...vehiclePlatePartsToPatch(next),
