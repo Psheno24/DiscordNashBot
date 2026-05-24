@@ -173,7 +173,7 @@ function shopApartmentTradeInLines(): string[] {
 
 function apartmentShopListLine(guildId: string, a: ApartmentDef): string {
   const util = inflatedApartmentUtilityRub(guildId, a.id);
-  return `• **${a.label}** — **${fmt(inflatedCatalogApartmentPrice(guildId, a.id))}** ₽ (${statLabel(a)}) · ЖКХ **${fmt(util)}** ₽/мес. (1-е числа, МСК)`;
+  return `• **${a.label}** — **${fmt(inflatedCatalogApartmentPrice(guildId, a.id))}** ₽ (${statLabel(a)}) · ЖКХ **${fmt(util)}** ₽/мес.`;
 }
 
 const SHOP_BRANCH_NONE = "**нет**";
@@ -505,7 +505,7 @@ export function buildShopApartmentBuyConfirmEmbed(member: GuildMember, aid: stri
     `Купить **${defA.label}**?`,
     `Спишется **${fmt(cost)}** ₽ с личного счёта.`,
     `Бонус: ${statLabel(defA)}`,
-    `ЖКХ: **${fmt(util)}** ₽/мес. (списание **1-го числа** каждого месяца, МСК).`,
+    `ЖКХ: **${fmt(util)}** ₽/мес.`,
   ];
   if (defA.origin === "soviet" && (u.housingKind ?? "none") === "rent") {
     const rentRefund = housingRentUnusedRefundRub(u, now, gid);
@@ -614,7 +614,6 @@ export function buildShopHousePickEmbed(member: GuildMember): EmbedBuilder {
     "",
     "**Советское** — покупка (быт). **Заморское** — покупка (престиж). Можно владеть **обоими** сразу.",
     "**Аренда** — только советское жильё, для работ 2+ уровня.",
-    "**ЖКХ** — ежемесячно с **собственной** квартиры (тариф у каждого объекта, списание **1-го числа**, МСК).",
   ];
   if (hk === "owned" && u.ownedApartmentId) {
     lines.push("", "Своя **советская** квартира — аренда **недоступна**.");
@@ -848,8 +847,11 @@ export function buildShopHouseListEmbed(member: GuildMember, origin: CatalogOrig
     );
   }
   lines.push("", ...shopApartmentTradeInLines());
-  lines.push(shopPlainSellLine(APARTMENT_SELL_REFUND_RATE), "");
-  lines.push("На кнопках — **краткое** имя (район); ниже — **полное** название и ЖКХ.", "");
+  lines.push(
+    shopPlainSellLine(APARTMENT_SELL_REFUND_RATE),
+    "**ЖКХ** — ежемесячно с **собственной** квартиры (тариф у каждого объекта ниже); списание **1-го числа** каждого месяца, **00:00 МСК**.",
+    "",
+  );
   for (const a of apartmentsByOrigin(origin)) {
     lines.push(apartmentShopListLine(gid, a));
   }
