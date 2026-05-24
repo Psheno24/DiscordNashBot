@@ -3142,7 +3142,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_SHOP_PHONE) {
     await replyOrUpdate(interaction, {
-      embeds: [buildShopOriginPickEmbed("Телефон", member)],
+      embeds: [buildShopOriginPickEmbed("Телефон", member, "phone")],
       components: buildShopOriginPickRows("phone", ECON_SHOP_HUB),
     });
     return true;
@@ -3179,7 +3179,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_SHOP_CAR) {
     await replyOrUpdate(interaction, {
-      embeds: [buildShopOriginPickEmbed("Авто", member)],
+      embeds: [buildShopOriginPickEmbed("Авто", member, "car")],
       components: buildShopOriginPickRows("car", ECON_SHOP_HUB),
     });
     return true;

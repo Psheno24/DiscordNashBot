@@ -104,6 +104,43 @@ function shopApartmentTradeInLines(): string[] {
   ];
 }
 
+const SHOP_BRANCH_NONE = "**нет**";
+
+function shopBranchOwnershipBlock(u: EconomyUser, kind: "phone" | "car" | "house"): string[] {
+  let soviet = SHOP_BRANCH_NONE;
+  let foreign = SHOP_BRANCH_NONE;
+
+  if (kind === "phone") {
+    if (u.hasPhone) {
+      const cur = getPhoneDef(u.phoneModelId);
+      if (cur) {
+        const label = `**${cur.label}**`;
+        if (cur.origin === "soviet") soviet = label;
+        else foreign = label;
+      }
+    }
+  } else if (kind === "car") {
+    const cur = getCarDef(u.ownedCarId);
+    if (cur) {
+      const label = `**${cur.label}**`;
+      if (cur.origin === "soviet") soviet = label;
+      else foreign = label;
+    }
+  } else {
+    const hk = u.housingKind ?? "none";
+    if (hk === "owned" && u.ownedApartmentId) {
+      soviet = `**${getApartmentDef(u.ownedApartmentId)?.label ?? "—"}**`;
+    } else if (hk === "rent" && u.housingRentNextDueMs) {
+      soviet = `аренда до <t:${Math.floor(u.housingRentNextDueMs / 1000)}:R>`;
+    }
+    if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId) {
+      foreign = `**${getApartmentDef(u.ownedForeignApartmentId)?.label ?? "—"}**`;
+    }
+  }
+
+  return ["**У вас:**", `• **Советское:** ${soviet}`, `• **Заморское:** ${foreign}`];
+}
+
 export function shopItemButtonLabel(short: string, cost: number): string {
   const s = short.length > 18 ? `${short.slice(0, 16)}…` : short;
   return `${s} · ${fmt(cost)}₽`;
@@ -155,13 +192,21 @@ export function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBu
   ];
 }
 
-export function buildShopOriginPickEmbed(title: string, member: GuildMember): EmbedBuilder {
+export function buildShopOriginPickEmbed(
+  title: string,
+  member: GuildMember,
+  kind: "phone" | "car",
+): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle(title)
     .setDescription(
-      `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}** · быт **${fmt(u.domesticPoints ?? 0)}**`,
+      [
+        `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}** · быт **${fmt(u.domesticPoints ?? 0)}**`,
+        "",
+        ...shopBranchOwnershipBlock(u, kind),
+      ].join("\n"),
     );
 }
 
@@ -182,17 +227,13 @@ export function buildShopHousePickEmbed(member: GuildMember): EmbedBuilder {
   const lines = [
     `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}** · быт **${fmt(u.domesticPoints ?? 0)}**`,
     "",
+    ...shopBranchOwnershipBlock(u, "house"),
+    "",
     "**Советское** — покупка (быт). **Заморское** — покупка (престиж). Можно владеть **обоими** сразу.",
     "**Аренда** — только советское жильё, для работ 2+ уровня.",
   ];
-  if (hk === "rent" && u.housingRentNextDueMs) {
-    lines.push("", `Сейчас аренда до <t:${Math.floor(u.housingRentNextDueMs / 1000)}:R>.`);
-  }
   if (hk === "owned" && u.ownedApartmentId) {
-    lines.push("", `Своё (сов.): **${getApartmentDef(u.ownedApartmentId)?.label ?? "—"}** — аренда недоступна.`);
-  }
-  if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId) {
-    lines.push("", `Своё (зам.): **${getApartmentDef(u.ownedForeignApartmentId)?.label ?? "—"}**.`);
+    lines.push("", "Своя **советская** квартира — аренда **недоступна**.");
   }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Жильё").setDescription(lines.join("\n"));
 }
