@@ -9,6 +9,7 @@ import {
   type GuildLotteryState,
   type LotteryTicketEntry,
 } from "./lotteryStore.js";
+import { applyUnregisteredVehiclePenalty } from "./economyLicensePlate.js";
 import { getEconomyUser, patchEconomyUser } from "./userStore.js";
 import { mskTodayYmd } from "./mskCalendar.js";
 
@@ -114,8 +115,9 @@ export function runLotteryDrawForGuild(guild: Guild, periodYmd: string, nowMs: n
   const feedLines: string[] = [];
   for (const [userId, total] of byUser) {
     const u = getEconomyUser(guild.id, userId);
-    patchEconomyUser(guild.id, userId, { rubles: u.rubles + total });
-    feedLines.push(`<@${userId}>: лотерея **+${total.toLocaleString("ru-RU")}** ₽`);
+    const credit = applyUnregisteredVehiclePenalty(u, total);
+    patchEconomyUser(guild.id, userId, { rubles: u.rubles + credit });
+    feedLines.push(`<@${userId}>: лотерея **+${credit.toLocaleString("ru-RU")}** ₽`);
   }
 
   const nextPeriod = lotteryPeriodMskYmd(nowMs + 60_000);

@@ -19,6 +19,7 @@ import { MSK_OFFSET_MS } from "../time/msk.js";
 import { appendFeedEvent } from "../economy/feedStore.js";
 import { ensureEconomyFeedPanel } from "../economy/panel.js";
 import { addToTreasury, trySpendTreasuryRub } from "../economy/taxTreasury.js";
+import { applyUnregisteredVehiclePenalty } from "../economy/economyLicensePlate.js";
 import { getEconomyUser, patchEconomyUser } from "../economy/userStore.js";
 import {
   buildAdminEconEmbed,
@@ -1523,7 +1524,8 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
         if (bet.optionId !== optionId) continue;
         const payout = Math.floor(bet.amount * bet.oddsAtPlacement);
         const u = getEconomyUser(guildId, userId);
-        patchEconomyUser(guildId, userId, { rubles: u.rubles + payout });
+        const credit = applyUnregisteredVehiclePenalty(u, payout);
+        patchEconomyUser(guildId, userId, { rubles: u.rubles + credit });
       }
     }
     ev.status = "resolved";

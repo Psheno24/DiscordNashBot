@@ -1,4 +1,5 @@
 import { getPetDef } from "./economyCatalog.js";
+import { applyUnregisteredVehiclePenalty } from "./economyLicensePlate.js";
 import { scaledEconomyExpense, scaledEconomyPsIncome } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { getEconomyUser, patchEconomyUser } from "./userStore.js";
@@ -39,7 +40,7 @@ export function processPetMskMidnightForUser(
     return;
   }
 
-  const psAdd = scaledEconomyPsIncome(guildId, pet.dailyPsRub);
+  const psAdd = applyUnregisteredVehiclePenalty(u, scaledEconomyPsIncome(guildId, pet.dailyPsRub));
   patchEconomyUser(guildId, userId, {
     ...mark,
     rubles: u.rubles - upkeep,

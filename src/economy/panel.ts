@@ -133,8 +133,28 @@ import {
   purchasePhone,
   sellForeignApartment,
   sellSovietApartment,
+  sellOwnedCar,
+  buildShopPlateEmbed,
+  buildShopPlateRows,
+  buildShopCarSellConfirmEmbed,
+  buildShopCarSellConfirmRows,
+  registerVehiclePlate,
+  changeVehiclePlateNumber,
+  changeVehiclePlateRegion,
+  ECON_SHOP_PLATE,
+  ECON_SHOP_PLATE_REGISTER,
+  ECON_SHOP_PLATE_NUMBER,
+  ECON_SHOP_PLATE_REGION,
+  ECON_SHOP_CAR_SELL,
+  ECON_SHOP_CAR_SELL_CONFIRM,
+  ECON_SHOP_CAR_SELL_CANCEL,
   ECON_SHOP_APPEARANCE,
 } from "./economyShopUi.js";
+import {
+  applyUnregisteredVehiclePenalty,
+  economyCarDisplayLine,
+  formatVehiclePlateFromUser,
+} from "./economyLicensePlate.js";
 import {
   buildShopAppearanceEmbed,
   buildShopAppearanceRows,
@@ -441,8 +461,7 @@ function buildProfilePurchasesBlock(u: ReturnType<typeof getEconomyUser>): strin
       lines.push(`Телефон: **${pl}** (сим **${u.courierSimNumber}**, баланс **${fmt(u.simBalanceRub ?? 0)}** ₽)`);
     }
   }
-  const car = getCarDef(u.ownedCarId);
-  lines.push(`Авто: **${car?.label ?? "нет"}**`);
+  lines.push(economyCarDisplayLine(u));
   const hk = u.housingKind ?? "none";
   const homeSov =
     hk === "rent" ? "аренда (сов.)" : hk === "owned" ? (getApartmentDef(u.ownedApartmentId)?.label ?? "сов.") : "нет (сов.)";
@@ -1183,7 +1202,11 @@ function courierTransportExtrasLines(u: ReturnType<typeof getEconomyUser>, now: 
   const lines: string[] = [];
   const car = getCarDef(u.ownedCarId);
   if (car) {
-    lines.push(`**Авто:** **${car.label}** (${car.speedKmh} км/ч) — КД смены **${(car.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч.`);
+    const plate = formatVehiclePlateFromUser(u);
+    const platePart = plate ? ` · ${plate}` : " · **госномер не оформлен** (−10% к заработку)";
+    lines.push(
+      `**Авто:** **${car.label}** (${car.speedKmh} км/ч) — КД **${(car.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч${platePart}.`,
+    );
   } else if (hasActiveBikeRental(u, now)) {
     const t = Math.floor((u.courierBikeUntilMs ?? 0) / 1000);
     lines.push(`**Электровелосипед:** оплачен до <t:${t}:F> (<t:${t}:R>).`);
@@ -2516,6 +2539,13 @@ function isEconomyButton(id: string): boolean {
       ECON_SHOP_PHONE,
       ECON_PROFILE_BUTTON_CARD,
       ECON_SHOP_CAR,
+      ECON_SHOP_PLATE,
+      ECON_SHOP_PLATE_REGISTER,
+      ECON_SHOP_PLATE_NUMBER,
+      ECON_SHOP_PLATE_REGION,
+      ECON_SHOP_CAR_SELL,
+      ECON_SHOP_CAR_SELL_CONFIRM,
+      ECON_SHOP_CAR_SELL_CANCEL,
       ECON_SHOP_HOUSE,
       ECON_SHOP_ANIMALS,
       ECON_SHOP_SIM,
@@ -2746,6 +2776,12 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     }
   }
 
+  if (jobTotal > 0) {
+    const beforePlate = jobTotal;
+    jobTotal = applyUnregisteredVehiclePenalty(u, jobTotal);
+    if (jobTotal < beforePlate) notes.push("без госномера: **−10%** к выплате");
+  }
+
   let payToWallet = jobTotal;
   if (jobTotal > 0 && isLegalTaxableJob(jobId)) {
     const { netRub, taxRub } = withholdLegalIncomeTax(guildId, jobTotal);
@@ -2758,6 +2794,7 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
   let psGain = 0;
   if (shiftPsApplies(jobId)) {
     psGain = shiftPsFromDomestic(jobId, u.domesticPoints ?? 0);
+    psGain = applyUnregisteredVehiclePenalty(u, psGain);
     if (psGain > 0) notes.push(`**+${fmt(psGain)}** СР (быт)`);
   }
 
@@ -3211,6 +3248,97 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       embeds: [buildShopCarListEmbed(member, defC.origin)],
       components: buildShopCarListRows(member, defC.origin),
     });
+    return true;
+  }
+
+  if (id === ECON_SHOP_PLATE) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPlateEmbed(member)],
+      components: buildShopPlateRows(member),
+    });
+    return true;
+  }
+
+  if (id === ECON_SHOP_PLATE_REGISTER) {
+    const r = registerVehiclePlate(member);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPlateEmbed(member)],
+      components: buildShopPlateRows(member),
+    });
+    await interaction.followUp({ content: `Оформлен госномер: **${r.plate}**`, flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id === ECON_SHOP_PLATE_NUMBER) {
+    const r = changeVehiclePlateNumber(member);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPlateEmbed(member)],
+      components: buildShopPlateRows(member),
+    });
+    await interaction.followUp({ content: `Новый номер: **${r.plate}**`, flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id === ECON_SHOP_PLATE_REGION) {
+    const r = changeVehiclePlateRegion(member);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPlateEmbed(member)],
+      components: buildShopPlateRows(member),
+    });
+    await interaction.followUp({ content: `Новый номер: **${r.plate}**`, flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id === ECON_SHOP_CAR_SELL) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (!getCarDef(u.ownedCarId)) {
+      await interaction.reply({ content: "Нет **авто** для продажи.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopCarSellConfirmEmbed(member)],
+      components: buildShopCarSellConfirmRows(),
+    });
+    return true;
+  }
+
+  if (id === ECON_SHOP_CAR_SELL_CANCEL) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    const cur = getCarDef(u.ownedCarId);
+    const origin = cur?.origin ?? "soviet";
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopCarListEmbed(member, origin)],
+      components: buildShopCarListRows(member, origin),
+    });
+    return true;
+  }
+
+  if (id === ECON_SHOP_CAR_SELL_CONFIRM) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    const cur = getCarDef(u.ownedCarId);
+    const origin = cur?.origin ?? "soviet";
+    const r = sellOwnedCar(member);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopOriginPickEmbed("Авто", member, "car")],
+      components: buildShopOriginPickRows("car", ECON_SHOP_HUB),
+    });
+    await interaction.followUp({ content: `Авто продано: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -3755,7 +3883,8 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         return true;
       }
       const streak = u.jobMskDayStreak ?? 0;
-      const bonus = rubFromTier3MetaPercent(member.guild.id, streak);
+      let bonus = rubFromTier3MetaPercent(member.guild.id, streak);
+      bonus = applyUnregisteredVehiclePenalty(u, bonus);
       const gid = member.guild.id;
       let netRub = bonus;
       let taxRub = 0;
@@ -3787,7 +3916,8 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       }
       if (def3.archetype === "legal") {
         const streak = u.jobMskDayStreak ?? 0;
-        const bonus = rubFromTier3MetaPercent(member.guild.id, streak);
+        let bonus = rubFromTier3MetaPercent(member.guild.id, streak);
+        bonus = applyUnregisteredVehiclePenalty(u, bonus);
         const gid = member.guild.id;
         const { netRub, taxRub } = withholdLegalIncomeTax(gid, bonus);
         patchEconomyUser(member.guild.id, member.id, {

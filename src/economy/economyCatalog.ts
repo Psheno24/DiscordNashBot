@@ -241,6 +241,7 @@ export const CAR_MODELS = CAR_MODELS_BASE.map((item) =>
 ) as CarDef[];
 
 export const CAR_TRADE_IN_RATE = 0.75;
+export const CAR_SELL_REFUND_RATE = 0.45;
 
 export function getCarDef(id: string | undefined): CarDef | undefined {
   if (!id) return undefined;

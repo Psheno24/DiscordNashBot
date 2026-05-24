@@ -10,6 +10,7 @@ import {
   APARTMENT_SELL_REFUND_RATE,
   APARTMENT_TRADE_IN_RATE,
   APARTMENT_TRADE_IN_RATE_AFTER_MONTH,
+  CAR_SELL_REFUND_RATE,
   CAR_TRADE_IN_RATE,
   HOUSING_CALENDAR_MONTH_MS,
   PET_MODELS,
@@ -34,6 +35,22 @@ import {
   type CatalogOrigin,
   type HousingRentPlan,
 } from "./economyCatalog.js";
+import {
+  SHOP_CAR_PLATE_HINT_LINES,
+  SHOP_PLATE_CHANGE_NUMBER_BASE_RUB,
+  SHOP_PLATE_CHANGE_REGION_BASE_RUB,
+  SHOP_PLATE_REGISTER_BASE_RUB,
+  clearVehiclePlatePatch,
+  formatVehiclePlate,
+  formatVehiclePlateFromUser,
+  parseVehiclePlateParts,
+  pickRandomPlateRegion,
+  rollRandomVehiclePlateParts,
+  rollRandomVehiclePlateSerial,
+  userHasOwnedCar,
+  userHasVehiclePlate,
+  vehiclePlatePartsToPatch,
+} from "./economyLicensePlate.js";
 import { cancelRentAndBikeOnAssetPurchase, clearSovietHousingRentPatch } from "./economyHousingUtil.js";
 import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub, userHasActiveHousing } from "./economyHousing.js";
 import {
@@ -61,6 +78,13 @@ export const ECON_SHOP_PHONE_BUY_PREFIX = "econ:shop:phoneBuy:";
 export const ECON_SHOP_CAR = "econ:shop:car";
 export const ECON_SHOP_CAR_ORIGIN_PREFIX = "econ:shop:car:";
 export const ECON_SHOP_CAR_BUY_PREFIX = "econ:shop:carBuy:";
+export const ECON_SHOP_PLATE = "econ:shop:plate";
+export const ECON_SHOP_PLATE_REGISTER = "econ:shop:plate:reg";
+export const ECON_SHOP_PLATE_NUMBER = "econ:shop:plate:num";
+export const ECON_SHOP_PLATE_REGION = "econ:shop:plate:regio";
+export const ECON_SHOP_CAR_SELL = "econ:shop:car:sell";
+export const ECON_SHOP_CAR_SELL_CONFIRM = "econ:shop:car:sell:ok";
+export const ECON_SHOP_CAR_SELL_CANCEL = "econ:shop:car:sell:cancel";
 export const ECON_SHOP_HOUSE = "econ:shop:house";
 export const ECON_SHOP_HOUSE_ORIGIN_PREFIX = "econ:shop:house:";
 /** Меню аренды (не путать с `econ:shop:house:rent:1d` и т.д.). */
@@ -126,6 +150,13 @@ function shopBranchOwnershipBlock(u: EconomyUser, kind: "phone" | "car" | "house
       if (cur.origin === "soviet") soviet = label;
       else foreign = label;
     }
+    const plate = formatVehiclePlateFromUser(u);
+    return [
+      "**У вас:**",
+      `• **Советское:** ${soviet}`,
+      `• **Заморское:** ${foreign}`,
+      `• **Госномер:** ${plate ? `**${plate}**` : SHOP_BRANCH_NONE}`,
+    ];
   } else {
     const hk = u.housingKind ?? "none";
     if (hk === "owned" && u.ownedApartmentId) {
@@ -172,7 +203,7 @@ export function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBu
   const u = getEconomyUser(member.guild.id, member.id);
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_PHONE).setLabel("Телефон").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(ECON_SHOP_PHONE).setLabel("Телефон").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(ECON_SHOP_SIM)
         .setLabel("Симка")
@@ -198,25 +229,115 @@ export function buildShopOriginPickEmbed(
   kind: "phone" | "car",
 ): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  return new EmbedBuilder()
-    .setColor(PANEL_COLOR)
-    .setTitle(title)
-    .setDescription(
-      [
-        `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}** · быт **${fmt(u.domesticPoints ?? 0)}**`,
-        "",
-        ...shopBranchOwnershipBlock(u, kind),
-      ].join("\n"),
-    );
+  const lines = [
+    `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}** · быт **${fmt(u.domesticPoints ?? 0)}**`,
+    "",
+    ...shopBranchOwnershipBlock(u, kind),
+  ];
+  if (kind === "car") {
+    lines.push("", ...SHOP_CAR_PLATE_HINT_LINES);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle(title).setDescription(lines.join("\n"));
 }
 
 export function buildShopOriginPickRows(kind: "phone" | "car", backId: string): ActionRowBuilder<ButtonBuilder>[] {
   const prefix = kind === "phone" ? ECON_SHOP_PHONE_ORIGIN_PREFIX : ECON_SHOP_CAR_ORIGIN_PREFIX;
+  const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(`${prefix}soviet`).setLabel("Советское").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`${prefix}foreign`).setLabel("Заморское").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+  );
+  if (kind === "phone") return [row1];
+  return [
+    row1,
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_PLATE).setLabel("Гос.номер").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+function inflatedPlateShopPrice(guildId: string, baseRub: number): number {
+  return scaledShopPrice(guildId, baseRub);
+}
+
+export function buildShopPlateEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const regCost = inflatedPlateShopPrice(gid, SHOP_PLATE_REGISTER_BASE_RUB);
+  const numCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_NUMBER_BASE_RUB);
+  const regioCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
+  const plate = formatVehiclePlateFromUser(u);
+  const lines = [
+    `Баланс: **${fmt(u.rubles)}** ₽`,
+    "",
+    "При покупке **любого** авто нужно оформить **госномер**. Иначе — штраф **10%** к заработку на работах, сменах и прочих начислениях.",
+    "Номер **сохраняется** при замене авто на лучшее; при **продаже** авто госномер **теряется**.",
+    "",
+    plate ? `Текущий номер: **${plate}**` : "Госномер: **не оформлен**",
+    "",
+    `• **Оформить** — **${fmt(regCost)}** ₽ (случайный номер и регион)`,
+    `• **Сменить номер** — **${fmt(numCost)}** ₽ (только цифры и буквы до «|»)`,
+    `• **Сменить регион** — **${fmt(regioCost)}** ₽`,
+  ];
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Гос.номер").setDescription(lines.join("\n"));
+}
+
+export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const hasCar = userHasOwnedCar(u);
+  const hasPlate = userHasVehiclePlate(u);
+  const regCost = inflatedPlateShopPrice(gid, SHOP_PLATE_REGISTER_BASE_RUB);
+  const numCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_NUMBER_BASE_RUB);
+  const regioCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`${prefix}soviet`).setLabel("Советское").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`${prefix}foreign`).setLabel("Заморское").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_PLATE_REGISTER)
+        .setLabel(`Оформить · ${fmt(regCost)}₽`)
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(!hasCar || hasPlate || u.rubles < regCost),
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_PLATE_NUMBER)
+        .setLabel(`Сменить номер · ${fmt(numCost)}₽`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasPlate || u.rubles < numCost),
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_PLATE_REGION)
+        .setLabel(`Сменить регион · ${fmt(regioCost)}₽`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasPlate || u.rubles < regioCost),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_CAR).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+export function buildShopCarSellConfirmEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = getCarDef(u.ownedCarId);
+  const refund = cur
+    ? Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_SELL_REFUND_RATE)
+    : 0;
+  const plate = formatVehiclePlateFromUser(u);
+  const lines = [
+    `Продать **${cur?.label ?? "авто"}**?`,
+    `Вернётся **${fmt(refund)}** ₽ (**${tradeInPctLabel(CAR_SELL_REFUND_RATE)}** каталожной цены).`,
+    "",
+    "Это **продажа**, не замена на лучшее — авто исчезнет с профиля.",
+  ];
+  if (plate) {
+    lines.push("", `⚠️ Вместе с авто будет снят госномер **${plate}**. При следующей покупке авто номер нужно оформить **заново**.`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Продажа авто").setDescription(lines.join("\n"));
+}
+
+export function buildShopCarSellConfirmRows(): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_CAR_SELL_CONFIRM).setLabel("Продать").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(ECON_SHOP_CAR_SELL_CANCEL).setLabel("Отмена").setStyle(ButtonStyle.Secondary),
     ),
   ];
 }
@@ -384,6 +505,7 @@ export function buildShopCarListEmbed(member: GuildMember, origin: CatalogOrigin
     (c) =>
       `• **${c.label}** — **${fmt(inflatedCatalogCarPrice(member.guild.id, c.id))}** ₽ (${statLabel(c)}) · КД доставки **${(c.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч`,
   );
+  const plateLine = formatVehiclePlateFromUser(u);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle(`Авто · ${originTitle(origin)}`)
@@ -391,6 +513,9 @@ export function buildShopCarListEmbed(member: GuildMember, origin: CatalogOrigin
       [
         `Баланс: **${fmt(u.rubles)}** ₽`,
         cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет**",
+        plateLine ? `Госномер: **${plateLine}**` : "Госномер: **нет**",
+        "",
+        ...SHOP_CAR_PLATE_HINT_LINES,
         "",
         shopUpgradeTradeInLine(CAR_TRADE_IN_RATE),
         "",
@@ -403,6 +528,13 @@ export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin)
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = getCarDef(u.ownedCarId);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (cur && cur.origin === origin) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_SHOP_CAR_SELL).setLabel("Продать авто").setStyle(ButtonStyle.Danger),
+      ),
+    );
+  }
   const list = carsByOrigin(origin);
   for (let i = 0; i < list.length; i += 3) {
     const slice = list.slice(i, i + 3);
@@ -646,6 +778,69 @@ export function purchaseCar(member: GuildMember, cid: string): { ok: true } | { 
   });
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   return { ok: true };
+}
+
+export function registerVehiclePlate(member: GuildMember): { ok: true; plate: string } | { ok: false; reply: string } {
+  const u = getEconomyUser(member.guild.id, member.id);
+  if (!userHasOwnedCar(u)) return { ok: false, reply: "Сначала купите **авто**." };
+  if (userHasVehiclePlate(u)) return { ok: false, reply: "Госномер **уже оформлен**." };
+  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_REGISTER_BASE_RUB);
+  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  const parts = rollRandomVehiclePlateParts();
+  patchEconomyUser(member.guild.id, member.id, {
+    rubles: u.rubles - cost,
+    ...vehiclePlatePartsToPatch(parts),
+  });
+  remitShopPurchaseVatToTreasury(member.guild.id, cost);
+  return { ok: true, plate: formatVehiclePlate(parts) };
+}
+
+export function changeVehiclePlateNumber(member: GuildMember): { ok: true; plate: string } | { ok: false; reply: string } {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = parseVehiclePlateParts(u);
+  if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
+  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_NUMBER_BASE_RUB);
+  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  const next = { ...rollRandomVehiclePlateSerial(), region: cur.region };
+  patchEconomyUser(member.guild.id, member.id, {
+    rubles: u.rubles - cost,
+    ...vehiclePlatePartsToPatch(next),
+  });
+  remitShopPurchaseVatToTreasury(member.guild.id, cost);
+  return { ok: true, plate: formatVehiclePlate(next) };
+}
+
+export function changeVehiclePlateRegion(member: GuildMember): { ok: true; plate: string } | { ok: false; reply: string } {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = parseVehiclePlateParts(u);
+  if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
+  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
+  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  const next = { ...cur, region: pickRandomPlateRegion() };
+  patchEconomyUser(member.guild.id, member.id, {
+    rubles: u.rubles - cost,
+    ...vehiclePlatePartsToPatch(next),
+  });
+  remitShopPurchaseVatToTreasury(member.guild.id, cost);
+  return { ok: true, plate: formatVehiclePlate(next) };
+}
+
+export function sellOwnedCar(member: GuildMember): { ok: true; refund: number } | { ok: false; reply: string } {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = getCarDef(u.ownedCarId);
+  if (!cur) return { ok: false, reply: "Нет **авто** для продажи." };
+  const refund = Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_SELL_REFUND_RATE);
+  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
+    prestigeDelta: -cur.prestigeDelta,
+    domesticDelta: -cur.domesticDelta,
+  });
+  patchEconomyUser(member.guild.id, member.id, {
+    rubles: u.rubles + refund,
+    ownedCarId: undefined,
+    ...clearVehiclePlatePatch(),
+    ...stats,
+  });
+  return { ok: true, refund };
 }
 
 export function purchaseApartment(member: GuildMember, aid: string): { ok: true; refund: number } | { ok: false; reply: string } {

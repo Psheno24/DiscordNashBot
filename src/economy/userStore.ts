@@ -12,6 +12,7 @@ import {
   migrateCatalogItemId,
   type HousingRentPlan,
 } from "./economyCatalog.js";
+import { isValidVehiclePlateParts } from "./economyLicensePlate.js";
 import { SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS } from "./shiftPayCoeff.js";
 
 export type JobId =
@@ -78,6 +79,11 @@ export interface EconomyUser {
   domesticPoints?: number;
   /** Купленный автомобиль — снимает аренду вела с UI и укорачивает КД смены доставки. */
   ownedCarId?: string;
+  /** Госномер (формат «А 123 ВС | 77 RUS»). */
+  vehiclePlateL1?: string;
+  vehiclePlateDigits?: string;
+  vehiclePlateL2?: string;
+  vehiclePlateRegion?: string;
 
   /** Советское жильё: нет / аренда / своя квартира. */
   housingKind?: HousingKind;
@@ -442,6 +448,40 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     courierBikeUntilMs = undefined;
   }
 
+  let vehiclePlateL1 =
+    typeof (u as any)?.vehiclePlateL1 === "string" ? String((u as any).vehiclePlateL1).toUpperCase() : undefined;
+  let vehiclePlateDigits =
+    typeof (u as any)?.vehiclePlateDigits === "string" ? String((u as any).vehiclePlateDigits) : undefined;
+  let vehiclePlateL2 =
+    typeof (u as any)?.vehiclePlateL2 === "string" ? String((u as any).vehiclePlateL2).toUpperCase() : undefined;
+  let vehiclePlateRegion =
+    typeof (u as any)?.vehiclePlateRegion === "string" ? String((u as any).vehiclePlateRegion) : undefined;
+  if (!ownedCarId) {
+    vehiclePlateL1 = undefined;
+    vehiclePlateDigits = undefined;
+    vehiclePlateL2 = undefined;
+    vehiclePlateRegion = undefined;
+  } else if (vehiclePlateL1 && vehiclePlateDigits && vehiclePlateL2 && vehiclePlateRegion) {
+    if (
+      !isValidVehiclePlateParts({
+        l1: vehiclePlateL1,
+        digits: vehiclePlateDigits,
+        l2: vehiclePlateL2,
+        region: vehiclePlateRegion,
+      })
+    ) {
+      vehiclePlateL1 = undefined;
+      vehiclePlateDigits = undefined;
+      vehiclePlateL2 = undefined;
+      vehiclePlateRegion = undefined;
+    }
+  } else {
+    vehiclePlateL1 = undefined;
+    vehiclePlateDigits = undefined;
+    vehiclePlateL2 = undefined;
+    vehiclePlateRegion = undefined;
+  }
+
   if (ownedApartmentId) {
     const aptO = getApartmentDef(ownedApartmentId);
     if (aptO?.origin === "foreign") {
@@ -517,6 +557,10 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     prestigePoints,
     domesticPoints,
     ownedCarId,
+    vehiclePlateL1,
+    vehiclePlateDigits,
+    vehiclePlateL2,
+    vehiclePlateRegion,
     housingKind: housingKind === "none" ? undefined : housingKind,
     housingRentNextDueMs,
     housingRentPlan,

@@ -1,5 +1,6 @@
 import type { Client } from "discord.js";
 import { getGuildConfig, patchGuildConfig } from "../guildConfig/store.js";
+import { applyUnregisteredVehiclePenalty } from "./economyLicensePlate.js";
 import { feedNetPrestigeRubBonus, feedPrestigeDomesticBonusSuffix } from "./economyFeedBonus.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { processHousingMskMidnightForUser } from "./economyHousing.js";
@@ -87,7 +88,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
         solePropPassiveEffMult: u.solePropPassiveEffMult,
         solePropPassiveTempMult: u.solePropPassiveTempMult,
       });
-      const passive = passiveOut.total;
+      let passive = applyUnregisteredVehiclePenalty(u, passiveOut.total);
       const rankAfter = tier3PromotionRank(streakOut.nextStreak);
 
       let creditPassive = passive;

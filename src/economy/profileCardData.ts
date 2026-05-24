@@ -1,4 +1,5 @@
-import { getApartmentDef, getCarDef, getPetDef, getPhoneDef } from "./economyCatalog.js";
+import { getApartmentDef, getPetDef, getPhoneDef } from "./economyCatalog.js";
+import { economyCarDisplayLine } from "./economyLicensePlate.js";
 import { economyJobTitle } from "./jobTitles.js";
 import { computeGuildEconomyRanks, formatServerPlace, type GuildEconomyRanks } from "./profileCardRanks.js";
 import { resolveProfileCardStyle, type ProfileFrameColorId } from "./profileThemes.js";
@@ -61,7 +62,6 @@ export function buildProfileCardContent(
   const rubPlace = r.rubPlaceByUserId.get(userId) ?? r.totalPlayers;
 
   const jobName = u.jobId ? economyJobTitle(u.jobId) : "не выбрана";
-  const car = getCarDef(u.ownedCarId);
   const pet = u.ownedPetId ? getPetDef(u.ownedPetId) : undefined;
 
   const lines = [
@@ -69,7 +69,7 @@ export function buildProfileCardContent(
     `Быт: ${fmt(u.domesticPoints ?? 0)}`,
     "",
     truncateLine(phoneLine(u)),
-    truncateLine(`Авто: ${car?.label ?? "нет"}`),
+    truncateLine(economyCarDisplayLine(u, { markdown: false })),
     truncateLine(housingLine(u)),
     truncateLine(`Питомец: ${pet?.label ?? "нет"}`),
     "",

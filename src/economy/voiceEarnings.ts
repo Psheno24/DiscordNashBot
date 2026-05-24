@@ -2,6 +2,7 @@ import { mskCalendarDayKey } from "../time/msk.js";
 import { feedPrestigeDomesticBonusSuffix, voiceDomesticPsBonus } from "./economyFeedBonus.js";
 import { domesticVoicePsMult } from "./economyModifiers.js";
 import { appendFeedEvent } from "./feedStore.js";
+import { applyUnregisteredVehiclePenalty } from "./economyLicensePlate.js";
 import { getEconomyUser, patchEconomyUser } from "./userStore.js";
 
 function psFromMinutesWithDiminishing(alreadyToday: number, addMinutes: number): number {
@@ -43,7 +44,7 @@ export function applyVoiceEarnings(args: {
 
   const psRaw = psFromMinutesWithDiminishing(already, minutes);
   const bytMult = domesticVoicePsMult(u.domesticPoints ?? 0);
-  const psAdded = Math.floor(psRaw * bytMult);
+  const psAdded = applyUnregisteredVehiclePenalty(u, Math.floor(psRaw * bytMult));
 
   const nextMinutesToday = already + minutes;
   patchEconomyUser(guildId, userId, {
