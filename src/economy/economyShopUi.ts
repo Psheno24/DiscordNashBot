@@ -15,6 +15,7 @@ import {
   HOUSING_CALENDAR_MONTH_MS,
   PET_MODELS,
   PET_TRADE_IN_RATE,
+  PHONE_SELL_REFUND_RATE,
   PHONE_TRADE_IN_RATE,
   apartmentsByOrigin,
   carsByOrigin,
@@ -85,9 +86,16 @@ export const ECON_SHOP_HUB = "econ:shop:hub";
 export const ECON_SHOP_PHONE = "econ:shop:phone";
 export const ECON_SHOP_PHONE_ORIGIN_PREFIX = "econ:shop:phone:";
 export const ECON_SHOP_PHONE_BUY_PREFIX = "econ:shop:phoneBuy:";
+export const ECON_SHOP_PHONE_BUY_CONFIRM_PREFIX = "econ:shop:phoneBuyOk:";
+export const ECON_SHOP_PHONE_BUY_CANCEL_PREFIX = "econ:shop:phoneBuyCan:";
+export const ECON_SHOP_PHONE_SELL = "econ:shop:phone:sell";
+export const ECON_SHOP_PHONE_SELL_CONFIRM = "econ:shop:phone:sell:ok";
+export const ECON_SHOP_PHONE_SELL_CANCEL = "econ:shop:phone:sell:cancel";
 export const ECON_SHOP_CAR = "econ:shop:car";
 export const ECON_SHOP_CAR_ORIGIN_PREFIX = "econ:shop:car:";
 export const ECON_SHOP_CAR_BUY_PREFIX = "econ:shop:carBuy:";
+export const ECON_SHOP_CAR_BUY_CONFIRM_PREFIX = "econ:shop:carBuyOk:";
+export const ECON_SHOP_CAR_BUY_CANCEL_PREFIX = "econ:shop:carBuyCan:";
 export const ECON_SHOP_PLATE = "econ:shop:plate";
 export const ECON_SHOP_PLATE_REGISTER = "econ:shop:plate:reg";
 export const ECON_SHOP_PLATE_DIGITS = "econ:shop:plate:dig";
@@ -105,8 +113,14 @@ export const ECON_SHOP_HOUSE_RENT_7D = "econ:shop:house:rent:7d";
 export const ECON_SHOP_HOUSE_RENT_30D = "econ:shop:house:rent:30d";
 export const ECON_SHOP_HOUSE_LEAVE = "econ:shop:house:leave";
 export const ECON_SHOP_APT_BUY_PREFIX = "econ:shop:aptBuy:";
+export const ECON_SHOP_APT_BUY_CONFIRM_PREFIX = "econ:shop:aptBuyOk:";
+export const ECON_SHOP_APT_BUY_CANCEL_PREFIX = "econ:shop:aptBuyCan:";
 export const ECON_SHOP_APT_SELL_SOVIET = "econ:shop:apt:sell:sov";
+export const ECON_SHOP_APT_SELL_SOVIET_CONFIRM = "econ:shop:apt:sell:sov:ok";
+export const ECON_SHOP_APT_SELL_SOVIET_CANCEL = "econ:shop:apt:sell:sov:cancel";
 export const ECON_SHOP_APT_SELL_FOREIGN = "econ:shop:apt:sell:for";
+export const ECON_SHOP_APT_SELL_FOREIGN_CONFIRM = "econ:shop:apt:sell:for:ok";
+export const ECON_SHOP_APT_SELL_FOREIGN_CANCEL = "econ:shop:apt:sell:for:cancel";
 export const ECON_SHOP_ANIMALS = "econ:shop:animals";
 export const ECON_SHOP_PET_BUY_PREFIX = "econ:shop:petBuy:";
 
@@ -132,10 +146,13 @@ function shopUpgradeTradeInLine(rate: number): string {
   return `Апгрейд на **лучшее** в этой ветке: зачёт **${tradeInPctLabel(rate)}** каталожной цены текущего (на кнопках — итог к оплате).`;
 }
 
+function shopPlainSellLine(rate: number): string {
+  return `**Продать** (без замены): возврат **${tradeInPctLabel(rate)}** каталожной цены.`;
+}
+
 function shopApartmentTradeInLines(): string[] {
   return [
     `Переезд на **лучшее** жильё той же ветки: зачёт **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE)}** каталожной цены; если владели **30+ суток** — **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE_AFTER_MONTH)}**.`,
-    `**Продать** — возврат **${tradeInPctLabel(APARTMENT_SELL_REFUND_RATE)}** каталожной цены.`,
   ];
 }
 
@@ -202,6 +219,7 @@ export function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
         "Жильё: можно **советское** и **заморское** одновременно. Телефон и авто — **одно** из двух веток.",
         "",
         "Апгрейд на лучшее в той же ветке уменьшает цену за счёт текущего: телефон **50%**, авто **75%**, жильё **90–120%**, питомец **50%** (подробнее в разделе).",
+        `Продажа без замены: телефон **${tradeInPctLabel(PHONE_SELL_REFUND_RATE)}**, авто **${tradeInPctLabel(CAR_SELL_REFUND_RATE)}**, жильё **${tradeInPctLabel(APARTMENT_SELL_REFUND_RATE)}** каталожной цены.`,
       ].join("\n"),
     );
 }
@@ -366,16 +384,208 @@ export function buildShopCarSellConfirmEmbed(member: GuildMember): EmbedBuilder 
   if (plate) {
     lines.push("", `⚠️ Вместе с авто будет снят госномер **${plate}**. При следующей покупке авто номер нужно оформить **заново**.`);
   }
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Продажа авто").setDescription(lines.join("\n"));
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Подтверждение продажи").setDescription(lines.join("\n"));
 }
 
 export function buildShopCarSellConfirmRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_SHOP_CAR_SELL_CONFIRM).setLabel("Продать").setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(ECON_SHOP_CAR_SELL_CANCEL).setLabel("Отмена").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_SHOP_CAR_SELL_CANCEL).setLabel("Отменить").setStyle(ButtonStyle.Secondary),
     ),
   ];
+}
+
+function buildShopConfirmRows(
+  confirmId: string,
+  confirmLabel: string,
+  confirmStyle: ButtonStyle.Success | ButtonStyle.Danger,
+  cancelId: string,
+): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(confirmId).setLabel(confirmLabel).setStyle(confirmStyle),
+      new ButtonBuilder().setCustomId(cancelId).setLabel("Отменить").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+export function buildShopPhoneBuyConfirmEmbed(member: GuildMember, pid: string): EmbedBuilder | undefined {
+  const defP = getPhoneDef(pid);
+  if (!defP) return undefined;
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = getPhoneDef(u.phoneModelId);
+  const cost = inflatedPhonePurchaseCost(member.guild.id, cur, defP, Boolean(u.hasPhone));
+  const lines = [
+    `Купить **${defP.label}**?`,
+    `Спишется **${fmt(cost)}** ₽ с личного счёта.`,
+    `Бонус: ${statLabel(defP)}`,
+  ];
+  if (cur && cur.origin === defP.origin && u.hasPhone) {
+    const credit = Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_TRADE_IN_RATE);
+    lines.push("", `Зачёт за **${cur.label}**: **−${fmt(credit)}** ₽ (**${tradeInPctLabel(PHONE_TRADE_IN_RATE)}** каталожной цены).`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Подтверждение покупки").setDescription(lines.join("\n"));
+}
+
+export function buildShopPhoneBuyConfirmRows(pid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+  return buildShopConfirmRows(
+    `${ECON_SHOP_PHONE_BUY_CONFIRM_PREFIX}${pid}`,
+    "Купить",
+    ButtonStyle.Success,
+    `${ECON_SHOP_PHONE_BUY_CANCEL_PREFIX}${origin}`,
+  );
+}
+
+export function buildShopCarBuyConfirmEmbed(member: GuildMember, cid: string): EmbedBuilder | undefined {
+  const defC = getCarDef(cid);
+  if (!defC) return undefined;
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = getCarDef(u.ownedCarId);
+  const cost = inflatedCarPurchaseCost(member.guild.id, cur, defC);
+  const lines = [
+    `Купить **${defC.label}**?`,
+    `Спишется **${fmt(cost)}** ₽ с личного счёта.`,
+    `Бонус: ${statLabel(defC)}`,
+  ];
+  if (cur && cur.origin === defC.origin) {
+    const credit = Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_TRADE_IN_RATE);
+    lines.push("", `Зачёт за **${cur.label}**: **−${fmt(credit)}** ₽ (**${tradeInPctLabel(CAR_TRADE_IN_RATE)}** каталожной цены).`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Подтверждение покупки").setDescription(lines.join("\n"));
+}
+
+export function buildShopCarBuyConfirmRows(cid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+  return buildShopConfirmRows(
+    `${ECON_SHOP_CAR_BUY_CONFIRM_PREFIX}${cid}`,
+    "Купить",
+    ButtonStyle.Success,
+    `${ECON_SHOP_CAR_BUY_CANCEL_PREFIX}${origin}`,
+  );
+}
+
+export function buildShopApartmentBuyConfirmEmbed(member: GuildMember, aid: string): EmbedBuilder | undefined {
+  const defA = getApartmentDef(aid);
+  if (!defA) return undefined;
+  const u = getEconomyUser(member.guild.id, member.id);
+  const now = Date.now();
+  const gid = member.guild.id;
+  const curA =
+    defA.origin === "soviet" && (u.housingKind ?? "none") === "owned"
+      ? getApartmentDef(u.ownedApartmentId)
+      : undefined;
+  const curF = defA.origin === "foreign" && u.housingForeignKind === "owned" ? getApartmentDef(u.ownedForeignApartmentId) : undefined;
+  const cur = curA ?? curF;
+  const cost =
+    cur && ((defA.origin === "soviet" && (u.housingKind ?? "none") === "owned") || (defA.origin === "foreign" && u.housingForeignKind === "owned"))
+      ? inflatedApartmentPurchaseCost(
+          gid,
+          cur,
+          defA,
+          defA.origin === "soviet" ? u.ownedApartmentPurchasedAtMs : u.ownedForeignApartmentPurchasedAtMs,
+          now,
+        )
+      : inflatedCatalogApartmentPrice(gid, defA.id);
+  const lines = [
+    `Купить **${defA.label}**?`,
+    `Спишется **${fmt(cost)}** ₽ с личного счёта.`,
+    `Бонус: ${statLabel(defA)}`,
+  ];
+  if (defA.origin === "soviet" && (u.housingKind ?? "none") === "rent") {
+    const rentRefund = housingRentUnusedRefundRub(u, now, gid);
+    if (rentRefund > 0) {
+      lines.push("", `Возврат неиспользованной аренды: **+${fmt(rentRefund)}** ₽.`);
+    }
+  }
+  if (cur && cur.origin === defA.origin) {
+    const rate =
+      defA.origin === "soviet"
+        ? (u.ownedApartmentPurchasedAtMs != null && now - u.ownedApartmentPurchasedAtMs >= HOUSING_CALENDAR_MONTH_MS
+            ? APARTMENT_TRADE_IN_RATE_AFTER_MONTH
+            : APARTMENT_TRADE_IN_RATE)
+        : u.ownedForeignApartmentPurchasedAtMs != null &&
+            now - u.ownedForeignApartmentPurchasedAtMs >= HOUSING_CALENDAR_MONTH_MS
+          ? APARTMENT_TRADE_IN_RATE_AFTER_MONTH
+          : APARTMENT_TRADE_IN_RATE;
+    const credit = Math.floor(inflatedCatalogApartmentPrice(gid, cur.id) * rate);
+    lines.push("", `Зачёт за **${cur.label}**: **−${fmt(credit)}** ₽ (**${tradeInPctLabel(rate)}** каталожной цены).`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Подтверждение покупки").setDescription(lines.join("\n"));
+}
+
+export function buildShopApartmentBuyConfirmRows(aid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+  return buildShopConfirmRows(
+    `${ECON_SHOP_APT_BUY_CONFIRM_PREFIX}${aid}`,
+    "Купить",
+    ButtonStyle.Success,
+    `${ECON_SHOP_APT_BUY_CANCEL_PREFIX}${origin}`,
+  );
+}
+
+export function buildShopPhoneSellConfirmEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = getPhoneDef(u.phoneModelId);
+  const refund = cur
+    ? Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_SELL_REFUND_RATE)
+    : 0;
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Подтверждение продажи")
+    .setDescription(
+      [
+        `Продать **${cur?.label ?? "телефон"}**?`,
+        `Вернётся **${fmt(refund)}** ₽ (**${tradeInPctLabel(PHONE_SELL_REFUND_RATE)}** каталожной цены).`,
+        "",
+        "Это **продажа**, не замена на лучшее — телефон исчезнет с профиля.",
+      ].join("\n"),
+    );
+}
+
+export function buildShopPhoneSellConfirmRows(origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+  return buildShopConfirmRows(
+    ECON_SHOP_PHONE_SELL_CONFIRM,
+    "Продать",
+    ButtonStyle.Danger,
+    `${ECON_SHOP_PHONE_SELL_CANCEL}:${origin}`,
+  );
+}
+
+export function buildShopApartmentSellConfirmEmbed(member: GuildMember, origin: "soviet" | "foreign"): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur =
+    origin === "soviet" ? getApartmentDef(u.ownedApartmentId) : getApartmentDef(u.ownedForeignApartmentId);
+  const refund = cur
+    ? Math.floor(inflatedCatalogApartmentPrice(member.guild.id, cur.id) * APARTMENT_SELL_REFUND_RATE)
+    : 0;
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Подтверждение продажи")
+    .setDescription(
+      [
+        `Продать **${cur?.label ?? "жильё"}**?`,
+        `Вернётся **${fmt(refund)}** ₽ (**${tradeInPctLabel(APARTMENT_SELL_REFUND_RATE)}** каталожной цены).`,
+        "",
+        "Это **продажа**, не переезд на лучшее — жильё исчезнет с профиля.",
+      ].join("\n"),
+    );
+}
+
+export function buildShopApartmentSellSovietConfirmRows(): ActionRowBuilder<ButtonBuilder>[] {
+  return buildShopConfirmRows(
+    ECON_SHOP_APT_SELL_SOVIET_CONFIRM,
+    "Продать",
+    ButtonStyle.Danger,
+    ECON_SHOP_APT_SELL_SOVIET_CANCEL,
+  );
+}
+
+export function buildShopApartmentSellForeignConfirmRows(): ActionRowBuilder<ButtonBuilder>[] {
+  return buildShopConfirmRows(
+    ECON_SHOP_APT_SELL_FOREIGN_CONFIRM,
+    "Продать",
+    ButtonStyle.Danger,
+    ECON_SHOP_APT_SELL_FOREIGN_CANCEL,
+  );
 }
 
 export function buildShopHousePickEmbed(member: GuildMember): EmbedBuilder {
@@ -495,6 +705,7 @@ export function buildShopPhoneListEmbed(member: GuildMember, origin: CatalogOrig
         cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет**",
         "",
         shopUpgradeTradeInLine(PHONE_TRADE_IN_RATE),
+        shopPlainSellLine(PHONE_SELL_REFUND_RATE),
         "",
         ...lines,
       ].join("\n"),
@@ -505,6 +716,13 @@ export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigi
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = getPhoneDef(u.phoneModelId);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (u.hasPhone && cur?.origin === origin) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_SHOP_PHONE_SELL).setLabel("Продать телефон").setStyle(ButtonStyle.Danger),
+      ),
+    );
+  }
   const list = phonesByOrigin(origin);
   for (let i = 0; i < list.length; i += 3) {
     const slice = list.slice(i, i + 3);
@@ -554,6 +772,7 @@ export function buildShopCarListEmbed(member: GuildMember, origin: CatalogOrigin
         ...SHOP_CAR_PLATE_HINT_LINES,
         "",
         shopUpgradeTradeInLine(CAR_TRADE_IN_RATE),
+        shopPlainSellLine(CAR_SELL_REFUND_RATE),
         "",
         ...lines,
       ].join("\n"),
@@ -612,7 +831,8 @@ export function buildShopHouseListEmbed(member: GuildMember, origin: CatalogOrig
   } else if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId) {
     lines.push(`Своё: **${getApartmentDef(u.ownedForeignApartmentId)?.label ?? "—"}**`, "");
   }
-  lines.push("", ...shopApartmentTradeInLines(), "");
+  lines.push("", ...shopApartmentTradeInLines());
+  lines.push(shopPlainSellLine(APARTMENT_SELL_REFUND_RATE), "");
   for (const a of apartmentsByOrigin(origin)) {
     lines.push(`• **${a.label}** — **${fmt(inflatedCatalogApartmentPrice(member.guild.id, a.id))}** ₽ (${statLabel(a)})`);
   }
@@ -961,6 +1181,24 @@ export function changeVehiclePlateRegion(
     plate,
     lastRoll: plateLastRoll("Новый регион", plate, breakdown, prestigeDelta),
   };
+}
+
+export function sellOwnedPhone(member: GuildMember): { ok: true; refund: number } | { ok: false; reply: string } {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = getPhoneDef(u.phoneModelId);
+  if (!u.hasPhone || !cur) return { ok: false, reply: "Нет **телефона** для продажи." };
+  const refund = Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_SELL_REFUND_RATE);
+  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
+    prestigeDelta: -cur.prestigeDelta,
+    domesticDelta: -cur.domesticDelta,
+  });
+  patchEconomyUser(member.guild.id, member.id, {
+    rubles: u.rubles + refund,
+    hasPhone: false,
+    phoneModelId: undefined,
+    ...stats,
+  });
+  return { ok: true, refund };
 }
 
 export function sellOwnedCar(member: GuildMember): { ok: true; refund: number } | { ok: false; reply: string } {

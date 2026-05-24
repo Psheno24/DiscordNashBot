@@ -108,6 +108,8 @@ export const PHONE_MODELS = PHONE_MODELS_BASE.map((item) =>
 ) as PhoneDef[];
 
 export const PHONE_TRADE_IN_RATE = 0.5;
+/** Возврат при продаже телефона без замены (доля каталожной цены). */
+export const PHONE_SELL_REFUND_RATE = PHONE_TRADE_IN_RATE;
 
 export function getPhoneDef(id: string | undefined): PhoneDef | undefined {
   if (!id) return undefined;
