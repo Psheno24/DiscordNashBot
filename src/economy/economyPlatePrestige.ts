@@ -93,12 +93,40 @@ function isBookendMirrorLetters(p: VehiclePlateParts): boolean {
   return p.l1 === p.l2[1] && !isTripleLetter(p) && !isPairLetters(p);
 }
 
-/** Зеркальные цифры и буквы в одном номере. */
+type LetterTierKind = "triple" | "blat" | "pair" | "mirror" | "partial" | "none";
+
+/** Один бонус за буквы: тир выше «голого» зеркала; зеркало не дублируется, если уже есть тир. */
+function letterTierScore(p: VehiclePlateParts): {
+  score: number;
+  label?: string;
+  tier?: BlatTier;
+  kind: LetterTierKind;
+} {
+  const s3 = plateLetters3(p);
+  if (NEGATIVE_BLAT.has(s3)) return { score: 0, kind: "none", label: `${s3} (без бонуса)` };
+
+  if (isTripleLetter(p)) return { score: 750, label: `тройная буква ${s3}`, kind: "triple" };
+
+  const blat = BLAT_SERIES[s3];
+  if (blat) return { score: blat.score, label: blat.label, tier: blat.tier, kind: "blat" };
+
+  if (isPairLetters(p)) return { score: 180, label: `пара ${p.l2}`, kind: "pair" };
+
+  if (isPalindromeLetterSeries(p)) return { score: 200, label: `зеркальная серия ${s3}`, kind: "mirror" };
+  if (isBookendMirrorLetters(p)) return { score: 180, label: `зеркало ${p.l1}·${p.l2}`, kind: "mirror" };
+
+  if (p.l1 === p.l2[0]) return { score: 50, label: "частичное повторение", kind: "partial" };
+  return { score: 0, kind: "none" };
+}
+
+/** Буквы симметричны (для ×полного зеркала; очки — только по тиру). */
+function hasMirrorLetters(p: VehiclePlateParts): boolean {
+  return isTripleLetter(p) || isPairLetters(p) || isPalindromeLetterSeries(p) || isBookendMirrorLetters(p);
+}
+
+/** Зеркальные цифры и буквы — **×1,4**, даже если буквы уже дали тир (серия, тройка…). */
 export function isFullPlateMirror(p: VehiclePlateParts): boolean {
-  const mirrorDigits = isPalindromeDigit(p.digits);
-  const mirrorLetters =
-    isTripleLetter(p) || isPairLetters(p) || isPalindromeLetterSeries(p) || isBookendMirrorLetters(p);
-  return mirrorDigits && mirrorLetters;
+  return isPalindromeDigit(p.digits) && hasMirrorLetters(p);
 }
 
 function isTripleDigit(digits: string): boolean {
@@ -127,24 +155,6 @@ function digitScore(digits: string): { score: number; label?: string } {
   return { score: 0 };
 }
 
-function letterScore(p: VehiclePlateParts): { score: number; label?: string } {
-  const s3 = plateLetters3(p);
-  if (NEGATIVE_BLAT.has(s3)) return { score: 0, label: `${s3} (без бонуса)` };
-  if (isTripleLetter(p)) return { score: 700, label: `тройная буква ${s3}` };
-  if (isPalindromeLetterSeries(p)) return { score: 220, label: `зеркальная серия ${s3}` };
-  if (isPairLetters(p)) return { score: 120, label: `пара ${p.l2}` };
-  if (isBookendMirrorLetters(p)) return { score: 200, label: `зеркало ${p.l1}·${p.l2}` };
-  if (p.l1 === p.l2[0]) return { score: 40, label: "частичное повторение" };
-  return { score: 0 };
-}
-
-function blatScore(p: VehiclePlateParts): { score: number; label?: string; tier?: BlatTier } {
-  const s3 = plateLetters3(p);
-  if (NEGATIVE_BLAT.has(s3)) return { score: 0 };
-  const hit = BLAT_SERIES[s3];
-  if (hit) return { score: hit.score, label: hit.label, tier: hit.tier };
-  return { score: 0 };
-}
 
 function regionScore(region: string): { score: number; label?: string; moscowCore?: boolean; moscowVanity?: boolean; moscowObl?: boolean; spb?: boolean } {
   if (MOSCOW_CORE.has(region)) return { score: 500, label: `Москва ${region}`, moscowCore: true };
@@ -159,17 +169,16 @@ function regionScore(region: string): { score: number; label?: string; moscowCor
 
 function comboMultipliers(
   p: VehiclePlateParts,
-  blat: ReturnType<typeof blatScore>,
+  letter: ReturnType<typeof letterTierScore>,
   region: ReturnType<typeof regionScore>,
   digit: ReturnType<typeof digitScore>,
-  letter: ReturnType<typeof letterScore>,
 ): { mult: number; labels: string[] } {
   let mult = 1;
   const labels: string[] = [];
-  const tripleL = isTripleLetter(p);
+  const tripleL = letter.kind === "triple";
   const tripleD = isTripleDigit(p.digits);
-  const blatS = blat.tier === "S";
-  const hasBlat = blat.score > 0;
+  const blatS = letter.tier === "S";
+  const hasBlat = letter.kind === "blat";
 
   if (tripleL && tripleD) {
     mult *= 1.8;
@@ -207,9 +216,13 @@ function comboMultipliers(
   return { mult, labels: [...new Set(labels)] };
 }
 
-function regionComboHint(p: VehiclePlateParts, blat: ReturnType<typeof blatScore>, region: ReturnType<typeof regionScore>): string | undefined {
+function regionComboHint(
+  p: VehiclePlateParts,
+  letter: ReturnType<typeof letterTierScore>,
+  region: ReturnType<typeof regionScore>,
+): string | undefined {
   const s3 = plateLetters3(p);
-  if (blat.tier === "S" && blat.score > 0 && !region.moscowCore && !region.moscowVanity && !region.moscowObl) {
+  if (letter.tier === "S" && letter.kind === "blat" && !region.moscowCore && !region.moscowVanity && !region.moscowObl) {
     if (s3 === "ЕКХ") return "Подсказка: **ЕКХ** ценится с **77, 99, 177, 199, 97** — попробуйте сменить регион.";
     if (s3 === "АМР") return "Подсказка: **АМР** максимален с **77** (на **50/90** — слабее, но дешевле крутить).";
     if (["ООО", "ССС", "МММ", "ХХХ"].includes(s3)) return "Подсказка: **" + s3 + "** с **77** или **99** — топ; **МО 50/90/150** — хороший компромисс.";
@@ -232,8 +245,7 @@ function regionComboHint(p: VehiclePlateParts, blat: ReturnType<typeof blatScore
 
 export function computePlatePrestige(p: VehiclePlateParts): PlatePrestigeBreakdown {
   const digit = digitScore(p.digits);
-  const letter = letterScore(p);
-  const blat = blatScore(p);
+  const letter = letterTierScore(p);
   const region = regionScore(p.region);
 
   const lines: string[] = [];
@@ -245,22 +257,19 @@ export function computePlatePrestige(p: VehiclePlateParts): PlatePrestigeBreakdo
   }
   if (letter.score > 0) {
     base += letter.score;
-    lines.push(`буквы **+${letter.score}** (${letter.label})`);
-  }
-  if (blat.score > 0) {
-    base += blat.score;
-    lines.push(`серия **+${blat.score}** (${blat.label})`);
+    const cat = letter.kind === "blat" ? "серия" : "буквы";
+    lines.push(`${cat} **+${letter.score}** (${letter.label})`);
   }
   if (region.score > 0) {
     base += region.score;
     lines.push(`регион **+${region.score}** (${region.label})`);
   }
 
-  const { mult, labels } = comboMultipliers(p, blat, region, digit, letter);
+  const { mult, labels } = comboMultipliers(p, letter, region, digit);
   let total = Math.floor(base * mult);
   total = Math.min(PLATE_PRESTIGE_CAP, total);
 
-  const regionHint = regionComboHint(p, blat, region);
+  const regionHint = regionComboHint(p, letter, region);
 
   return { total, base, lines, multipliers: labels, regionHint };
 }
@@ -292,8 +301,8 @@ export function formatPlateRollEmbedFooter(roll: PlateShopLastRoll): string[] {
 }
 
 export const PLATE_SHOP_PRESTIGE_HINT_LINES = [
-  "Престиж номера **складывается** из цифр, букв, «блатных» серий (**АМР**, **ЕКХ**, **ООО**…) и региона; **×множители** за удачные сочетания.",
+  "Престиж номера **складывается** из цифр, **одного** бонуса за буквы (тройка, серия **АМР**/**ОКО**, пара, зеркало…) и региона; **×множители** за сочетания.",
   "Спецсерии с **77**, **99**, **777**, **497**, **999** и **МО 50/90/150** дают **больше** — см. подсказку после выпадения.",
   "Тройные буквы/цифры (**А 777 АА**, **О 000 ОО**) и зеркала (**О 727 MO**, **А 121 АА**) усиливают престиж.",
-  "Полное зеркало (зеркальные **цифры и буквы**) — доп. **×1,4** к престижу номера.",
+  "Полное зеркало (зеркальные **цифры и буквы**) — **×1,4** к итогу, в т.ч. если буквы уже дали серию/тройку.",
 ];
