@@ -72,6 +72,14 @@ export interface EconomyUser {
   /** Сумма КД (мс) завершённых смен за текущие календарные сутки — лимит выплаты по накопленному КД. */
   workShiftCdAccMs?: number;
 
+  /** Итог последней завершённой смены (для Telegram и краткого статуса). */
+  lastShiftSummary?: {
+    walletRub: number;
+    ps: number;
+    treasuryRub: number;
+    atMs: number;
+  };
+
   /** Куплен телефон в магазине (нужен на доставке). */
   hasPhone?: boolean;
   /** Модель телефона (влияет на престиж при покупке/апгрейде). */
@@ -376,6 +384,18 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     workShiftCdAccMs = n > 0 ? Math.min(n * SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS) : 0;
   }
 
+  let lastShiftSummary: EconomyUser["lastShiftSummary"];
+  const rawLs = (u as any)?.lastShiftSummary;
+  if (rawLs && typeof rawLs === "object") {
+    const walletRub = Number.isFinite(rawLs.walletRub) ? Math.round(rawLs.walletRub * 100) / 100 : NaN;
+    const ps = Number.isFinite(rawLs.ps) ? Math.max(0, Math.floor(rawLs.ps)) : NaN;
+    const treasuryRub = Number.isFinite(rawLs.treasuryRub) ? Math.max(0, Math.round(rawLs.treasuryRub * 100) / 100) : NaN;
+    const atMs = Number.isFinite(rawLs.atMs) ? Math.max(0, Math.floor(rawLs.atMs)) : NaN;
+    if (Number.isFinite(walletRub) && Number.isFinite(ps) && Number.isFinite(treasuryRub) && Number.isFinite(atMs)) {
+      lastShiftSummary = { walletRub, ps, treasuryRub, atMs };
+    }
+  }
+
   const legacySimShifts = Number.isFinite((u as any)?.courierSimShiftsLeft) ? Math.max(0, Math.floor((u as any).courierSimShiftsLeft)) : 0;
   const legacyBikeShifts = Number.isFinite((u as any)?.courierBikeShiftsLeft) ? Math.max(0, Math.floor((u as any).courierBikeShiftsLeft)) : 0;
 
@@ -649,6 +669,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     solePropControlReadyAt,
     workShiftMskYmd,
     workShiftCdAccMs,
+    lastShiftSummary,
     profileCardColor:
       typeof (u as any)?.profileCardColor === "string" && (u as any).profileCardColor.length > 0
         ? (u as any).profileCardColor

@@ -1,11 +1,11 @@
 import type { Client, GuildMember } from "discord.js";
 import {
   canWorkNow,
-  economyFormatJobCardScreen,
-  economyFormatJobListScreen,
   economyFormatSkillsNotify,
   economyFormatSkillsScreen,
-  economyFormatWorkMenuScreen,
+  economyFormatTelegramJobCardScreen,
+  economyFormatTelegramJobListScreen,
+  economyFormatTelegramWorkScreen,
   economyIsWorkJobId,
   economyJobTitle,
   economyQuitJob,
@@ -77,12 +77,6 @@ function workReadyBoundaryMs(u: ReturnType<typeof getEconomyUser>, jobId: JobId,
   const last = lastWorkAtForJob(u, jobId);
   const cd = effectiveShiftCooldownMs(u, jobId, now);
   return last + cd;
-}
-
-function formatDelta(n: number): string {
-  const rounded = Math.round(n * 100) / 100;
-  const s = rounded.toLocaleString("ru-RU", { maximumFractionDigits: 0 });
-  return n >= 0 ? `+${s} ₽` : `${s} ₽`;
 }
 
 function row(...buttons: InlineBtn[]): InlineBtn[] {
@@ -254,15 +248,15 @@ function screenMain(): ScreenPayload {
 }
 
 function screenWork(member: GuildMember): ScreenPayload {
-  return { text: economyFormatWorkMenuScreen(member), markup: workMenuKeyboard(member) };
+  return { text: economyFormatTelegramWorkScreen(member), markup: workMenuKeyboard(member) };
 }
 
-function screenTier(member: GuildMember, tier: "t1" | "t2" | "t3"): ScreenPayload {
-  return { text: economyFormatJobListScreen(member.guild.id, tier), markup: tierListKeyboard(tier) };
+function screenTier(_member: GuildMember, tier: "t1" | "t2" | "t3"): ScreenPayload {
+  return { text: economyFormatTelegramJobListScreen(tier), markup: tierListKeyboard(tier) };
 }
 
 function screenJob(member: GuildMember, jobId: JobId): ScreenPayload {
-  return { text: economyFormatJobCardScreen(member, jobId), markup: jobCardKeyboard(member, jobId) };
+  return { text: economyFormatTelegramJobCardScreen(member, jobId), markup: jobCardKeyboard(member, jobId) };
 }
 
 function screenSkills(member: GuildMember): ScreenPayload {
@@ -340,13 +334,8 @@ function screenStatus(member: GuildMember): ScreenPayload {
   };
 }
 
-function screenAfterShift(member: GuildMember, walletDeltaRub: number, notes: string[]): ScreenPayload {
-  const header = [`<b>Смена:</b> ${formatDelta(walletDeltaRub)} к кошельку.`];
-  if (notes.length) header.push("", ...notes.map((n) => `· ${n.replace(/\*\*/g, "")}`));
-  return {
-    text: [...header, "", economyFormatWorkMenuScreen(member)].join("\n"),
-    markup: workMenuKeyboard(member),
-  };
+function screenAfterShift(member: GuildMember): ScreenPayload {
+  return { text: economyFormatTelegramWorkScreen(member), markup: workMenuKeyboard(member) };
 }
 
 function screenAfterTrain(member: GuildMember, skillLabel: string, newLevel: number): ScreenPayload {
@@ -395,7 +384,7 @@ async function handleShift(client: Client, tgUserId: string, chatId: number, tok
     return;
   }
   if (ack) await answerCallback(token, ack.id, "Готово");
-  await presentPanel(tgUserId, token, chatId, screenAfterShift(ctx.member, r.walletDeltaRub, r.notes), { messageId });
+  await presentPanel(tgUserId, token, chatId, screenAfterShift(ctx.member), { messageId });
 }
 
 async function handleTrain(
@@ -435,18 +424,18 @@ async function handleTake(
   if (!r.ok) {
     if (r.kind === "missing_skills") {
       if (ack) await answerCallback(token, ack.id, "Не хватает навыков");
-      const body = economyFormatWorkMenuScreen(ctx.member);
       await presentPanel(tgUserId, token, chatId, {
-        text: `<b>Не хватает навыков:</b>\n${r.missing.map((m) => `· ${m}`).join("\n")}\n\n${body}`,
+        text: `<b>Не хватает навыков:</b>\n${r.missing.map((m) => `· ${m}`).join("\n")}\n\n${economyFormatTelegramWorkScreen(ctx.member)}`,
         markup: workMenuKeyboard(ctx.member),
       }, { messageId });
       return;
     }
     if (r.kind === "need_housing") {
       if (ack) await answerCallback(token, ack.id, "Нужно жильё");
-      const body = economyFormatWorkMenuScreen(ctx.member);
       await presentPanel(tgUserId, token, chatId, {
-        text: "Сначала оформите <b>жильё</b> (аренда или квартира) в магазине терминала Discord — для работ тир 2+.\n\n" + body,
+        text:
+          "Сначала оформите <b>жильё</b> (аренда или квартира) в магазине терминала Discord — для работ тир 2+.\n\n" +
+          economyFormatTelegramWorkScreen(ctx.member),
         markup: workMenuKeyboard(ctx.member),
       }, { messageId });
       return;

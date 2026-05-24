@@ -2605,7 +2605,7 @@ function buildCooldownBlockedEmbed(member: GuildMember, msLeft: number): EmbedBu
 export type EconomyRunWorkShiftResult =
   | { ok: false; kind: "ephemeral"; message: string }
   | { ok: false; kind: "cooldown" }
-  | { ok: true; walletDeltaRub: number; notes: string[] };
+  | { ok: true; walletDeltaRub: number; psGain: number; treasuryRub: number; notes: string[] };
 
 export type EconomyRunTrainSkillResult =
   | { ok: false; kind: "unknown_skill" | "cooldown_or_max" }
@@ -2795,9 +2795,11 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
   }
 
   let payToWallet = jobTotal;
+  let treasuryRub = 0;
   if (jobTotal > 0 && isLegalTaxableJob(jobId)) {
     const { netRub, taxRub } = withholdLegalIncomeTax(guildId, jobTotal);
     payToWallet = netRub;
+    treasuryRub = taxRub;
     if (taxRub > 0) notes.push(`налог **${fmt(taxRub)}** ₽ → казна`);
   }
   rublesNext += payToWallet;
@@ -2810,6 +2812,7 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     if (psGain > 0) notes.push(`**+${fmt(psGain)}** СР (быт)`);
   }
 
+  const walletDeltaRub = rublesNext - u.rubles;
   const patch: Partial<EconomyUser> = {
     rubles: rublesNext,
     psTotal: u.psTotal + psGain,
@@ -2817,10 +2820,10 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     courierPhonePaidUntilMs: phoneUntilNext,
     lastWorkAtByJob: { ...(u.lastWorkAtByJob ?? {}), [jobId]: now },
     jobExp: { ...(u.jobExp ?? {}), [jobId]: expAfter },
+    lastShiftSummary: { walletRub: walletDeltaRub, ps: psGain, treasuryRub, atMs: now },
     ...spamPatch,
   };
   patchEconomyUser(guildId, member.id, patch);
-  const walletDeltaRub = rublesNext - u.rubles;
   const netPrestigeRub =
     walletDeltaRub > 0 && prestigeRubBonus > 0
       ? feedNetPrestigeRubBonus(jobTotal, prestigeRubBonus, payToWallet)
@@ -2840,7 +2843,89 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     text: `${member.toString()} вышел на смену: **${def.title}** — ${feedParts.join(", ")}${feedBonus}`,
   });
   await ensureEconomyFeedPanel(client);
-  return { ok: true, walletDeltaRub, notes };
+  return { ok: true, walletDeltaRub, psGain, treasuryRub, notes };
+}
+
+function tgFmtRub(n: number): string {
+  const rounded = Math.round(n * 100) / 100;
+  return rounded.toLocaleString("ru-RU", { maximumFractionDigits: 0 });
+}
+
+function tgFmtDelta(n: number): string {
+  const s = tgFmtRub(n);
+  return n >= 0 ? `+${s} ₽` : `${s} ₽`;
+}
+
+function tgFmtCooldown(msLeft: number): string {
+  const m = Math.ceil(msLeft / 60000);
+  if (m >= 1440) return `${Math.floor(m / 1440)} д ${Math.floor((m % 1440) / 60)} ч`;
+  if (m >= 60) return `${Math.floor(m / 60)} ч ${m % 60} мин`;
+  return `${m} мин`;
+}
+
+/** Краткий экран «Работа» для Telegram (смена, КД, лимит 12 ч, последняя смена). */
+export function economyFormatTelegramWorkScreen(member: GuildMember): string {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const now = Date.now();
+  const lines: string[] = ["<b>Работа</b>", ""];
+
+  if (!u.jobId) {
+    lines.push("Текущая: <b>не выбрана</b>");
+    lines.push("", "Выберите профессию в каталоге ниже.");
+    return lines.join("\n");
+  }
+
+  const def = getAnyJobDef(u.jobId);
+  lines.push(`Текущая: <b>${def.title}</b>`);
+
+  if (u.jobId === "soleProp") {
+    lines.push("", "ИП — смен нет, доход пассивный.");
+    return lines.join("\n");
+  }
+
+  const ls = u.lastShiftSummary;
+  if (ls) {
+    const parts = [tgFmtDelta(ls.walletRub)];
+    if (ls.ps > 0) parts.push(`+${tgFmtRub(ls.ps)} СР`);
+    if (ls.treasuryRub > 0) parts.push(`казна ${tgFmtRub(ls.treasuryRub)} ₽`);
+    lines.push(`Последняя смена: ${parts.join(" · ")}`);
+  } else {
+    lines.push("Последняя смена: —");
+  }
+
+  const cdMs = effectiveShiftCooldownMs(u, u.jobId, now);
+  const st = canWorkNow(u, u.jobId, now);
+  const cdH = cdHoursLabel(cdMs);
+  lines.push(
+    st.ok ? `КД смены: ${cdH} ч · <b>можно</b>` : `КД смены: ${cdH} ч · осталось <b>${tgFmtCooldown(st.msLeft)}</b>`,
+  );
+
+  if (shiftPayCoeffApplies(cdMs)) {
+    const ymd = mskTodayYmd(now);
+    const acc = u.workShiftMskYmd === ymd ? (u.workShiftCdAccMs ?? 0) : 0;
+    const usedH = formatAccCdHours(acc);
+    const limitH = formatAccCdHours(SHIFT_PAY_FREE_CD_MS);
+    const coeff = shiftPayCoeffFromAccMs(acc);
+    lines.push(
+      coeff < 1 - 1e-9
+        ? `Лимит КД за сутки: <b>${usedH}</b> / ${limitH} ч (×${coeff})`
+        : `Лимит КД за сутки: <b>${usedH}</b> / ${limitH} ч`,
+    );
+  }
+
+  return lines.join("\n");
+}
+
+export function economyFormatTelegramJobListScreen(tier: "t1" | "t2" | "t3"): string {
+  const title = tier === "t1" ? "Начальные (т1)" : tier === "t2" ? "С навыком (т2)" : "Продвинутые (т3)";
+  return `<b>${title}</b>\n\nВыберите профессию:`;
+}
+
+export function economyFormatTelegramJobCardScreen(member: GuildMember, jobId: JobId): string {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const title = economyJobTitle(jobId);
+  if (u.jobId === jobId) return `<b>${title}</b>\n\nТекущая работа.`;
+  return `<b>${title}</b>`;
 }
 
 /** Markdown Discord → HTML для Telegram (упрощённо). */
