@@ -227,7 +227,7 @@ import {
 } from "./economyMacro.js";
 import {
   computeSimPrestige,
-  formatSimPrestigeBreakdownShort,
+  formatSimPrestigeBreakdownEmbedLines,
   SIM_SHOP_PRESTIGE_HINT_LINES,
 } from "./economySimPrestige.js";
 import { lotteryPeriodMskYmd, msUntilNextLotteryDrawMsk } from "./lotteryDraw.js";
@@ -1444,26 +1444,29 @@ function buildShopSimEmbed(member: GuildMember): EmbedBuilder {
     hasSim
       ? "**Замена номера** — новый случайный 5-значный номер (**" +
         SHOP_SIM_NEW_PRICE_RUB +
-        " ₽**), **равновероятно** среди свободных на сервере. Текущий баланс симки **не меняется**."
+        " ₽**), **равновероятно** среди свободных на сервере."
       : "**Первая симка** — номер **10 000…99 999**, **равновероятно** среди свободных на сервере (**" +
         SHOP_SIM_NEW_PRICE_RUB +
-        " ₽**), на баланс симки **+" +
-        SHOP_SIM_START_BALANCE_RUB +
-        " ₽**.",
+        " ₽**).",
+    hasSim ? "Баланс симки при замене **не меняется**." : `На баланс симки **+${SHOP_SIM_START_BALANCE_RUB} ₽**.`,
     "",
+    "**Престиж номера**",
     ...SIM_SHOP_PRESTIGE_HINT_LINES,
     "",
-    u.hasPhone ? "" : "**Сначала купите телефон** — без него симку оформить нельзя.",
-    "",
-    "Пополнить сим: введите сумму в ₽ — **столько же** зачислится на баланс симки (списание с основного счёта).",
-    "",
-    hasSim ? `Текущий номер: **${u.courierSimNumber}** · баланс: **${fmt(u.simBalanceRub ?? 0)} ₽**` : "Симки ещё **нет**.",
-  ].filter(Boolean);
-  if (simBreakdown) {
-    lines.push(
-      `Престиж номера сим: **${simBreakdown.total.toLocaleString("ru-RU")}**`,
-      `(${formatSimPrestigeBreakdownShort(simBreakdown)})`,
-    );
+    "**Пополнение**",
+    "Введите сумму в ₽ — **столько же** зачислится на баланс симки (списание с основного счёта).",
+  ];
+  if (!u.hasPhone) {
+    lines.push("", "**Телефон**", "Сначала купите **телефон** в магазине — без него симку оформить нельзя.");
+  }
+  lines.push("", "**Ваш номер**");
+  if (hasSim) {
+    lines.push(`Номер: **${u.courierSimNumber}**`, `Баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**`);
+    if (simBreakdown && simBreakdown.total > 0) {
+      lines.push(`Престиж: **${simBreakdown.total.toLocaleString("ru-RU")}**`, ...formatSimPrestigeBreakdownEmbedLines(simBreakdown));
+    }
+  } else {
+    lines.push("Симки пока **нет**.");
   }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Симка").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
 }
