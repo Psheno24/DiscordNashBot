@@ -20,6 +20,7 @@ import { appendFeedEvent } from "../economy/feedStore.js";
 import { ensureEconomyFeedPanel } from "../economy/panel.js";
 import { addToTreasury, trySpendTreasuryRub } from "../economy/taxTreasury.js";
 import { applyUnregisteredVehiclePenalty } from "../economy/economyLicensePlate.js";
+import { scalePositiveIncome } from "../economy/economyMacro.js";
 import { getEconomyUser, patchEconomyUser } from "../economy/userStore.js";
 import {
   buildAdminEconEmbed,
@@ -54,6 +55,9 @@ const BET_BUTTON_CONFIRM_PREFIX = "bet:confirm:";
 const BET_BUTTON_CONFIRM_CANCEL_PREFIX = "bet:confirmCancel:";
 
 const MODAL_BET_AMOUNT_PREFIX = "modal:bet:amount:";
+
+/** Базовый потолок выплаты (ставка × кэф, включая тело) на один исход события для одного игрока. */
+const BASE_BET_MAX_PAYOUT_RUB = 1_000_000;
 
 const BET_COLOR = 0xb71c1c;
 const BET_RESOLVED_FEED_MESSAGE_DELETE_AFTER_MS = 24 * 60 * 60 * 1000;
@@ -433,6 +437,62 @@ function parseTeamOddsLine(raw: string): { label: string; odds: number } | undef
 
 function betOption(id: string, label: string, odds: number): { id: string; label: string; odds: number } {
   return { id, label: label.slice(0, 80), odds };
+}
+
+function betMaxPayoutCapRub(guildId: string): number {
+  return scalePositiveIncome(guildId, BASE_BET_MAX_PAYOUT_RUB);
+}
+
+function userOptionPayoutTotal(ev: BetEvent, userId: string, optionId: string): number {
+  return getUserStakes(ev, userId)
+    .filter((b) => b.optionId === optionId)
+    .reduce((sum, b) => sum + Math.floor(b.amount * b.oddsAtPlacement), 0);
+}
+
+/** Макс. новая ставка на исход с учётом уже принятых ставок игрока на этот исход и баланса. */
+function maxAllowedBetAmount(
+  guildId: string,
+  ev: BetEvent,
+  userId: string,
+  optionId: string,
+  odds: number,
+  balanceRub: number,
+): number {
+  const cap = betMaxPayoutCapRub(guildId);
+  const room = cap - userOptionPayoutTotal(ev, userId, optionId);
+  if (room <= 0) return 0;
+  let stake = Math.floor(room / odds);
+  while (stake > 0 && Math.floor(stake * odds) > room) stake--;
+  return Math.min(stake, Math.max(0, Math.floor(balanceRub)));
+}
+
+function betAmountModalPlaceholder(maxBet: number): string {
+  if (maxBet < 1) return "0";
+  return `1-${maxBet}`;
+}
+
+function buildBetAmountModal(
+  guildId: string,
+  ev: BetEvent,
+  userId: string,
+  eventId: string,
+  optionId: string,
+  opt: { odds: number },
+  balanceRub: number,
+): ModalBuilder {
+  const maxBet = maxAllowedBetAmount(guildId, ev, userId, optionId, opt.odds, balanceRub);
+  const modal = new ModalBuilder().setCustomId(`${MODAL_BET_AMOUNT_PREFIX}${eventId}:${optionId}`).setTitle("Сумма ставки");
+  modal.addComponents(
+    new ActionRowBuilder<TextInputBuilder>().addComponents(
+      new TextInputBuilder()
+        .setCustomId("amount")
+        .setLabel(`Сколько ₽ поставить? Баланс: ${balanceRub.toLocaleString("ru-RU")} ₽`)
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true)
+        .setPlaceholder(betAmountModalPlaceholder(maxBet)),
+    ),
+  );
+  return modal;
 }
 
 function getUserStakes(ev: BetEvent, userId: string): PlacedBet[] {
@@ -817,18 +877,7 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
     }
 
     const u = getEconomyUser(guildId, userId);
-    const modal = new ModalBuilder().setCustomId(`${MODAL_BET_AMOUNT_PREFIX}${eventId}:${optionId}`).setTitle("Сумма ставки");
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder()
-          .setCustomId("amount")
-          .setLabel(`Сколько ₽ поставить? Баланс: ${u.rubles.toLocaleString("ru-RU")} ₽`)
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder("1000 или 1 000 или 500,50"),
-      ),
-    );
-    await interaction.showModal(modal);
+    await interaction.showModal(buildBetAmountModal(guildId, ev, userId, eventId, optionId, opt, u.rubles));
     return true;
   }
 
@@ -867,18 +916,7 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
     }
     const userId = interaction.user.id;
     const u = getEconomyUser(guildId, userId);
-    const modal = new ModalBuilder().setCustomId(`${MODAL_BET_AMOUNT_PREFIX}${eventId}:${optionId}`).setTitle("Сумма ставки");
-    modal.addComponents(
-      new ActionRowBuilder<TextInputBuilder>().addComponents(
-        new TextInputBuilder()
-          .setCustomId("amount")
-          .setLabel(`Сколько ₽ поставить? Баланс: ${u.rubles.toLocaleString("ru-RU")} ₽`)
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setPlaceholder("1000 или 1 000 или 500,50"),
-      ),
-    );
-    await interaction.showModal(modal);
+    await interaction.showModal(buildBetAmountModal(guildId, ev, userId, eventId, optionId, opt, u.rubles));
     return true;
   }
 
@@ -927,6 +965,19 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
     const u = getEconomyUser(guildId, userId);
     if (u.rubles < amount) {
       await interaction.reply({ content: `Недостаточно ₽. Баланс: ${u.rubles.toLocaleString("ru-RU")} ₽.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    const maxBet = maxAllowedBetAmount(guildId, ev, userId, optionId, opt.odds, u.rubles);
+    if (maxBet < 1) {
+      await interaction.reply({ content: "На этот исход сейчас нельзя поставить.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (amount > maxBet) {
+      await interaction.reply({
+        content: `Укажите сумму от **1** до **${maxBet.toLocaleString("ru-RU")}** ₽.`,
+        flags: MessageFlags.Ephemeral,
+      });
       return true;
     }
 
@@ -1290,6 +1341,19 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
     const u = getEconomyUser(guildId, userId);
     if (u.rubles < amount) {
       await interaction.reply({ content: `Недостаточно ₽. Баланс: ${u.rubles.toLocaleString("ru-RU")} ₽.`, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+
+    const maxBet = maxAllowedBetAmount(guildId, ev, userId, optionId, opt.odds, u.rubles);
+    if (maxBet < 1) {
+      await interaction.reply({ content: "На этот исход сейчас нельзя поставить.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (amount > maxBet) {
+      await interaction.reply({
+        content: `Укажите сумму от **1** до **${maxBet.toLocaleString("ru-RU")}** ₽.`,
+        flags: MessageFlags.Ephemeral,
+      });
       return true;
     }
 
