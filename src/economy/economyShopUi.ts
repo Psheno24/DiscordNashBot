@@ -66,12 +66,14 @@ import { cancelRentAndBikeOnAssetPurchase, clearSovietHousingRentPatch } from ".
 import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub, userHasActiveHousing } from "./economyHousing.js";
 import {
   inflatedApartmentPurchaseCost,
+  inflatedApartmentUtilityRub,
   inflatedCarPurchaseCost,
   inflatedCatalogApartmentPrice,
   inflatedCatalogCarPrice,
   inflatedCatalogPhonePrice,
   inflatedHousingRentPrice,
   inflatedPhonePurchaseCost,
+  nextHousingUtilityDueMs,
   scaledEconomyExpense,
   scaledEconomyPsIncome,
   scaledShopPrice,
@@ -491,10 +493,12 @@ export function buildShopApartmentBuyConfirmEmbed(member: GuildMember, aid: stri
           now,
         )
       : inflatedCatalogApartmentPrice(gid, defA.id);
+  const util = inflatedApartmentUtilityRub(gid, defA.id);
   const lines = [
     `Купить **${defA.label}**?`,
     `Спишется **${fmt(cost)}** ₽ с личного счёта.`,
     `Бонус: ${statLabel(defA)}`,
+    `ЖКХ: **${fmt(util)}** ₽/мес. (списание **1-го числа** каждого месяца, МСК).`,
   ];
   if (defA.origin === "soviet" && (u.housingKind ?? "none") === "rent") {
     const rentRefund = housingRentUnusedRefundRub(u, now, gid);
@@ -639,6 +643,8 @@ export function buildShopHouseRentEmbed(member: GuildMember): EmbedBuilder {
     `• **1 сутки** — **${fmt(inflatedHousingRentPrice(gid, "day"))}** ₽`,
     `• **7 суток** — **${fmt(inflatedHousingRentPrice(gid, "week"))}** ₽`,
     `• **30 суток** — **${fmt(inflatedHousingRentPrice(gid, "month"))}** ₽`,
+    "",
+    "Цены **растут с инфляцией** сервера (как в магазине у квартир и авто); автопродление — по **текущему** тарифу.",
   ];
   if (hk === "rent" && u.housingRentNextDueMs) {
     lines.push("", `Оплачено **до** <t:${Math.floor(u.housingRentNextDueMs / 1000)}:F>. Продление **добавляет** срок.`);
@@ -1232,7 +1238,7 @@ export function purchaseApartment(member: GuildMember, aid: string): { ok: true;
       housingKind: "owned",
       ownedApartmentId: defA.id,
       ownedApartmentPurchasedAtMs: now,
-      housingUtilityNextDueMs: now + HOUSING_CALENDAR_MONTH_MS,
+      housingUtilityNextDueMs: nextHousingUtilityDueMs(now),
       ...clearSovietHousingRentPatch(),
       ...stats,
       courierBikeUntilMs: undefined,
@@ -1261,7 +1267,7 @@ export function purchaseApartment(member: GuildMember, aid: string): { ok: true;
     housingForeignKind: "owned",
     ownedForeignApartmentId: defA.id,
     ownedForeignApartmentPurchasedAtMs: now,
-    housingForeignUtilityNextDueMs: now + HOUSING_CALENDAR_MONTH_MS,
+    housingForeignUtilityNextDueMs: nextHousingUtilityDueMs(now),
     ...stats,
     ...cancelRentAndBikeOnAssetPurchase(u),
   });

@@ -14,6 +14,8 @@ import {
 } from "./economyCatalog.js";
 import { isValidVehiclePlateParts } from "./economyLicensePlate.js";
 import { computePlatePrestige } from "./economyPlatePrestige.js";
+import { computeSimPrestige, isValidSimNumber } from "./economySimPrestige.js";
+import { nextHousingUtilityDueMs } from "./economyMacro.js";
 import { SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS } from "./shiftPayCoeff.js";
 
 export type JobId =
@@ -108,7 +110,7 @@ export interface EconomyUser {
   ownedApartmentId?: string;
   /** Когда куплена текущая советская квартира (unix ms) — для выкупа при переезде. */
   ownedApartmentPurchasedAtMs?: number;
-  /** Следующее списание коммуналки советского жилья (unix ms). */
+  /** Следующее списание ЖКХ советского жилья — полночь 1-го числа месяца (МСК), unix ms. */
   housingUtilityNextDueMs?: number;
   /** Последняя обработка советского жилья по суточному тику (YYYY-MM-DD). */
   housingLastMskYmd?: string;
@@ -128,6 +130,8 @@ export interface EconomyUser {
 
   /** 5-значный номер симки (уникален среди игроков на сервере). */
   courierSimNumber?: string;
+  /** Престиж, уже учтённый в prestigePoints от текущего номера симки. */
+  courierSimPrestige?: number;
   /** Баланс симки (пополнение в магазине); тариф доставки списывается отсюда. */
   simBalanceRub?: number;
   /** До какого момента оплачен месячный тариф сим для доставки (+30 суток после оплаты). */
@@ -417,7 +421,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   let ownedApartmentPurchasedAtMs = Number.isFinite((u as any)?.ownedApartmentPurchasedAtMs)
     ? Math.max(0, Math.floor((u as any).ownedApartmentPurchasedAtMs))
     : undefined;
-  const housingUtilityNextDueMs = Number.isFinite((u as any)?.housingUtilityNextDueMs)
+  let housingUtilityNextDueMs = Number.isFinite((u as any)?.housingUtilityNextDueMs)
     ? Math.max(0, Math.floor((u as any).housingUtilityNextDueMs))
     : undefined;
   const housingLastMskYmd =
@@ -426,7 +430,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
       : undefined;
 
   let courierSimNumber =
-    typeof (u as any)?.courierSimNumber === "string" && /^\d{5}$/.test((u as any).courierSimNumber)
+    typeof (u as any)?.courierSimNumber === "string" && isValidSimNumber((u as any).courierSimNumber)
       ? (u as any).courierSimNumber
       : undefined;
   let simBalanceRub = Number.isFinite((u as any)?.simBalanceRub) ? Math.max(0, Math.floor((u as any).simBalanceRub)) : undefined;
@@ -511,9 +515,17 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   const ownedForeignApartmentPurchasedAtMs = Number.isFinite((u as any)?.ownedForeignApartmentPurchasedAtMs)
     ? Math.max(0, Math.floor((u as any).ownedForeignApartmentPurchasedAtMs))
     : undefined;
-  const housingForeignUtilityNextDueMs = Number.isFinite((u as any)?.housingForeignUtilityNextDueMs)
+  let housingForeignUtilityNextDueMs = Number.isFinite((u as any)?.housingForeignUtilityNextDueMs)
     ? Math.max(0, Math.floor((u as any).housingForeignUtilityNextDueMs))
     : undefined;
+
+  if (housingKind === "owned" && ownedApartmentId && housingUtilityNextDueMs == null) {
+    housingUtilityNextDueMs = nextHousingUtilityDueMs(Date.now());
+  }
+  if (housingForeignKind === "owned" && ownedForeignApartmentId && housingForeignUtilityNextDueMs == null) {
+    housingForeignUtilityNextDueMs = nextHousingUtilityDueMs(Date.now());
+  }
+
   const housingForeignLastMskYmd =
     typeof (u as any)?.housingForeignLastMskYmd === "string" && /^\d{4}-\d{2}-\d{2}$/.test((u as any).housingForeignLastMskYmd)
       ? (u as any).housingForeignLastMskYmd
@@ -548,6 +560,14 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     prestigePoints += vehiclePlatePrestige;
   } else {
     vehiclePlatePrestige = undefined;
+  }
+
+  let courierSimPrestige: number | undefined;
+  if (courierSimNumber) {
+    courierSimPrestige = computeSimPrestige(courierSimNumber).total;
+    prestigePoints += courierSimPrestige;
+  } else {
+    courierSimPrestige = undefined;
   }
 
   if (housingKind === "rent" && housingRentNextDueMs != null && (housingRentChainStartedAtMs == null || housingRentTotalPaidRub == null)) {
@@ -604,6 +624,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     petLastMskYmd,
     petPausedNoFunds,
     courierSimNumber,
+    courierSimPrestige,
     simBalanceRub,
     courierPhonePaidUntilMs,
     courierBikeUntilMs,

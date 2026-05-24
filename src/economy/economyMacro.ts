@@ -104,6 +104,11 @@ export function hasMacroIndexingEverRun(guildId: string): boolean {
   return getGuildConfig(guildId).lastSalaryIndexingYm != null;
 }
 
+/** Следующее списание ЖКХ: полночь **1-го числа** месяца (МСК) строго после `fromMs`. */
+export function nextHousingUtilityDueMs(fromMs: number = Date.now()): number {
+  return nextMskMonthFirstDayMs(fromMs);
+}
+
 /** Следующая полночь 1-го числа месяца (МСК) строго после `afterMs`. */
 export function nextMskMonthFirstDayMs(afterMs: number = Date.now()): number {
   let ym = mskYearMonth(afterMs);
@@ -319,6 +324,7 @@ function scaleCatalogApartment(guildId: string, a: ApartmentDef): ApartmentDef {
   };
 }
 
+/** Аренда советского жилья — с инфляцией магазина (`shopPriceMultiplier`), как квартиры и ЖКХ. */
 export function inflatedHousingRentPrice(guildId: string, plan: HousingRentPlan): number {
   return scaledShopPrice(guildId, housingRentPlanPriceRub(plan));
 }

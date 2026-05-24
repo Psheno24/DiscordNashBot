@@ -1,15 +1,17 @@
-import { inflatedApartmentUtilityRub, inflatedHousingRentPrice } from "./economyMacro.js";
+import { inflatedApartmentUtilityRub, inflatedHousingRentPrice, nextHousingUtilityDueMs } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
 import {
   getApartmentDef,
-  HOUSING_CALENDAR_MONTH_MS,
   housingRentPlanPeriodMs,
   housingRentPlanPriceRub,
   type HousingRentPlan,
 } from "./economyCatalog.js";
+import { isMskFirstCalendarDay } from "./mskCalendar.js";
 import { getEconomyUser, patchEconomyUser, type EconomyUser } from "./userStore.js";
 import { remitShopPurchaseVatToTreasury } from "./taxTreasury.js";
 import { isTier3JobId, tier3PatchWhenJobChanges } from "./tier3Jobs.js";
+
+export { nextHousingUtilityDueMs } from "./economyMacro.js";
 
 /** Пропорциональный возврат ₽ за неиспользованное время текущей оплаченной аренды (для покупки квартиры и т.п.). */
 export function housingRentUnusedRefundRub(u: EconomyUser, nowMs: number = Date.now(), guildId?: string): number {
@@ -78,13 +80,17 @@ function processForeignUtility(
   if (u.housingForeignLastMskYmd === todayYmd) return;
 
   const mark = { housingForeignLastMskYmd: todayYmd };
-  if (u.housingForeignUtilityNextDueMs != null && nowMs >= u.housingForeignUtilityNextDueMs) {
+  if (
+    isMskFirstCalendarDay(nowMs) &&
+    u.housingForeignUtilityNextDueMs != null &&
+    nowMs >= u.housingForeignUtilityNextDueMs
+  ) {
     const apt = getApartmentDef(u.ownedForeignApartmentId);
     const util = inflatedApartmentUtilityRub(guildId, u.ownedForeignApartmentId);
     if (util > 0 && u.rubles >= util) {
       patchEconomyUser(guildId, userId, {
         rubles: u.rubles - util,
-        housingForeignUtilityNextDueMs: u.housingForeignUtilityNextDueMs + HOUSING_CALENDAR_MONTH_MS,
+        housingForeignUtilityNextDueMs: nextHousingUtilityDueMs(nowMs),
         ...mark,
       });
       remitShopPurchaseVatToTreasury(guildId, util);
@@ -93,7 +99,7 @@ function processForeignUtility(
         guildId,
         type: "job:passive",
         actorUserId: userId,
-        text: `Коммуналка (**${apt?.label ?? "заморское жильё"}**): **−${util.toLocaleString("ru-RU")}** ₽.`,
+        text: `ЖКХ (**${apt?.label ?? "заморское жильё"}**): **−${util.toLocaleString("ru-RU")}** ₽.`,
       });
     } else if (util > 0) {
       patchEconomyUser(guildId, userId, { ...mark });
@@ -102,7 +108,7 @@ function processForeignUtility(
         guildId,
         type: "job:passive",
         actorUserId: userId,
-        text: `**Коммуналка (зам.) не списана** — недостаточно ₽.`,
+        text: `**ЖКХ (зам.) не списано** — недостаточно ₽.`,
       });
     } else {
       patchEconomyUser(guildId, userId, { ...mark });
@@ -112,7 +118,7 @@ function processForeignUtility(
   patchEconomyUser(guildId, userId, { ...mark });
 }
 
-/** Списание аренды / коммуналки в начале календарного дня (по полю housingLastMskYmd). */
+/** Списание аренды / ЖКХ в начале календарного дня (по полю housingLastMskYmd). ЖКХ — **1-е число** месяца (МСК). */
 export function processHousingMskMidnightForUser(guildId: string, userId: string, todayYmd: string, nowMs: number): void {
   let u = getEconomyUser(guildId, userId);
   processForeignUtility(guildId, userId, u, todayYmd, nowMs);
@@ -174,13 +180,19 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
     return;
   }
 
-  if (u.housingKind === "owned" && u.ownedApartmentId && u.housingUtilityNextDueMs != null && nowMs >= u.housingUtilityNextDueMs) {
+  if (
+    u.housingKind === "owned" &&
+    u.ownedApartmentId &&
+    isMskFirstCalendarDay(nowMs) &&
+    u.housingUtilityNextDueMs != null &&
+    nowMs >= u.housingUtilityNextDueMs
+  ) {
     const apt = getApartmentDef(u.ownedApartmentId);
     const util = inflatedApartmentUtilityRub(guildId, u.ownedApartmentId);
     if (util > 0 && u.rubles >= util) {
       patchEconomyUser(guildId, userId, {
         rubles: u.rubles - util,
-        housingUtilityNextDueMs: u.housingUtilityNextDueMs + HOUSING_CALENDAR_MONTH_MS,
+        housingUtilityNextDueMs: nextHousingUtilityDueMs(nowMs),
         ...mark,
       });
       remitShopPurchaseVatToTreasury(guildId, util);
@@ -189,7 +201,7 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
         guildId,
         type: "job:passive",
         actorUserId: userId,
-        text: `Коммуналка (**${apt?.label ?? "квартира"}**): **−${util.toLocaleString("ru-RU")}** ₽.`,
+        text: `ЖКХ (**${apt?.label ?? "квартира"}**): **−${util.toLocaleString("ru-RU")}** ₽.`,
       });
     } else if (util > 0) {
       patchEconomyUser(guildId, userId, { ...mark });
@@ -198,7 +210,7 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
         guildId,
         type: "job:passive",
         actorUserId: userId,
-        text: `**Коммуналка не списана** — недостаточно ₽.`,
+        text: `**ЖКХ не списано** — недостаточно ₽.`,
       });
     } else {
       patchEconomyUser(guildId, userId, { ...mark });

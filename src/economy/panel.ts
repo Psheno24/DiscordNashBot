@@ -225,6 +225,11 @@ import {
   scaleSignedIncome,
   scaledShopPrice,
 } from "./economyMacro.js";
+import {
+  computeSimPrestige,
+  formatSimPrestigeBreakdownShort,
+  SIM_SHOP_PRESTIGE_HINT_LINES,
+} from "./economySimPrestige.js";
 import { lotteryPeriodMskYmd, msUntilNextLotteryDrawMsk } from "./lotteryDraw.js";
 import {
   addLotteryTickets,
@@ -1423,6 +1428,7 @@ function buildMyRentEditRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
 function buildShopSimEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const hasSim = Boolean(u.courierSimNumber);
+  const simBreakdown = hasSim && u.courierSimNumber ? computeSimPrestige(u.courierSimNumber) : null;
   const lines: string[] = [
     hasSim
       ? "**Замена номера** — новый случайный 5-значный номер (**" +
@@ -1434,12 +1440,20 @@ function buildShopSimEmbed(member: GuildMember): EmbedBuilder {
         SHOP_SIM_START_BALANCE_RUB +
         " ₽**.",
     "",
+    ...SIM_SHOP_PRESTIGE_HINT_LINES,
+    "",
     u.hasPhone ? "" : "**Сначала купите телефон** — без него симку оформить нельзя.",
     "",
     "Пополнить сим: введите сумму в ₽ — **столько же** зачислится на баланс симки (списание с основного счёта).",
     "",
     hasSim ? `Текущий номер: **${u.courierSimNumber}** · баланс: **${fmt(u.simBalanceRub ?? 0)} ₽**` : "Симки ещё **нет**.",
   ].filter(Boolean);
+  if (simBreakdown) {
+    lines.push(
+      `Престиж номера сим: **${simBreakdown.total.toLocaleString("ru-RU")}**`,
+      `(${formatSimPrestigeBreakdownShort(simBreakdown)})`,
+    );
+  }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Симка").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
