@@ -13,6 +13,7 @@ import {
   type HousingRentPlan,
 } from "./economyCatalog.js";
 import { isValidVehiclePlateParts } from "./economyLicensePlate.js";
+import { computePlatePrestige } from "./economyPlatePrestige.js";
 import { SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS } from "./shiftPayCoeff.js";
 
 export type JobId =
@@ -534,8 +535,20 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     housingForeignKind,
     ownedForeignApartmentId,
   });
-  const prestigePoints = stats.prestigePoints;
+  let prestigePoints = stats.prestigePoints;
   const domesticPoints = stats.domesticPoints;
+
+  if (vehiclePlateL1 && vehiclePlateDigits && vehiclePlateL2 && vehiclePlateRegion) {
+    vehiclePlatePrestige = computePlatePrestige({
+      l1: vehiclePlateL1,
+      digits: vehiclePlateDigits,
+      l2: vehiclePlateL2,
+      region: vehiclePlateRegion,
+    }).total;
+    prestigePoints += vehiclePlatePrestige;
+  } else {
+    vehiclePlatePrestige = undefined;
+  }
 
   if (housingKind === "rent" && housingRentNextDueMs != null && (housingRentChainStartedAtMs == null || housingRentTotalPaidRub == null)) {
     const p = housingRentPlan ?? "month";

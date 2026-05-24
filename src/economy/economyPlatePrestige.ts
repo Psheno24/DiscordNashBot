@@ -82,6 +82,25 @@ function isPairLetters(p: VehiclePlateParts): boolean {
   return p.l2[0] === p.l2[1];
 }
 
+/** Серия **X YZ** зеркальна: **X…X** (напр. **O MO** → OMO). */
+function isPalindromeLetterSeries(p: VehiclePlateParts): boolean {
+  const s3 = plateLetters3(p);
+  return s3.length === 3 && s3[0] === s3[2] && s3[0] !== s3[1];
+}
+
+/** Книжное зеркало: первая буква = вторая буква пары (**А ВА**). */
+function isBookendMirrorLetters(p: VehiclePlateParts): boolean {
+  return p.l1 === p.l2[1] && !isTripleLetter(p) && !isPairLetters(p);
+}
+
+/** Зеркальные цифры и буквы в одном номере. */
+export function isFullPlateMirror(p: VehiclePlateParts): boolean {
+  const mirrorDigits = isPalindromeDigit(p.digits);
+  const mirrorLetters =
+    isTripleLetter(p) || isPairLetters(p) || isPalindromeLetterSeries(p) || isBookendMirrorLetters(p);
+  return mirrorDigits && mirrorLetters;
+}
+
 function isTripleDigit(digits: string): boolean {
   return digits[0] === digits[1] && digits[1] === digits[2];
 }
@@ -112,8 +131,10 @@ function letterScore(p: VehiclePlateParts): { score: number; label?: string } {
   const s3 = plateLetters3(p);
   if (NEGATIVE_BLAT.has(s3)) return { score: 0, label: `${s3} (без бонуса)` };
   if (isTripleLetter(p)) return { score: 700, label: `тройная буква ${s3}` };
+  if (isPalindromeLetterSeries(p)) return { score: 220, label: `зеркальная серия ${s3}` };
   if (isPairLetters(p)) return { score: 120, label: `пара ${p.l2}` };
-  if (p.l1 === p.l2[0] || p.l1 === p.l2[1]) return { score: 40, label: "частичное повторение" };
+  if (isBookendMirrorLetters(p)) return { score: 200, label: `зеркало ${p.l1}·${p.l2}` };
+  if (p.l1 === p.l2[0]) return { score: 40, label: "частичное повторение" };
   return { score: 0 };
 }
 
@@ -177,6 +198,10 @@ function comboMultipliers(
   if (hasBlat && tripleD && mult === 1) {
     mult *= 1.25;
     labels.push("×1,25 блат + тройные цифры");
+  }
+  if (isFullPlateMirror(p)) {
+    mult *= 1.4;
+    labels.push("×1,4 полное зеркало (цифры + буквы)");
   }
 
   return { mult, labels: [...new Set(labels)] };
@@ -273,5 +298,6 @@ export function formatPlateRollMessage(args: {
 export const PLATE_SHOP_PRESTIGE_HINT_LINES = [
   "Престиж номера **складывается** из цифр, букв, «блатных» серий (**АМР**, **ЕКХ**, **ООО**…) и региона; **×множители** за удачные сочетания.",
   "Спецсерии с **77**, **99**, **777**, **497**, **999** и **МО 50/90/150** дают **больше** — см. подсказку после выпадения.",
-  "Тройные буквы/цифры (**А 777 АА**, **О 000 ОО**) и зеркала усиливают престиж.",
+  "Тройные буквы/цифры (**А 777 АА**, **О 000 ОО**) и зеркала (**О 727 MO**, **А 121 АА**) усиливают престиж.",
+  "Полное зеркало (зеркальные **цифры и буквы**) — доп. **×1,4** к престижу номера.",
 ];
