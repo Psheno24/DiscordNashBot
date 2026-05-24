@@ -147,6 +147,71 @@ function isSpecialDigit(digits: string): boolean {
   return n > 0 && n % 100 === 0 && n <= 900;
 }
 
+/**
+ * Буквы госномера, визуально похожие на цифры (кириллица на знаке).
+ * **О** ↔ **0**, **В** ↔ **8**.
+ */
+const LETTER_VISUAL_DIGIT: Readonly<Record<string, string>> = {
+  О: "0",
+  В: "8",
+};
+
+function letterMatchesDigitVisually(letter: string, digitChar: string): boolean {
+  return LETTER_VISUAL_DIGIT[letter] === digitChar;
+}
+
+function visualDigitHint(digitChar: string): string {
+  if (digitChar === "0") return "**О** как **0**";
+  if (digitChar === "8") return "**В** как **8**";
+  return `буквы как **${digitChar}**`;
+}
+
+function countVisualMatchesOnPlate(p: VehiclePlateParts): number {
+  let n = 0;
+  if (letterMatchesDigitVisually(p.l1, p.digits[0]!)) n++;
+  if (letterMatchesDigitVisually(p.l2[0]!, p.digits[1]!)) n++;
+  if (letterMatchesDigitVisually(p.l2[1]!, p.digits[2]!)) n++;
+  return n;
+}
+
+/** Визуальное совпадение букв и цифр (**В 888 ВВ**, **О 101 ОО** и т.п.). */
+function visualLetterDigitUnity(p: VehiclePlateParts): { score: number; label?: string; full: boolean } {
+  if (isTripleDigit(p.digits)) {
+    const d = p.digits[0]!;
+    const l1ok = letterMatchesDigitVisually(p.l1, d);
+    const l2a = letterMatchesDigitVisually(p.l2[0]!, d);
+    const l2b = letterMatchesDigitVisually(p.l2[1]!, d);
+    const n = (l1ok ? 1 : 0) + (l2a ? 1 : 0) + (l2b ? 1 : 0);
+    if (n === 3) {
+      return {
+        score: 2000,
+        label: `${visualDigitHint(d)} · ${p.l1} ${p.digits} ${p.l2}`,
+        full: true,
+      };
+    }
+    if (n === 2) return { score: 900, label: `${visualDigitHint(d)} (2/3 буквы)`, full: false };
+    if (n === 1) return { score: 320, label: `${visualDigitHint(d)} (частично)`, full: false };
+    return { score: 0, full: false };
+  }
+
+  const n = countVisualMatchesOnPlate(p);
+  if (n >= 2) {
+    return {
+      score: 480,
+      label: `визуал ${n}/3 · ${p.l1} ${p.digits} ${p.l2}`,
+      full: false,
+    };
+  }
+  if (n === 1) {
+    return {
+      score: 180,
+      label: `визуал 1/3 · ${p.l1} ${p.digits} ${p.l2}`,
+      full: false,
+    };
+  }
+  return { score: 0, full: false };
+}
+
 function digitScore(digits: string): { score: number; label?: string } {
   if (isTripleDigit(digits)) return { score: 500, label: `тройка ${digits}` };
   if (isPalindromeDigit(digits) && !isTripleDigit(digits)) return { score: 160, label: `зеркало ${digits}` };
@@ -172,6 +237,7 @@ function comboMultipliers(
   letter: ReturnType<typeof letterTierScore>,
   region: ReturnType<typeof regionScore>,
   digit: ReturnType<typeof digitScore>,
+  visual: ReturnType<typeof visualLetterDigitUnity>,
 ): { mult: number; labels: string[] } {
   let mult = 1;
   const labels: string[] = [];
@@ -212,6 +278,13 @@ function comboMultipliers(
     mult *= 1.4;
     labels.push("×1,4 полное зеркало (цифры + буквы)");
   }
+  if (visual.full) {
+    mult *= 1.55;
+    labels.push(`×1,55 ${visualDigitHint(p.digits[0]!)} (полное)`);
+  } else if (visual.score >= 900) {
+    mult *= 1.28;
+    labels.push("×1,28 визуал букв (2/3)");
+  }
 
   return { mult, labels: [...new Set(labels)] };
 }
@@ -246,6 +319,7 @@ function regionComboHint(
 export function computePlatePrestige(p: VehiclePlateParts): PlatePrestigeBreakdown {
   const digit = digitScore(p.digits);
   const letter = letterTierScore(p);
+  const visual = visualLetterDigitUnity(p);
   const region = regionScore(p.region);
 
   const lines: string[] = [];
@@ -260,12 +334,16 @@ export function computePlatePrestige(p: VehiclePlateParts): PlatePrestigeBreakdo
     const cat = letter.kind === "blat" ? "серия" : "буквы";
     lines.push(`${cat} **+${letter.score}** (${letter.label})`);
   }
+  if (visual.score > 0) {
+    base += visual.score;
+    lines.push(`визуал **+${visual.score}** (${visual.label})`);
+  }
   if (region.score > 0) {
     base += region.score;
     lines.push(`регион **+${region.score}** (${region.label})`);
   }
 
-  const { mult, labels } = comboMultipliers(p, letter, region, digit);
+  const { mult, labels } = comboMultipliers(p, letter, region, digit, visual);
   let total = Math.floor(base * mult);
   total = Math.min(PLATE_PRESTIGE_CAP, total);
 
@@ -303,6 +381,8 @@ export function formatPlateRollEmbedFooter(roll: PlateShopLastRoll): string[] {
 export const PLATE_SHOP_PRESTIGE_HINT_LINES = [
   "Престиж номера **складывается** из цифр, **одного** бонуса за буквы (тройка, серия **АМР**/**ОКО**, пара, зеркало…) и региона; **×множители** за сочетания.",
   "Спецсерии с **77**, **99**, **777**, **497**, **999** и **МО 50/90/150** дают **больше** — см. подсказку после выпадения.",
-  "Тройные буквы/цифры (**А 777 АА**, **О 000 ОО**) и зеркала (**О 727 MO**, **А 121 АА**) усиливают престиж.",
+  "Тройные буквы/цифры (**А 777 АА**, **В 888 ВВ**) и зеркала (**О 727 MO**, **А 121 АА**) усиливают престиж.",
+  "Визуал: **В** как **8**, **О** как **0** (**В 888 ВВ**, **О 707 ОО**…) — отдельный бонус и **×множители**.",
   "Полное зеркало (зеркальные **цифры и буквы**) — **×1,4** к итогу, в т.ч. если буквы уже дали серию/тройку.",
+  "Цифры на знаке: **001–999** (комбинации **000** не бывает).",
 ];

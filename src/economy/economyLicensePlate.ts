@@ -266,15 +266,16 @@ function pickRandomPlateLetter(): string {
   return pickRandom(VEHICLE_PLATE_LETTERS);
 }
 
+/** **001–999** (на знаке не бывает **000**). */
 function pickRandomPlateDigits(): string {
-  return String(Math.floor(Math.random() * 1000)).padStart(3, "0");
+  return String(1 + Math.floor(Math.random() * 999)).padStart(3, "0");
 }
 
 export function pickRandomPlateRegion(): string {
   return pickRandom(VEHICLE_PLATE_REGION_CODES);
 }
 
-/** Случайные 3 цифры (000–999, повторы допустимы). */
+/** Случайные 3 цифры (**001–999**, повторы допустимы). */
 export function rollRandomVehiclePlateDigits(): string {
   return pickRandomPlateDigits();
 }
@@ -311,7 +312,7 @@ export function parseVehiclePlateParts(u: EconomyUser): VehiclePlateParts | unde
 
 export function isValidVehiclePlateParts(p: VehiclePlateParts): boolean {
   if (!LETTER_SET.has(p.l1)) return false;
-  if (!/^\d{3}$/.test(p.digits)) return false;
+  if (!/^\d{3}$/.test(p.digits) || p.digits === "000") return false;
   if (!/^[АВЕКМНОРСТУХ]{2}$/.test(p.l2)) return false;
   if (!REGION_SET.has(p.region)) return false;
   return true;
