@@ -177,6 +177,7 @@ import {
   ECON_SHOP_CAR_SELL_CONFIRM,
   ECON_SHOP_CAR_SELL_CANCEL,
   ECON_SHOP_APPEARANCE,
+  shopNavBottomRow,
 } from "./economyShopUi.js";
 import {
   applyUnregisteredVehiclePenalty,
@@ -599,16 +600,15 @@ function buildTelegramHubRows(member: GuildMember, view: "hub" | "confirmNew"): 
     return [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(ECON_TG_NEW_CONFIRM).setLabel("Да, новый код").setStyle(ButtonStyle.Danger),
-        new ButtonBuilder().setCustomId(ECON_TG_NEW_CANCEL).setLabel("Отмена").setStyle(ButtonStyle.Secondary),
       ),
+      shopNavBottomRow(ECON_TG_NEW_CANCEL, "Отменить"),
     ];
   }
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_TG_NEW_CODE).setLabel("Новый код").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(ECON_TG_BACK_PROFILE).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_TG_MENU_ROOT).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
     ),
+    shopNavBottomRow(ECON_TG_BACK_PROFILE),
   ];
 }
 
@@ -1341,11 +1341,11 @@ function buildMyRentHomeRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_HOUSING_EDIT).setLabel("Изменить срок").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_HOUSING_LEAVE).setLabel("Съехать с аренды").setStyle(ButtonStyle.Danger),
     ),
+    buildMenuRow(),
   ];
 }
 
@@ -1416,12 +1416,7 @@ function buildMyRentEditRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
       ),
     );
   }
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_HOUSING_BACK).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
-  );
+  rows.push(shopNavBottomRow(ECON_HOUSING_BACK));
   return rows;
 }
 
@@ -1465,10 +1460,7 @@ function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(!canTop),
     ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_HUB).setLabel("Назад в магазин").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
+    shopNavBottomRow(ECON_SHOP_HUB),
   ];
 }
 
@@ -1505,10 +1497,7 @@ function buildShopLotteryRows(member: GuildMember): ActionRowBuilder<ButtonBuild
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY_BUY_OPEN).setLabel("Купить").setStyle(ButtonStyle.Primary),
     ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_HUB).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
+    shopNavBottomRow(ECON_SHOP_HUB),
   ];
 }
 
@@ -1535,8 +1524,8 @@ function buildLotteryConfirmRows(qty: number): ActionRowBuilder<ButtonBuilder>[]
         .setCustomId(`${ECON_LOTTERY_CONFIRM_PREFIX}${qty}`)
         .setLabel("Купить")
         .setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId(ECON_LOTTERY_CANCEL).setLabel("Отменить").setStyle(ButtonStyle.Secondary),
     ),
+    shopNavBottomRow(ECON_LOTTERY_CANCEL, "Отменить"),
   ];
 }
 
@@ -1767,10 +1756,7 @@ function buildStarterJobsRows(): ActionRowBuilder<ButtonBuilder>[] {
       new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}waiter`).setLabel("Брокер").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}watchman`).setLabel("Кладбище").setStyle(ButtonStyle.Secondary),
     ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
+    shopNavBottomRow(ECON_BUTTON_WORK),
   ];
 }
 
@@ -1809,15 +1795,7 @@ function buildJobDetailEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
 }
 
 function buildJobDetailRows(jobId: JobId): ActionRowBuilder<ButtonBuilder>[] {
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${ECON_WORK_BUTTON_JOB_DETAIL_CLOSE_PREFIX}${jobId}`)
-        .setLabel("Назад")
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
-  ];
+  return [shopNavBottomRow(`${ECON_WORK_BUTTON_JOB_DETAIL_CLOSE_PREFIX}${jobId}`)];
 }
 
 function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
@@ -2026,11 +2004,7 @@ function buildTier3JobRows(): ActionRowBuilder<ButtonBuilder>[] {
     new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}shadowFixer`).setLabel("Схемы").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}soleProp`).setLabel("ИП").setStyle(ButtonStyle.Secondary),
   );
-  const nav = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-  );
-  return [row, nav];
+  return [row, shopNavBottomRow(ECON_BUTTON_WORK)];
 }
 
 function buildTier3ActionRows(member: GuildMember, jobId: JobId): ActionRowBuilder<ButtonBuilder>[] {
@@ -2092,13 +2066,7 @@ function buildSwitchJobConfirmRows(newJobId: JobId): ActionRowBuilder<ButtonBuil
         .setLabel("Да, устроиться сюда")
         .setStyle(ButtonStyle.Danger),
     ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}${newJobId}`)
-        .setLabel("Назад")
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
+    shopNavBottomRow(`${ECON_WORK_BUTTON_JOB_PREFIX}${newJobId}`),
   ];
 }
 
@@ -2149,12 +2117,7 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
     if (isTier3PanelJob(jobId)) {
       rows.push(...buildTier3ActionRows(member, jobId));
     }
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-      ),
-    );
+    rows.push(shopNavBottomRow(backId));
     return rows;
   }
 
@@ -2177,12 +2140,7 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
         .setStyle(ButtonStyle.Secondary),
     ),
   );
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
-  );
+  rows.push(shopNavBottomRow(backId));
   return rows;
 }
 
@@ -2318,12 +2276,7 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   if (isTier3PanelJob(u.jobId)) {
     rows.push(...buildTier3ActionRows(member, u.jobId));
   }
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
-  );
+  rows.push(shopNavBottomRow(backId));
   return rows;
 }
 
@@ -2401,7 +2354,7 @@ function buildFeedArchiveRows(page: number, totalPages: number): ActionRowBuilde
   const prevPage = Math.max(1, page - 1);
   const nextPage = Math.min(totalPages, page + 1);
 
-  const nav = new ActionRowBuilder<ButtonBuilder>().addComponents(
+  const pager = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
       .setCustomId(`${ECON_FEED_BUTTON_PAGE_PREFIX}${prevPage}`)
       .setLabel("◀")
@@ -2412,10 +2365,9 @@ function buildFeedArchiveRows(page: number, totalPages: number): ActionRowBuilde
       .setLabel("▶")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(page >= totalPages),
-    new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
   );
 
-  return [nav];
+  return [pager, buildMenuRow()];
 }
 
 function buildFeedArchiveEmbed(guildId: string, page: number): { embed: EmbedBuilder; totalPages: number } {
@@ -3964,11 +3916,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}assembler`).setLabel("Склад").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(`${ECON_WORK_BUTTON_JOB_PREFIX}expediter`).setLabel("Развлекательный центр").setStyle(ButtonStyle.Secondary),
     );
-    const nav = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    );
-    await replyOrUpdate(interaction, { embeds: [embed], components: [row, nav] });
+    await replyOrUpdate(interaction, { embeds: [embed], components: [row, shopNavBottomRow(ECON_BUTTON_WORK)] });
     return true;
   }
 
@@ -4340,11 +4288,15 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       .setColor(PANEL_COLOR)
       .setTitle("Увольнение")
       .setDescription(`Вы уверены, что хотите уволиться с работы **${jobTitle(u.jobId)}**?`);
-    const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_QUIT_CONFIRM).setLabel("Да, уволиться").setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-    );
-    await replyOrUpdate(interaction, { embeds: [embed], components: [row] });
+    await replyOrUpdate(interaction, {
+      embeds: [embed],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_QUIT_CONFIRM).setLabel("Да, уволиться").setStyle(ButtonStyle.Danger),
+        ),
+        shopNavBottomRow(ECON_BUTTON_WORK, "Отменить"),
+      ],
+    });
     return true;
   }
 
@@ -4435,12 +4387,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const e = await buildTopEmbed(member, "ps");
     await replyOrUpdate(interaction, {
       embeds: [e],
-      components: [
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(ECON_BUTTON_PLAYERS).setLabel("Назад к игрокам").setStyle(ButtonStyle.Secondary),
-        ),
-        buildMenuRow(),
-      ],
+      components: [shopNavBottomRow(ECON_BUTTON_PLAYERS)],
     });
     return true;
   }
@@ -4449,12 +4396,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const e = await buildTopEmbed(member, "rub");
     await replyOrUpdate(interaction, {
       embeds: [e],
-      components: [
-        new ActionRowBuilder<ButtonBuilder>().addComponents(
-          new ButtonBuilder().setCustomId(ECON_BUTTON_PLAYERS).setLabel("Назад к игрокам").setStyle(ButtonStyle.Secondary),
-        ),
-        buildMenuRow(),
-      ],
+      components: [shopNavBottomRow(ECON_BUTTON_PLAYERS)],
     });
     return true;
   }

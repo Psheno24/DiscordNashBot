@@ -82,6 +82,17 @@ import { getEconomyUser, patchEconomyUser, type EconomyUser } from "./userStore.
 
 const PANEL_COLOR = 0x2b2d31;
 
+/** То же, что `ECON_BUTTON_MENU` в `panel.ts`. */
+export const ECON_BUTTON_MENU = "econ:menu";
+
+/** Нижний ряд: «Назад» и «Главное меню» рядом (всегда последний ряд). */
+export function shopNavBottomRow(backId: string, backLabel = "Назад"): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder().setCustomId(backId).setLabel(backLabel).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+  );
+}
+
 export const ECON_SHOP_HUB = "econ:shop:hub";
 export const ECON_SHOP_PHONE = "econ:shop:phone";
 export const ECON_SHOP_PHONE_ORIGIN_PREFIX = "econ:shop:phone:";
@@ -247,7 +258,7 @@ export function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBu
       new ButtonBuilder().setCustomId(ECON_SHOP_APPEARANCE).setLabel("Оформление").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId("econ:menu").setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
     ),
   ];
 }
@@ -271,18 +282,21 @@ export function buildShopOriginPickEmbed(
 
 export function buildShopOriginPickRows(kind: "phone" | "car", backId: string): ActionRowBuilder<ButtonBuilder>[] {
   const prefix = kind === "phone" ? ECON_SHOP_PHONE_ORIGIN_PREFIX : ECON_SHOP_CAR_ORIGIN_PREFIX;
-  const row1 = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(`${prefix}soviet`).setLabel("Советское").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId(`${prefix}foreign`).setLabel("Заморское").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-  );
-  if (kind === "phone") return [row1];
-  return [
-    row1,
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_PLATE).setLabel("Гос.номер").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`${prefix}soviet`).setLabel("Советское").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`${prefix}foreign`).setLabel("Заморское").setStyle(ButtonStyle.Secondary),
     ),
   ];
+  if (kind === "car") {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_SHOP_PLATE).setLabel("Гос.номер").setStyle(ButtonStyle.Secondary),
+      ),
+    );
+  }
+  rows.push(shopNavBottomRow(backId));
+  return rows;
 }
 
 function inflatedPlateShopPrice(guildId: string, baseRub: number): number {
@@ -356,12 +370,7 @@ export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<Button
     mainRow.addComponents(digitsBtn, lettersBtn, regionBtn);
   }
 
-  return [
-    mainRow,
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_CAR).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-    ),
-  ];
+  return [mainRow, shopNavBottomRow(ECON_SHOP_CAR)];
 }
 
 export function buildShopCarSellConfirmEmbed(member: GuildMember): EmbedBuilder {
@@ -387,8 +396,8 @@ export function buildShopCarSellConfirmRows(): ActionRowBuilder<ButtonBuilder>[]
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_SHOP_CAR_SELL_CONFIRM).setLabel("Продать").setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(ECON_SHOP_CAR_SELL_CANCEL).setLabel("Отменить").setStyle(ButtonStyle.Secondary),
     ),
+    shopNavBottomRow(ECON_SHOP_CAR_SELL_CANCEL, "Отменить"),
   ];
 }
 
@@ -396,13 +405,13 @@ function buildShopConfirmRows(
   confirmId: string,
   confirmLabel: string,
   confirmStyle: ButtonStyle.Success | ButtonStyle.Danger,
-  cancelId: string,
+  cancelBackId: string,
 ): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(confirmId).setLabel(confirmLabel).setStyle(confirmStyle),
-      new ButtonBuilder().setCustomId(cancelId).setLabel("Отменить").setStyle(ButtonStyle.Secondary),
     ),
+    shopNavBottomRow(cancelBackId, "Отменить"),
   ];
 }
 
@@ -614,9 +623,7 @@ export function buildShopHousePickRows(backId: string): ActionRowBuilder<ButtonB
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE_RENT_MENU).setLabel("Аренда").setStyle(ButtonStyle.Success),
     ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-    ),
+    shopNavBottomRow(backId),
   ];
 }
 
@@ -672,11 +679,7 @@ export function buildShopHouseRentRows(member: GuildMember): ActionRowBuilder<Bu
       ),
     );
   }
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-    ),
-  );
+  rows.push(shopNavBottomRow(ECON_SHOP_HOUSE));
   return rows;
 }
 
@@ -740,11 +743,7 @@ export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigi
       ),
     );
   }
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_PHONE).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-    ),
-  );
+  rows.push(shopNavBottomRow(ECON_SHOP_PHONE));
   return rows;
 }
 
@@ -807,11 +806,7 @@ export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin)
       ),
     );
   }
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_CAR).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-    ),
-  );
+  rows.push(shopNavBottomRow(ECON_SHOP_CAR));
   return rows;
 }
 
@@ -896,11 +891,7 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
     );
   }
 
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-    ),
-  );
+  rows.push(shopNavBottomRow(ECON_SHOP_HOUSE));
   return rows;
 }
 
@@ -953,11 +944,7 @@ export function buildShopAnimalsRows(member: GuildMember): ActionRowBuilder<Butt
       ),
     );
   }
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_HUB).setLabel("Назад").setStyle(ButtonStyle.Secondary),
-    ),
-  );
+  rows.push(shopNavBottomRow(ECON_SHOP_HUB));
   return rows;
 }
 

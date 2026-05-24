@@ -17,7 +17,9 @@ import {
   PROFILE_FRAME_COLORS,
   type ProfileFrameColorId,
 } from "./profileThemes.js";
+import { shopNavBottomRow } from "./economyShopUi.js";
 import { getEconomyUser, patchEconomyUser } from "./userStore.js";
+
 const ECON_SHOP_HUB_BACK = "econ:shop:hub";
 
 const PANEL_COLOR = 0x2b2d31;
@@ -74,9 +76,7 @@ export function buildShopAppearanceRows(): ActionRowBuilder<ButtonBuilder>[] {
         .setLabel("Моя карточка")
         .setStyle(ButtonStyle.Success),
     ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_HUB_BACK).setLabel("Назад в магазин").setStyle(ButtonStyle.Secondary),
-    ),
+    shopNavBottomRow(ECON_SHOP_HUB_BACK),
   ];
 }
 
@@ -87,11 +87,8 @@ function buildColorPreviewBuyRows(colorId: ProfileFrameColorId): ActionRowBuilde
         .setCustomId(`${ECON_SHOP_APPEARANCE_COLOR_BUY_PREFIX}${colorId}`)
         .setLabel(`Купить · ${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)} ₽`)
         .setStyle(ButtonStyle.Success),
-      new ButtonBuilder()
-        .setCustomId(ECON_SHOP_APPEARANCE)
-        .setLabel("Назад к оформлению")
-        .setStyle(ButtonStyle.Secondary),
     ),
+    shopNavBottomRow(ECON_SHOP_APPEARANCE),
   ];
 }
 
