@@ -272,27 +272,23 @@ export function formatPlatePrestigeBreakdownShort(b: PlatePrestigeBreakdown): st
   return parts.join(" · ") || "без бонусов";
 }
 
-/** Сообщение после оформления/смены: номер + престиж в скобках. */
-export function formatPlateRollMessage(args: {
+export type PlateShopLastRoll = {
   action: string;
   plate: string;
   breakdown: PlatePrestigeBreakdown;
   prestigeDelta: number;
-  prestigeAccrued: number;
-}): string {
-  const { action, plate, breakdown, prestigeDelta, prestigeAccrued } = args;
-  const deltaStr =
-    prestigeDelta > 0
-      ? `**+${prestigeDelta.toLocaleString("ru-RU")}** престижа`
-      : prestigeDelta < 0
-        ? `${prestigeDelta.toLocaleString("ru-RU")} престижа`
-        : "престиж без изменений";
-  const detail = formatPlatePrestigeBreakdownShort(breakdown);
-  const hint = breakdown.regionHint ? `\n${breakdown.regionHint}` : "";
-  return (
-    `${action}: **${plate}** (${deltaStr}, с номера **${prestigeAccrued.toLocaleString("ru-RU")}**)\n` +
-    `(${detail})${hint}`
-  );
+};
+
+/** Строки в конец embed госномера после оформления/смены. */
+export function formatPlateRollEmbedFooter(roll: PlateShopLastRoll): string[] {
+  const lines = ["", "---", `**${roll.action}:** ${roll.plate}`];
+  const d = roll.prestigeDelta;
+  if (d > 0) lines.push(`**+${d.toLocaleString("ru-RU")}** к престижу профиля`);
+  else if (d < 0) lines.push(`**${d.toLocaleString("ru-RU")}** к престижу профиля`);
+  else lines.push("Престиж профиля без изменений");
+  lines.push(`(${formatPlatePrestigeBreakdownShort(roll.breakdown)})`);
+  if (roll.breakdown.regionHint) lines.push(roll.breakdown.regionHint);
+  return lines;
 }
 
 export const PLATE_SHOP_PRESTIGE_HINT_LINES = [

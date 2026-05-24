@@ -3271,10 +3271,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPlateEmbed(member)],
+      embeds: [buildShopPlateEmbed(member, r.lastRoll)],
       components: buildShopPlateRows(member),
     });
-    await interaction.followUp({ content: r.rollMessage, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -3285,10 +3284,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPlateEmbed(member)],
+      embeds: [buildShopPlateEmbed(member, r.lastRoll)],
       components: buildShopPlateRows(member),
     });
-    await interaction.followUp({ content: r.rollMessage, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -3299,10 +3297,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPlateEmbed(member)],
+      embeds: [buildShopPlateEmbed(member, r.lastRoll)],
       components: buildShopPlateRows(member),
     });
-    await interaction.followUp({ content: r.rollMessage, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -3313,10 +3310,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPlateEmbed(member)],
+      embeds: [buildShopPlateEmbed(member, r.lastRoll)],
       components: buildShopPlateRows(member),
     });
-    await interaction.followUp({ content: r.rollMessage, flags: MessageFlags.Ephemeral });
     return true;
   }
 

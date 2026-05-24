@@ -57,8 +57,9 @@ import {
 import {
   computePlatePrestige,
   formatPlatePrestigeBreakdownShort,
-  formatPlateRollMessage,
+  formatPlateRollEmbedFooter,
   PLATE_SHOP_PRESTIGE_HINT_LINES,
+  type PlateShopLastRoll,
 } from "./economyPlatePrestige.js";
 import { cancelRentAndBikeOnAssetPurchase, clearSovietHousingRentPatch } from "./economyHousingUtil.js";
 import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub, userHasActiveHousing } from "./economyHousing.js";
@@ -270,13 +271,8 @@ function inflatedPlateShopPrice(guildId: string, baseRub: number): number {
   return scaledShopPrice(guildId, baseRub);
 }
 
-export function buildShopPlateEmbed(member: GuildMember): EmbedBuilder {
+export function buildShopPlateEmbed(member: GuildMember, lastRoll?: PlateShopLastRoll): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const gid = member.guild.id;
-  const regCost = inflatedPlateShopPrice(gid, SHOP_PLATE_REGISTER_BASE_RUB);
-  const digCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
-  const letCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
-  const regioCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
   const plate = formatVehiclePlateFromUser(u);
   const plateParts = parseVehiclePlateParts(u);
   const platePrestige = plateParts ? computePlatePrestige(plateParts) : undefined;
@@ -292,18 +288,15 @@ export function buildShopPlateEmbed(member: GuildMember): EmbedBuilder {
     plate ? `Текущий номер: **${plate}**` : "Госномер: **не оформлен**",
   ];
   if (platePrestige && platePrestige.total > 0) {
-    lines.push(`Престиж номера: **${fmt(platePrestige.total)}** (${formatPlatePrestigeBreakdownShort(platePrestige)})`);
-    if (platePrestige.regionHint) lines.push(platePrestige.regionHint);
+    lines.push(`Престиж с номера: **${fmt(platePrestige.total)}**`);
+    if (!lastRoll) {
+      lines.push(`(${formatPlatePrestigeBreakdownShort(platePrestige)})`);
+      if (platePrestige.regionHint) lines.push(platePrestige.regionHint);
+    }
   } else if (plate) {
-    lines.push("Престиж номера: **0**");
+    lines.push("Престиж с номера: **0**");
   }
-  lines.push(
-    "",
-    `• **Оформить** — **${fmt(regCost)}** ₽ (случайная серия и регион)`,
-    `• **Сменить цифры** — **${fmt(digCost)}** ₽`,
-    `• **Сменить буквы** — **${fmt(letCost)}** ₽`,
-    `• **Сменить регион** — **${fmt(regioCost)}** ₽`,
-  );
+  if (lastRoll) lines.push(...formatPlateRollEmbedFooter(lastRoll));
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Гос.номер").setDescription(lines.join("\n"));
 }
 
@@ -861,9 +854,18 @@ export function syncVehiclePlatePrestige(member: GuildMember): void {
   patchEconomyUser(member.guild.id, member.id, { vehiclePlatePrestige: total, ...stats });
 }
 
+function plateLastRoll(
+  action: string,
+  plate: string,
+  breakdown: ReturnType<typeof computePlatePrestige>,
+  prestigeDelta: number,
+): PlateShopLastRoll {
+  return { action, plate, breakdown, prestigeDelta };
+}
+
 export function registerVehiclePlate(
   member: GuildMember,
-): { ok: true; plate: string; rollMessage: string } | { ok: false; reply: string } {
+): { ok: true; plate: string; lastRoll: PlateShopLastRoll } | { ok: false; reply: string } {
   const u = getEconomyUser(member.guild.id, member.id);
   if (!userHasOwnedCar(u)) return { ok: false, reply: "Сначала купите **авто**." };
   if (userHasVehiclePlate(u)) return { ok: false, reply: "Госномер **уже оформлен**." };
@@ -882,19 +884,13 @@ export function registerVehiclePlate(
   return {
     ok: true,
     plate,
-    rollMessage: formatPlateRollMessage({
-      action: "Оформлен госномер",
-      plate,
-      breakdown,
-      prestigeDelta,
-      prestigeAccrued,
-    }),
+    lastRoll: plateLastRoll("Оформлен госномер", plate, breakdown, prestigeDelta),
   };
 }
 
 export function changeVehiclePlateDigits(
   member: GuildMember,
-): { ok: true; plate: string; rollMessage: string } | { ok: false; reply: string } {
+): { ok: true; plate: string; lastRoll: PlateShopLastRoll } | { ok: false; reply: string } {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = parseVehiclePlateParts(u);
   if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
@@ -913,19 +909,13 @@ export function changeVehiclePlateDigits(
   return {
     ok: true,
     plate,
-    rollMessage: formatPlateRollMessage({
-      action: "Новые цифры",
-      plate,
-      breakdown,
-      prestigeDelta,
-      prestigeAccrued,
-    }),
+    lastRoll: plateLastRoll("Новые цифры", plate, breakdown, prestigeDelta),
   };
 }
 
 export function changeVehiclePlateLetters(
   member: GuildMember,
-): { ok: true; plate: string; rollMessage: string } | { ok: false; reply: string } {
+): { ok: true; plate: string; lastRoll: PlateShopLastRoll } | { ok: false; reply: string } {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = parseVehiclePlateParts(u);
   if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
@@ -944,19 +934,13 @@ export function changeVehiclePlateLetters(
   return {
     ok: true,
     plate,
-    rollMessage: formatPlateRollMessage({
-      action: "Новые буквы",
-      plate,
-      breakdown,
-      prestigeDelta,
-      prestigeAccrued,
-    }),
+    lastRoll: plateLastRoll("Новые буквы", plate, breakdown, prestigeDelta),
   };
 }
 
 export function changeVehiclePlateRegion(
   member: GuildMember,
-): { ok: true; plate: string; rollMessage: string } | { ok: false; reply: string } {
+): { ok: true; plate: string; lastRoll: PlateShopLastRoll } | { ok: false; reply: string } {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = parseVehiclePlateParts(u);
   if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
@@ -975,13 +959,7 @@ export function changeVehiclePlateRegion(
   return {
     ok: true,
     plate,
-    rollMessage: formatPlateRollMessage({
-      action: "Новый регион",
-      plate,
-      breakdown,
-      prestigeDelta,
-      prestigeAccrued,
-    }),
+    lastRoll: plateLastRoll("Новый регион", plate, breakdown, prestigeDelta),
   };
 }
 
