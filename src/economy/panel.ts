@@ -87,6 +87,7 @@ import {
 } from "./economyCatalog.js";
 import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub, userHasActiveHousing } from "./economyHousing.js";
 import { clearSovietHousingRentPatch } from "./economyHousingUtil.js";
+import { feedNetPrestigeRubBonus, feedPrestigeDomesticBonusSuffix } from "./economyFeedBonus.js";
 import { applyPrestigeToShiftRub, shiftPsApplies, shiftPsFromDomestic } from "./economyModifiers.js";
 import {
   applyRentPlanPurchase,
@@ -1072,41 +1073,43 @@ function formatDelta(n: number): string {
 }
 
 /** Ориентир суточного оклада офиса того же ранга — для бонусов 10–30% у тир-3. */
-function tier3ReferencePassiveRubFromStreak(streakDays: number): number {
+function tier3ReferencePassiveRubFromStreak(guildId: string, streakDays: number): number {
   const office = getTier3JobDef("officeAnalyst");
   const rank = tier3PromotionRank(streakDays);
-  return Math.floor(office.passiveBaseRub * (1 + 0.08 * rank));
+  return scalePositiveIncome(guildId, Math.floor(office.passiveBaseRub * (1 + 0.08 * rank)));
 }
 
-function solePropAdMaxRub(streakDays: number): number {
+function solePropAdMaxRub(guildId: string, streakDays: number): number {
   const rank = tier3PromotionRank(streakDays);
-  return Math.min(SOLE_PROP_CAP_MAX, 125_000 + rank * 40_000);
+  return scalePositiveIncome(guildId, Math.min(SOLE_PROP_CAP_MAX, 125_000 + rank * 40_000));
 }
 
 function rubFromTier3MetaPercent(guildId: string, streakDays: number): number {
-  const ref = tier3ReferencePassiveRubFromStreak(streakDays);
+  const ref = tier3ReferencePassiveRubFromStreak(guildId, streakDays);
   const p = 0.1 + Math.random() * 0.2;
-  return scalePositiveIncome(guildId, Math.max(0, Math.floor(ref * p)));
+  return Math.max(0, Math.floor(ref * p));
 }
 
 function solePropAdvertOutcome(
+  guildId: string,
   bizBal: number,
   amount: number,
   maxAd: number,
 ): { ok: boolean; delta: number; detail: string } {
-  if (amount < 10_000 || amount > maxAd || amount > bizBal) {
+  const minAd = scalePositiveIncome(guildId, 10_000);
+  if (amount < minAd || amount > maxAd || amount > bizBal) {
     return { ok: false, delta: 0, detail: "Сумма вне диапазона или больше баланса бизнеса." };
   }
   const frac = maxAd > 0 ? amount / maxAd : 1;
   const failP = Math.min(0.92, 0.22 + 0.58 * Math.pow(frac, 1.15));
   if (Math.random() < failP) {
     const lossMult = 0.7 + Math.random() * 0.3;
-    const loss = Math.min(bizBal, Math.floor(amount * lossMult));
+    const loss = scalePositiveIncome(guildId, Math.min(bizBal, Math.floor(amount * lossMult)));
     return { ok: false, delta: -loss, detail: `Реклама не зашла: **${formatDelta(-loss)}** с баланса бизнеса.` };
   }
   const gainPct = 0.07 + 0.38 * (1 - frac);
   const jitter = 0.88 + Math.random() * 0.28;
-  const gain = Math.floor(amount * gainPct * jitter);
+  const gain = scalePositiveIncome(guildId, Math.floor(amount * gainPct * jitter));
   return { ok: true, delta: gain, detail: `Реклама сработала: **+${fmt(gain)}** ₽ на баланс бизнеса.` };
 }
 
@@ -1804,7 +1807,7 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
     body.push(...cdAcc);
   }
 
-  const t3 = tier3StatusLines(u, jobId, now);
+  const t3 = tier3StatusLines(guildId, u, jobId, now);
   if (t3.length) {
     body.push("");
     body.push(...t3);
@@ -1868,7 +1871,7 @@ function workCatalogBackButtonId(jobId: JobId): string {
 }
 
 /** Ориентир суточного оклада ИП при разных вложениях (риск 0 — без рандом-джиттера). */
-function solePropPassiveExampleLines(u: ReturnType<typeof getEconomyUser>): string[] {
+function solePropPassiveExampleLines(guildId: string, u: ReturnType<typeof getEconomyUser>): string[] {
   const sdef = getTier3JobDef("soleProp");
   const streak = u.jobMskDayStreak ?? 0;
   const caps = [0, 100_000, 250_000, 500_000, 1_000_000, 2_000_000, 5_000_000];
@@ -1877,6 +1880,7 @@ function solePropPassiveExampleLines(u: ReturnType<typeof getEconomyUser>): stri
   ];
   for (const cap of caps) {
     const night = computeTier3PassiveRub({
+      guildId,
       jobId: "soleProp",
       def: sdef,
       streakDays: streak,
@@ -1894,7 +1898,7 @@ function solePropPassiveExampleLines(u: ReturnType<typeof getEconomyUser>): stri
   return out;
 }
 
-function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): string[] {
+function tier3StatusLines(guildId: string, u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): string[] {
   if (!isTier3PanelJob(jobId)) return [];
   const def = getTier3JobDef(jobId as Tier3JobId);
   const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
@@ -1903,13 +1907,14 @@ function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, no
   lines.push(`**Должность:** **${rankTitle}** (ранг **${rank}**) · стрик: **${u.jobMskDayStreak ?? 0}** дн.`);
   if (def.archetype === "legal") {
     lines.push(`**Суточный оклад** (пассивно) — **основной** доход; смены — дополнение.`);
-    const ref = tier3ReferencePassiveRubFromStreak(u.jobMskDayStreak ?? 0);
+    const ref = tier3ReferencePassiveRubFromStreak(guildId, u.jobMskDayStreak ?? 0);
     lines.push(`Ориентир суточного оклада для бонусов: **~${fmt(ref)}** ₽.`);
   } else if (def.archetype === "illegal") {
     lines.push(`Суточного пассивного оклада **нет**; смены + мелкие действия **24 ч** КД каждое.`);
   } else {
     const sdef = getTier3JobDef("soleProp");
     const passEst = computeTier3PassiveRub({
+      guildId,
       jobId: "soleProp",
       def: sdef,
       streakDays: u.jobMskDayStreak ?? 0,
@@ -1934,7 +1939,7 @@ function tier3StatusLines(u: ReturnType<typeof getEconomyUser>, jobId: JobId, no
     lines.push(stL > 0 ? `Персонал: через **${formatCooldown(stL)}**.` : `Персонал: **доступен**.`);
     lines.push(ctL > 0 ? `Контроль: через **${formatCooldown(ctL)}**.` : `Контроль: **доступен**.`);
     lines.push("");
-    lines.push(...solePropPassiveExampleLines(u));
+    lines.push(...solePropPassiveExampleLines(guildId, u));
     return lines;
   }
   const sideLeft = (u.tier3SideGigReadyAt ?? 0) - now;
@@ -2180,7 +2185,7 @@ function buildCurrentJobEmbed(
     lines.push(...cdAcc);
   }
 
-  const t3 = tier3StatusLines(u, jid, now);
+  const t3 = tier3StatusLines(guildId, u, jid, now);
   if (t3.length) {
     lines.push("");
     lines.push(...t3);
@@ -2703,11 +2708,13 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
   }
 
   const prestige = u.prestigePoints ?? 0;
+  let prestigeRubBonus = 0;
   if (jobTotal > 0) {
     const beforePrestige = jobTotal;
     jobTotal = applyPrestigeToShiftRub(jobTotal, prestige);
     if (jobTotal > beforePrestige) {
-      notes.push(`престиж к выплате: **+${fmt(jobTotal - beforePrestige)}** ₽`);
+      prestigeRubBonus = jobTotal - beforePrestige;
+      notes.push(`престиж к выплате: **+${fmt(prestigeRubBonus)}** ₽`);
     }
   }
 
@@ -2765,14 +2772,23 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
   };
   patchEconomyUser(guildId, member.id, patch);
   const walletDeltaRub = rublesNext - u.rubles;
-  const feedParts = [formatDelta(walletDeltaRub)];
-  if (psGain > 0) feedParts.push(`+${fmt(psGain)} СР`);
+  const netPrestigeRub =
+    walletDeltaRub > 0 && prestigeRubBonus > 0
+      ? feedNetPrestigeRubBonus(jobTotal, prestigeRubBonus, payToWallet)
+      : 0;
+  const feedRubMain =
+    walletDeltaRub > 0 && netPrestigeRub > 0 ? walletDeltaRub - netPrestigeRub : walletDeltaRub;
+  const feedParts = [formatDelta(feedRubMain)];
+  const feedBonus = feedPrestigeDomesticBonusSuffix({
+    prestigeRub: netPrestigeRub,
+    domesticPs: psGain > 0 ? psGain : 0,
+  });
   appendFeedEvent({
     ts: now,
     guildId,
     type: "job:shift",
     actorUserId: member.id,
-    text: `${member.toString()} вышел на смену: **${def.title}** — ${feedParts.join(", ")}`,
+    text: `${member.toString()} вышел на смену: **${def.title}** — ${feedParts.join(", ")}${feedBonus}`,
   });
   await ensureEconomyFeedPanel(client);
   return { ok: true, walletDeltaRub, notes };
@@ -3632,8 +3648,12 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     if (id === ECON_IP_AD_OPEN) {
-      const maxAd = solePropAdMaxRub(u.jobMskDayStreak ?? 0);
-      const modal = new ModalBuilder().setCustomId(ECON_MODAL_IP_AD).setTitle(`Реклама (10k–${fmt(maxAd)} ₽ с бизнеса)`);
+      const gid = member.guild.id;
+      const maxAd = solePropAdMaxRub(gid, u.jobMskDayStreak ?? 0);
+      const minAd = scalePositiveIncome(gid, 10_000);
+      const modal = new ModalBuilder()
+        .setCustomId(ECON_MODAL_IP_AD)
+        .setTitle(`Реклама (${fmt(minAd)}–${fmt(maxAd)} ₽ с бизнеса)`);
       modal.addComponents(
         new ActionRowBuilder<TextInputBuilder>().addComponents(
           new TextInputBuilder()
@@ -4202,9 +4222,9 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
         await interaction.reply({ content: "Реклама ещё на перезарядке.", flags: MessageFlags.Ephemeral });
         return true;
       }
-      const maxAd = solePropAdMaxRub(u.jobMskDayStreak ?? 0);
+      const maxAd = solePropAdMaxRub(mem.guild.id, u.jobMskDayStreak ?? 0);
       const biz = u.solePropCapitalRub ?? 0;
-      const out = solePropAdvertOutcome(biz, amount, maxAd);
+      const out = solePropAdvertOutcome(mem.guild.id, biz, amount, maxAd);
       if (!out.ok && out.delta === 0) {
         await interaction.reply({ content: out.detail, flags: MessageFlags.Ephemeral });
         return true;

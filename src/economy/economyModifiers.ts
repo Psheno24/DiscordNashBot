@@ -1,53 +1,43 @@
-import { catalogMaxDomesticPoints, catalogMaxPrestigePoints } from "./economyCatalog.js";
+/** Доля прироста ₽ за смену при log1p(STAT_LOG_REF) очков престижа. */
+const PRESTIGE_SHIFT_BONUS_AT_REF = 0.35;
+/** Доля прироста суточного оклада ИП при log1p(STAT_LOG_REF) престижа. */
+const PRESTIGE_PASSIVE_BONUS_AT_REF = 0.55;
+/** Доля прироста СР с голоса при log1p(STAT_LOG_REF) быта. */
+const DOMESTIC_VOICE_BONUS_AT_REF = 0.45;
+/** Доля прироста СР за смену при log1p(STAT_LOG_REF) быта. */
+const DOMESTIC_SHIFT_BONUS_AT_REF = 0.6;
 
-/** Доля прироста ₽ за смену при полном заморском сете (относительно catalogMaxPrestigePoints). */
-const PRESTIGE_SHIFT_BONUS_AT_MAX = 0.35;
-/** Доля прироста суточного оклада ИП при полном престиже. */
-const PRESTIGE_PASSIVE_BONUS_AT_MAX = 0.55;
-/** Доля прироста СР с голоса при полном советском сете. */
-const DOMESTIC_VOICE_BONUS_AT_MAX = 0.45;
-/** Доля прироста СР за смену при полном быте (к базе по тиру). */
-const DOMESTIC_SHIFT_BONUS_AT_MAX = 0.6;
+/**
+ * Опорная величина очков в log-формуле: при prestige/domestic = REF бонус ≈ половина от «эталонного» AT_REF.
+ * Без потолка по каталогу — новые товары и дорогие покупки усиливают эффект с убывающей отдачей.
+ */
+const STAT_LOG_REF = 150_000;
 
-function ratioToMax(value: number, max: number): number {
-  if (max <= 0 || value <= 0) return 0;
-  return Math.min(1, value / max);
+function statLogMultiplier(points: number, ref: number, bonusAtRef: number): number {
+  const p = Math.max(0, points);
+  if (p <= 0 || ref <= 0 || bonusAtRef <= 0) return 1;
+  const bonus = bonusAtRef * (Math.log1p(p / ref) / Math.log1p(1));
+  return 1 + bonus;
 }
 
 /** Множитель ₽ за смену. При престиже 0 — ровно ×1 (бонуса нет). */
 export function prestigeShiftIncomeMult(prestige: number): number {
-  const p = Math.max(0, prestige);
-  if (p <= 0) return 1;
-  const max = catalogMaxPrestigePoints();
-  if (max <= 0) return 1;
-  return 1 + PRESTIGE_SHIFT_BONUS_AT_MAX * Math.sqrt(ratioToMax(p, max));
+  return statLogMultiplier(prestige, STAT_LOG_REF, PRESTIGE_SHIFT_BONUS_AT_REF);
 }
 
 /** Множитель суточного оклада ИП / легального пассива. При престиже 0 — ×1. */
 export function prestigePassiveIncomeMult(prestige: number): number {
-  const p = Math.max(0, prestige);
-  if (p <= 0) return 1;
-  const max = catalogMaxPrestigePoints();
-  if (max <= 0) return 1;
-  return 1 + PRESTIGE_PASSIVE_BONUS_AT_MAX * Math.sqrt(ratioToMax(p, max));
+  return statLogMultiplier(prestige, STAT_LOG_REF, PRESTIGE_PASSIVE_BONUS_AT_REF);
 }
 
 /** Множитель СР с голоса. При быте 0 — ×1 (голос даёт базовые СР по зонам минут). */
 export function domesticVoicePsMult(domestic: number): number {
-  const d = Math.max(0, domestic);
-  if (d <= 0) return 1;
-  const max = catalogMaxDomesticPoints();
-  if (max <= 0) return 1;
-  return 1 + DOMESTIC_VOICE_BONUS_AT_MAX * Math.sqrt(ratioToMax(d, max));
+  return statLogMultiplier(domestic, STAT_LOG_REF, DOMESTIC_VOICE_BONUS_AT_REF);
 }
 
 /** Множитель СР за смену от быта. При быте 0 — не используется (см. shiftPsFromDomestic). */
 export function domesticShiftPsMult(domestic: number): number {
-  const d = Math.max(0, domestic);
-  if (d <= 0) return 1;
-  const max = catalogMaxDomesticPoints();
-  if (max <= 0) return 1;
-  return 1 + DOMESTIC_SHIFT_BONUS_AT_MAX * Math.sqrt(ratioToMax(d, max));
+  return statLogMultiplier(domestic, STAT_LOG_REF, DOMESTIC_SHIFT_BONUS_AT_REF);
 }
 
 /** Применить престиж: только при prestige > 0; минусы не усиливаются. */

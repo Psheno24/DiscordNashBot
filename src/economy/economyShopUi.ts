@@ -44,6 +44,8 @@ import {
   inflatedCatalogPhonePrice,
   inflatedHousingRentPrice,
   inflatedPhonePurchaseCost,
+  scaledEconomyExpense,
+  scaledEconomyPsIncome,
   scaledShopPrice,
 } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
@@ -480,10 +482,13 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
 export function buildShopAnimalsEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = getPetDef(u.ownedPetId);
+  const gid = member.guild.id;
   const lines = PET_MODELS.map((p) => {
-    const cost = scaledShopPrice(member.guild.id, petPurchaseCostRub(cur, p));
+    const cost = scaledShopPrice(gid, petPurchaseCostRub(cur, p));
+    const upkeep = scaledEconomyExpense(gid, p.dailyUpkeepRub);
+    const psDay = scaledEconomyPsIncome(gid, p.dailyPsRub);
     return [
-      `• **${p.label}** — покупка **${fmt(cost)}** ₽, **${fmt(p.dailyUpkeepRub)}** ₽/сут, **+${p.dailyPsRub}** СР/сут`,
+      `• **${p.label}** — покупка **${fmt(cost)}** ₽, **${fmt(upkeep)}** ₽/сут, **+${fmt(psDay)}** СР/сут`,
       `  Требования: ${petRequirementsLine(p)}`,
     ].join("\n");
   });

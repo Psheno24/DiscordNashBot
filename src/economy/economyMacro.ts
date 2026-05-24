@@ -52,7 +52,7 @@ export function scaledShopPrice(guildId: string, baseRub: number, fixed: boolean
   return roundEconomyPrice(baseRub * getShopPriceMultiplier(guildId));
 }
 
-/** Доход/штраф с учётом индексации зарплат (округление как у цен в магазине). */
+/** Доход/штраф/расход с учётом индексации экономики (округление как у цен в магазине). */
 export function scaleSignedIncome(guildId: string, rub: number): number {
   if (rub === 0) return 0;
   const m = getSalaryIncomeMultiplier(guildId);
@@ -64,6 +64,18 @@ export function scaleSignedIncome(guildId: string, rub: number): number {
 export function scalePositiveIncome(guildId: string, rub: number): number {
   if (rub <= 0) return 0;
   return scaleSignedIncome(guildId, rub);
+}
+
+/** Содержание питомца / прочие положительные расходы с индексацией. */
+export function scaledEconomyExpense(guildId: string, baseRub: number): number {
+  if (baseRub <= 0) return 0;
+  return scalePositiveIncome(guildId, baseRub);
+}
+
+/** СР и прочие неденежные «доходы», растущие вместе с индексацией (округление как у ₽). */
+export function scaledEconomyPsIncome(guildId: string, basePs: number): number {
+  if (basePs <= 0) return 0;
+  return scalePositiveIncome(guildId, basePs);
 }
 
 export function mskYearMonth(nowMs: number = Date.now()): string {

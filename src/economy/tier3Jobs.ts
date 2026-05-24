@@ -1,4 +1,5 @@
 import { prestigePassiveIncomeMult } from "./economyModifiers.js";
+import { scaleSignedIncome } from "./economyMacro.js";
 import type { EconomyUser, JobId, SkillId } from "./userStore.js";
 import { mskPreviousDayYmd, mskTodayYmd } from "./mskCalendar.js";
 
@@ -105,8 +106,14 @@ function passiveMultFromRank(rank: number): number {
   return 1 + 0.08 * rank;
 }
 
-/** Суточное пассивное начисление (один раз за календарные сутки). */
-export function computeTier3PassiveRub(input: {
+export type Tier3PassiveRubResult = {
+  total: number;
+  /** Доп. ₽ в суточном окладе только от престижа (ИП). */
+  prestigeRubBonus: number;
+};
+
+export type Tier3PassiveRubInput = {
+  guildId: string;
   jobId: Tier3JobId;
   def: Tier3JobDef;
   streakDays: number;
@@ -115,21 +122,23 @@ export function computeTier3PassiveRub(input: {
   prestigePoints?: number;
   solePropPassiveEffMult?: number;
   solePropPassiveTempMult?: number;
-}): number {
+};
+
+/** Суточное пассивное начисление (один раз за календарные сутки), с индексацией экономики гильдии. */
+export function computeTier3PassiveRubDetailed(input: Tier3PassiveRubInput): Tier3PassiveRubResult {
   const rank = tier3PromotionRank(input.streakDays);
   const mult = passiveMultFromRank(rank);
 
-  if (input.def.archetype === "illegal") return 0;
+  if (input.def.archetype === "illegal") return { total: 0, prestigeRubBonus: 0 };
 
   if (input.def.archetype === "legal") {
-    return Math.max(0, Math.floor(input.def.passiveBaseRub * mult));
+    const raw = Math.max(0, Math.floor(input.def.passiveBaseRub * mult));
+    return { total: scaleSignedIncome(input.guildId, raw), prestigeRubBonus: 0 };
   }
 
-  // ip: линейный сдвиг от риска; случайный джиттер только при dial >= 1
   const cap = Math.max(0, Math.min(SOLE_PROP_CAP_MAX, input.solePropCapitalRub));
   const dial = Math.min(SOLE_PROP_RISK_MAX, Math.max(SOLE_PROP_RISK_MIN, input.solePropRiskDial));
   const prestigeMult = prestigePassiveIncomeMult(input.prestigePoints ?? 0);
-  /** ₽ за единицу капитала на балансе бизнеса. */
   const solePropCapPerRubNight = 0.0045;
   const base = input.def.passiveBaseRub + cap * solePropCapPerRubNight;
   let riskJitter = 1 + dial * 0.06;
@@ -138,7 +147,20 @@ export function computeTier3PassiveRub(input: {
   }
   const effM = Math.min(1, Math.max(0.3, input.solePropPassiveEffMult ?? 1));
   const tmpM = Math.min(1.35, Math.max(1, input.solePropPassiveTempMult ?? 1));
-  return Math.max(0, Math.floor(base * mult * riskJitter * prestigeMult * effM * tmpM));
+  const core = base * mult * riskJitter * effM * tmpM;
+  const rawNoPrestige = Math.max(0, Math.floor(core));
+  const rawWithPrestige = Math.max(0, Math.floor(core * prestigeMult));
+  const total = scaleSignedIncome(input.guildId, rawWithPrestige);
+  const prestigeRubBonus =
+    prestigeMult > 1
+      ? total - scaleSignedIncome(input.guildId, rawNoPrestige)
+      : 0;
+
+  return { total, prestigeRubBonus: Math.max(0, prestigeRubBonus) };
+}
+
+export function computeTier3PassiveRub(input: Tier3PassiveRubInput): number {
+  return computeTier3PassiveRubDetailed(input).total;
 }
 
 export type Tier3StreakTickResult = {

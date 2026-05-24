@@ -1,6 +1,6 @@
 import type { Client } from "discord.js";
 import { getGuildConfig, patchGuildConfig } from "../guildConfig/store.js";
-import { scalePositiveIncome } from "./economyMacro.js";
+import { feedNetPrestigeRubBonus, feedPrestigeDomesticBonusSuffix } from "./economyFeedBonus.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { processHousingMskMidnightForUser } from "./economyHousing.js";
 import { isMskMonday, msUntilNextMskMidnight } from "./mskCalendar.js";
@@ -8,7 +8,7 @@ import { addToTreasury, getSolePropWeeklyCapitalTaxPercent, withholdLegalIncomeT
 import { getEconomyUser, listEconomyUsers, patchEconomyUser } from "./userStore.js";
 import { solePropMidnightPatch } from "./tier3SolePropMsk.js";
 import {
-  computeTier3PassiveRub,
+  computeTier3PassiveRubDetailed,
   computeTier3StreakAfterMskDay,
   getTier3JobDef,
   isTier3JobId,
@@ -76,7 +76,8 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
       u = { ...u, ...solePropMskPatch };
 
       const rankBefore = tier3PromotionRank(u.jobMskDayStreak ?? 0);
-      const passive = computeTier3PassiveRub({
+      const passiveOut = computeTier3PassiveRubDetailed({
+        guildId: guild.id,
         jobId,
         def,
         streakDays: streakOut.nextStreak,
@@ -86,12 +87,12 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
         solePropPassiveEffMult: u.solePropPassiveEffMult,
         solePropPassiveTempMult: u.solePropPassiveTempMult,
       });
+      const passive = passiveOut.total;
       const rankAfter = tier3PromotionRank(streakOut.nextStreak);
 
-      const passiveScaled = scalePositiveIncome(guild.id, passive);
-      let creditPassive = passiveScaled;
-      if (passiveScaled > 0 && (def.archetype === "legal" || def.archetype === "ip")) {
-        const { netRub } = withholdLegalIncomeTax(guild.id, passiveScaled);
+      let creditPassive = passive;
+      if (passive > 0 && (def.archetype === "legal" || def.archetype === "ip")) {
+        const { netRub } = withholdLegalIncomeTax(guild.id, passive);
         creditPassive = netRub;
       }
 
@@ -107,13 +108,15 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
       const member = await guild.members.fetch(userId).catch(() => null);
       const mention = member ? member.toString() : `Пользователь ${userId}`;
 
-      if (passiveScaled > 0) {
+      if (passive > 0) {
+        const netPrestigeRub = feedNetPrestigeRubBonus(passive, passiveOut.prestigeRubBonus, creditPassive);
+        const feedRubMain = Math.max(0, creditPassive - netPrestigeRub);
         appendFeedEvent({
           ts: Date.now(),
           guildId: guild.id,
           type: "job:passive",
           actorUserId: userId,
-          text: `${mention}: суточный оклад **${def.title}** — **+${Math.floor(creditPassive)}** ₽`,
+          text: `${mention}: суточный оклад **${def.title}** — **+${feedRubMain.toLocaleString("ru-RU")}** ₽${feedPrestigeDomesticBonusSuffix({ prestigeRub: netPrestigeRub })}`,
         });
       }
 

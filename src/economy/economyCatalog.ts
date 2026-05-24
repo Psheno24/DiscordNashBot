@@ -1,6 +1,8 @@
 import { roundEconomyPrice } from "./economyRound.js";
+import { withCatalogStatDeltas, type CatalogOrigin } from "./economyStatPoints.js";
 
-export type CatalogOrigin = "soviet" | "foreign";
+export type { CatalogOrigin };
+
 
 /** Тариф сим-карты доставки: один платёж на 30 суток (с баланса сим). */
 export const COURIER_SIM_MONTHLY_FEE_RUB = 1_000;
@@ -28,14 +30,12 @@ export interface PhoneDef {
   meetsCourierMinimum: boolean;
 }
 
-export const PHONE_MODELS: PhoneDef[] = [
+const PHONE_MODELS_BASE = [
   {
     id: "phone_sov_elta",
     label: "Кнопочник «Элта»",
     priceRub: 4_500,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 0,
     meetsCourierMinimum: true,
   },
   {
@@ -43,8 +43,6 @@ export const PHONE_MODELS: PhoneDef[] = [
     label: "«Нокиа» 3310 (параллель)",
     priceRub: 8_500,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 4,
     meetsCourierMinimum: true,
   },
   {
@@ -52,8 +50,6 @@ export const PHONE_MODELS: PhoneDef[] = [
     label: "«Электроника» С-25",
     priceRub: 18_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 10,
     meetsCourierMinimum: true,
   },
   {
@@ -61,8 +57,6 @@ export const PHONE_MODELS: PhoneDef[] = [
     label: "«Гамма» смартфон",
     priceRub: 32_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 18,
     meetsCourierMinimum: true,
   },
   {
@@ -70,8 +64,6 @@ export const PHONE_MODELS: PhoneDef[] = [
     label: "«Нева» 9М (флагман СССР)",
     priceRub: 52_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 28,
     meetsCourierMinimum: true,
   },
   {
@@ -79,8 +71,6 @@ export const PHONE_MODELS: PhoneDef[] = [
     label: "Redmi Note (Китай)",
     priceRub: 14_000,
     origin: "foreign",
-    prestigeDelta: 3,
-    domesticDelta: 0,
     meetsCourierMinimum: true,
   },
   {
@@ -88,8 +78,6 @@ export const PHONE_MODELS: PhoneDef[] = [
     label: "Samsung Galaxy (Корея)",
     priceRub: 48_000,
     origin: "foreign",
-    prestigeDelta: 12,
-    domesticDelta: 0,
     meetsCourierMinimum: true,
   },
   {
@@ -97,8 +85,6 @@ export const PHONE_MODELS: PhoneDef[] = [
     label: "Google Pixel (США)",
     priceRub: 82_000,
     origin: "foreign",
-    prestigeDelta: 22,
-    domesticDelta: 0,
     meetsCourierMinimum: true,
   },
   {
@@ -106,8 +92,6 @@ export const PHONE_MODELS: PhoneDef[] = [
     label: "iPhone Pro (США)",
     priceRub: 125_000,
     origin: "foreign",
-    prestigeDelta: 32,
-    domesticDelta: 0,
     meetsCourierMinimum: true,
   },
   {
@@ -115,11 +99,13 @@ export const PHONE_MODELS: PhoneDef[] = [
     label: "Vertu Signature (Великобритания)",
     priceRub: 220_000,
     origin: "foreign",
-    prestigeDelta: 48,
-    domesticDelta: 0,
     meetsCourierMinimum: true,
   },
 ];
+
+export const PHONE_MODELS = PHONE_MODELS_BASE.map((item) =>
+  withCatalogStatDeltas({ ...item, origin: item.origin as CatalogOrigin }),
+) as PhoneDef[];
 
 export const PHONE_TRADE_IN_RATE = 0.5;
 
@@ -167,14 +153,12 @@ export interface CarDef {
 
 const H = 60 * 60 * 1000;
 
-export const CAR_MODELS: CarDef[] = [
+const CAR_MODELS_BASE = [
   {
     id: "car_sov_moped",
     label: "Иж Планета-5",
     priceRub: 75_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 35,
     speedKmh: 55,
     courierShiftCdMs: Math.round(2.5 * H),
   },
@@ -183,8 +167,6 @@ export const CAR_MODELS: CarDef[] = [
     label: "Жигули ВАЗ-2107",
     priceRub: 280_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 75,
     speedKmh: 90,
     courierShiftCdMs: 2 * H,
   },
@@ -193,8 +175,6 @@ export const CAR_MODELS: CarDef[] = [
     label: "Lada Granta",
     priceRub: 480_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 115,
     speedKmh: 110,
     courierShiftCdMs: Math.round(1.85 * H),
   },
@@ -203,8 +183,6 @@ export const CAR_MODELS: CarDef[] = [
     label: "УАЗ «Патриот»",
     priceRub: 720_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 165,
     speedKmh: 120,
     courierShiftCdMs: Math.round(1.7 * H),
   },
@@ -213,8 +191,6 @@ export const CAR_MODELS: CarDef[] = [
     label: "ГАЗ-24 «Волга»",
     priceRub: 950_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 220,
     speedKmh: 135,
     courierShiftCdMs: Math.round(1.55 * H),
   },
@@ -223,8 +199,6 @@ export const CAR_MODELS: CarDef[] = [
     label: "Toyota Corolla (Япония)",
     priceRub: 1_150_000,
     origin: "foreign",
-    prestigeDelta: 300,
-    domesticDelta: 0,
     speedKmh: 130,
     courierShiftCdMs: Math.round(1.6 * H),
   },
@@ -233,8 +207,6 @@ export const CAR_MODELS: CarDef[] = [
     label: "Audi A6 (Германия)",
     priceRub: 2_800_000,
     origin: "foreign",
-    prestigeDelta: 820,
-    domesticDelta: 0,
     speedKmh: 155,
     courierShiftCdMs: Math.round(1.4 * H),
   },
@@ -243,8 +215,6 @@ export const CAR_MODELS: CarDef[] = [
     label: "BMW 5 Series (Германия)",
     priceRub: 4_200_000,
     origin: "foreign",
-    prestigeDelta: 1_250,
-    domesticDelta: 0,
     speedKmh: 170,
     courierShiftCdMs: Math.round(1.25 * H),
   },
@@ -253,8 +223,6 @@ export const CAR_MODELS: CarDef[] = [
     label: "Mercedes E-Class (Германия)",
     priceRub: 6_500_000,
     origin: "foreign",
-    prestigeDelta: 1_900,
-    domesticDelta: 0,
     speedKmh: 190,
     courierShiftCdMs: Math.round(1.12 * H),
   },
@@ -263,12 +231,14 @@ export const CAR_MODELS: CarDef[] = [
     label: "Porsche 911 (Германия)",
     priceRub: 12_500_000,
     origin: "foreign",
-    prestigeDelta: 3_600,
-    domesticDelta: 0,
     speedKmh: 220,
     courierShiftCdMs: 1 * H,
   },
 ];
+
+export const CAR_MODELS = CAR_MODELS_BASE.map((item) =>
+  withCatalogStatDeltas({ ...item, origin: item.origin as CatalogOrigin }),
+) as CarDef[];
 
 export const CAR_TRADE_IN_RATE = 0.75;
 
@@ -361,14 +331,12 @@ export interface ApartmentDef {
   monthlyUtilityRub: number;
 }
 
-export const APARTMENT_MODELS: ApartmentDef[] = [
+const APARTMENT_MODELS_BASE = [
   {
     id: "apt_sov_room",
     label: "Комната в общежитии (Капотня)",
     priceRub: 520_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 1_100,
     monthlyUtilityRub: 3_200,
   },
   {
@@ -376,8 +344,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Студия (Марьино)",
     priceRub: 950_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 4_200,
     monthlyUtilityRub: 8_500,
   },
   {
@@ -385,8 +351,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Однушка (Бутово)",
     priceRub: 4_800_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 10_500,
     monthlyUtilityRub: 13_500,
   },
   {
@@ -394,8 +358,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Двушка (Строгино)",
     priceRub: 11_500_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 26_000,
     monthlyUtilityRub: 17_500,
   },
   {
@@ -403,8 +365,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Трёшка (Хамовники)",
     priceRub: 24_000_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 58_000,
     monthlyUtilityRub: 21_500,
   },
   {
@@ -412,8 +372,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Пентхаус (Москва-Сити)",
     priceRub: 52_000_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 115_000,
     monthlyUtilityRub: 32_000,
   },
   {
@@ -421,8 +379,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Дача (Подмосковье)",
     priceRub: 72_000_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 155_000,
     monthlyUtilityRub: 36_000,
   },
   {
@@ -430,8 +386,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Резиденция (Рублёво-Успенское)",
     priceRub: 98_000_000,
     origin: "soviet",
-    prestigeDelta: 0,
-    domesticDelta: 210_000,
     monthlyUtilityRub: 42_000,
   },
   {
@@ -439,8 +393,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Студия (Париж)",
     priceRub: 1_350_000,
     origin: "foreign",
-    prestigeDelta: 4_800,
-    domesticDelta: 0,
     monthlyUtilityRub: 9_500,
   },
   {
@@ -448,8 +400,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Лофт (Берлин)",
     priceRub: 6_200_000,
     origin: "foreign",
-    prestigeDelta: 13_500,
-    domesticDelta: 0,
     monthlyUtilityRub: 14_000,
   },
   {
@@ -457,8 +407,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Квартира (Лондон)",
     priceRub: 14_500_000,
     origin: "foreign",
-    prestigeDelta: 32_000,
-    domesticDelta: 0,
     monthlyUtilityRub: 18_500,
   },
   {
@@ -466,8 +414,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Апартаменты (Дубай)",
     priceRub: 32_000_000,
     origin: "foreign",
-    prestigeDelta: 78_000,
-    domesticDelta: 0,
     monthlyUtilityRub: 24_000,
   },
   {
@@ -475,8 +421,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Пентхаус (Нью-Йорк)",
     priceRub: 52_000_000,
     origin: "foreign",
-    prestigeDelta: 135_000,
-    domesticDelta: 0,
     monthlyUtilityRub: 30_000,
   },
   {
@@ -484,8 +428,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Вилла (Монако)",
     priceRub: 78_000_000,
     origin: "foreign",
-    prestigeDelta: 210_000,
-    domesticDelta: 0,
     monthlyUtilityRub: 36_000,
   },
   {
@@ -493,8 +435,6 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Резиденция (Сингапур)",
     priceRub: 92_000_000,
     origin: "foreign",
-    prestigeDelta: 265_000,
-    domesticDelta: 0,
     monthlyUtilityRub: 38_000,
   },
   {
@@ -502,11 +442,13 @@ export const APARTMENT_MODELS: ApartmentDef[] = [
     label: "Поместье (Швейцария)",
     priceRub: 115_000_000,
     origin: "foreign",
-    prestigeDelta: 340_000,
-    domesticDelta: 0,
     monthlyUtilityRub: 45_000,
   },
 ];
+
+export const APARTMENT_MODELS = APARTMENT_MODELS_BASE.map((item) =>
+  withCatalogStatDeltas({ ...item, origin: item.origin as CatalogOrigin }),
+) as ApartmentDef[];
 
 export function getApartmentDef(id: string | undefined): ApartmentDef | undefined {
   if (!id) return undefined;
@@ -566,31 +508,6 @@ export function patchStatsFromShop(
   };
 }
 
-/** Макс. престиж: лучший заморский телефон + авто + жильё (одновременно). */
-export function catalogMaxPrestigePoints(): number {
-  const phone = Math.max(0, ...phonesByOrigin("foreign").map((p) => p.prestigeDelta));
-  const car = Math.max(0, ...carsByOrigin("foreign").map((c) => c.prestigeDelta));
-  const apt = Math.max(0, ...apartmentsByOrigin("foreign").map((a) => a.prestigeDelta));
-  return phone + car + apt;
-}
-
-/** Макс. быт: лучший советский телефон + авто + жильё (одновременно). */
-export function catalogMaxDomesticPoints(): number {
-  const phone = Math.max(0, ...phonesByOrigin("soviet").map((p) => p.domesticDelta));
-  const car = Math.max(0, ...carsByOrigin("soviet").map((c) => c.domesticDelta));
-  const apt = Math.max(0, ...apartmentsByOrigin("soviet").map((a) => a.domesticDelta));
-  return phone + car + apt;
-}
-
-/** @deprecated — используйте prestigePassiveIncomeMult из economyModifiers.ts */
-export function solePropPrestigeIncomeMult(prestige: number): number {
-  const p = Math.max(0, prestige);
-  if (p <= 0) return 1;
-  const max = catalogMaxPrestigePoints();
-  if (max <= 0) return 1;
-  return 1 + 0.55 * Math.sqrt(p / max);
-}
-
 // ——— Животные ———
 
 export type PetId =
@@ -609,8 +526,6 @@ export interface PetDef {
   purchaseRub: number;
   dailyUpkeepRub: number;
   dailyPsRub: number;
-  /** Минимальный быт (0 = не требуется). */
-  minDomestic: number;
   /** Минимальный id советской квартиры по порядку в APARTMENT_MODELS soviet, -1 = нет. */
   minSovietAptIndex: number;
   /** Минимальный id заморской квартиры по порядку foreign, -1 = нет. */
@@ -628,7 +543,6 @@ export const PET_MODELS: PetDef[] = [
     purchaseRub: 8_000,
     dailyUpkeepRub: 150,
     dailyPsRub: 8,
-    minDomestic: 0,
     minSovietAptIndex: -1,
     minForeignAptIndex: -1,
     requiresPhone: false,
@@ -639,7 +553,6 @@ export const PET_MODELS: PetDef[] = [
     purchaseRub: 28_000,
     dailyUpkeepRub: 350,
     dailyPsRub: 22,
-    minDomestic: 0,
     minSovietAptIndex: -1,
     minForeignAptIndex: -1,
     requiresPhone: false,
@@ -650,7 +563,6 @@ export const PET_MODELS: PetDef[] = [
     purchaseRub: 52_000,
     dailyUpkeepRub: 700,
     dailyPsRub: 45,
-    minDomestic: 0,
     minSovietAptIndex: -1,
     minForeignAptIndex: -1,
     requiresPhone: true,
@@ -661,7 +573,6 @@ export const PET_MODELS: PetDef[] = [
     purchaseRub: 95_000,
     dailyUpkeepRub: 1_200,
     dailyPsRub: 72,
-    minDomestic: 2_000,
     minSovietAptIndex: -1,
     minForeignAptIndex: -1,
     requiresPhone: false,
@@ -672,7 +583,6 @@ export const PET_MODELS: PetDef[] = [
     purchaseRub: 185_000,
     dailyUpkeepRub: 4_000,
     dailyPsRub: 155,
-    minDomestic: 0,
     minSovietAptIndex: 2,
     minForeignAptIndex: -1,
     requiresPhone: false,
@@ -683,7 +593,6 @@ export const PET_MODELS: PetDef[] = [
     purchaseRub: 420_000,
     dailyUpkeepRub: 9_000,
     dailyPsRub: 320,
-    minDomestic: 0,
     minSovietAptIndex: 3,
     minForeignAptIndex: 0,
     requiresPhone: false,
@@ -694,7 +603,6 @@ export const PET_MODELS: PetDef[] = [
     purchaseRub: 1_250_000,
     dailyUpkeepRub: 22_000,
     dailyPsRub: 750,
-    minDomestic: 0,
     minSovietAptIndex: 5,
     minForeignAptIndex: 3,
     requiresPhone: false,
@@ -705,7 +613,6 @@ export const PET_MODELS: PetDef[] = [
     purchaseRub: 2_800_000,
     dailyUpkeepRub: 45_000,
     dailyPsRub: 1_400,
-    minDomestic: 0,
     minSovietAptIndex: 7,
     minForeignAptIndex: 7,
     requiresPhone: false,
@@ -755,7 +662,6 @@ function apartmentLabelByForeignIndex(idx: number): string | undefined {
 export function petRequirementsLine(pet: PetDef): string {
   const parts: string[] = [];
   if (pet.requiresPhone) parts.push("**телефон** (любой)");
-  if (pet.minDomestic > 0) parts.push(`быт **≥ ${pet.minDomestic.toLocaleString("ru-RU")}**`);
 
   const sovLbl = apartmentLabelBySovietIndex(pet.minSovietAptIndex);
   const forLbl = apartmentLabelByForeignIndex(pet.minForeignAptIndex);
@@ -773,16 +679,12 @@ export function petRequirementsLine(pet: PetDef): string {
 
 export function petOwnershipBlockReason(u: {
   hasPhone?: boolean;
-  domesticPoints?: number;
   housingKind?: string;
   ownedApartmentId?: string;
   ownedForeignApartmentId?: string;
   housingForeignKind?: string;
 }, pet: PetDef): string | null {
   if (pet.requiresPhone && !u.hasPhone) return "Нужен **телефон** (любой).";
-  if ((u.domesticPoints ?? 0) < pet.minDomestic) {
-    return `Нужен быт **не ниже ${pet.minDomestic.toLocaleString("ru-RU")}**.`;
-  }
   const sovIdx = sovietAptTierIndex(u.ownedApartmentId);
   const forIdx = foreignAptTierIndex(u.ownedForeignApartmentId);
   const hasSov = u.housingKind === "owned" && sovIdx >= 0;

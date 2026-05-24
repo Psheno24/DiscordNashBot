@@ -1,4 +1,5 @@
 import { getPetDef } from "./economyCatalog.js";
+import { scaledEconomyExpense, scaledEconomyPsIncome } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { getEconomyUser, patchEconomyUser } from "./userStore.js";
 
@@ -21,7 +22,7 @@ export function processPetMskMidnightForUser(
   }
 
   const mark = { petLastMskYmd: todayYmd };
-  const upkeep = pet.dailyUpkeepRub;
+  const upkeep = scaledEconomyExpense(guildId, pet.dailyUpkeepRub);
 
   if (u.rubles < upkeep) {
     patchEconomyUser(guildId, userId, {
@@ -38,7 +39,7 @@ export function processPetMskMidnightForUser(
     return;
   }
 
-  const psAdd = pet.dailyPsRub;
+  const psAdd = scaledEconomyPsIncome(guildId, pet.dailyPsRub);
   patchEconomyUser(guildId, userId, {
     ...mark,
     rubles: u.rubles - upkeep,

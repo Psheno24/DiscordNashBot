@@ -1,4 +1,5 @@
 import { mskCalendarDayKey } from "../time/msk.js";
+import { feedPrestigeDomesticBonusSuffix, voiceDomesticPsBonus } from "./economyFeedBonus.js";
 import { domesticVoicePsMult } from "./economyModifiers.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { getEconomyUser, patchEconomyUser } from "./userStore.js";
@@ -53,12 +54,14 @@ export function applyVoiceEarnings(args: {
 
   if (psAdded > 0) {
     const who = args.actorMention ?? `<@${userId}>`;
+    const domesticBonus = voiceDomesticPsBonus(psRaw, u.domesticPoints ?? 0);
+    const psMain = domesticBonus > 0 ? Math.floor(psRaw) : psAdded;
     appendFeedEvent({
       ts: now,
       guildId,
       type: "voice:earn",
       actorUserId: userId,
-      text: `${who} получил за голос: **+${psAdded.toLocaleString("ru-RU")}** СР.`,
+      text: `${who} получил за голос: **+${psMain.toLocaleString("ru-RU")}** СР${feedPrestigeDomesticBonusSuffix({ domesticPs: domesticBonus })}.`,
     });
   }
 
