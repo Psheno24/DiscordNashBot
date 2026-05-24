@@ -1,0 +1,277 @@
+import type { VehiclePlateParts } from "./economyLicensePlate.js";
+
+export const PLATE_PRESTIGE_CAP = 12_000;
+
+/** Москва «классика» — выше прочих московских кодов. */
+const MOSCOW_CORE = new Set(["77"]);
+/** Москва и близкие vanity-коды. */
+const MOSCOW_VANITY = new Set(["97", "99", "177", "197", "199", "277", "299", "777", "797", "799", "977", "497", "999"]);
+/** Московская область (AMM150, AMM50…). */
+const MOSCOW_OBL = new Set(["50", "90", "150", "190", "250", "550", "750", "790"]);
+const SPB_REGIONS = new Set(["78", "98", "178", "198", "778", "278", "878"]);
+const CHECHNYA_REGIONS = new Set(["95", "195", "995"]);
+const SKR_REGIONS = new Set(["197", "199"]);
+/** «Красивые» коды региона (222, 333, 444…). */
+const VANITY_REGION_DIGITS = new Set(["222", "330", "333", "444", "660", "661", "663", "664", "665", "667", "668", "669"]);
+
+type BlatTier = "S" | "A" | "B" | "C" | "word";
+
+const BLAT_SERIES: Readonly<Record<string, { tier: BlatTier; label: string; score: number }>> = {
+  АМР: { tier: "S", label: "АМР (правительство)", score: 3200 },
+  ЕКХ: { tier: "S", label: "ЕКХ (ФСО)", score: 3200 },
+  ООО: { tier: "S", label: "ООО (ФСО/статус)", score: 3200 },
+  ССС: { tier: "S", label: "ССС (спецсвязь)", score: 3200 },
+  МММ: { tier: "S", label: "МММ (МВД/статус)", score: 3200 },
+  ХХХ: { tier: "S", label: "ХХХ (статус)", score: 3200 },
+  ВОР: { tier: "A", label: "ВОР", score: 2000 },
+  АММ: { tier: "A", label: "АММ (МВД)", score: 2000 },
+  ММР: { tier: "A", label: "ММР", score: 2000 },
+  АМО: { tier: "A", label: "АМО (мэрия)", score: 2000 },
+  ТМР: { tier: "A", label: "ТМР", score: 2000 },
+  ВМР: { tier: "A", label: "ВМР", score: 2000 },
+  ХКХ: { tier: "A", label: "ХКХ (ФСБ)", score: 2000 },
+  ККХ: { tier: "A", label: "ККХ (ФСБ/ФСО)", score: 1800 },
+  АКР: { tier: "B", label: "АКР (МВД)", score: 650 },
+  ВКР: { tier: "B", label: "ВКР (МВД)", score: 650 },
+  СКР: { tier: "B", label: "СКР (Следком)", score: 800 },
+  ЕРЕ: { tier: "B", label: "ЕРЕ (Ед. Россия)", score: 800 },
+  КРА: { tier: "B", label: "КРА", score: 800 },
+  АОО: { tier: "B", label: "АОО (УДП)", score: 800 },
+  ВОО: { tier: "B", label: "ВОО (УДП)", score: 800 },
+  КОО: { tier: "B", label: "КОО (КС/УДП)", score: 800 },
+  МОО: { tier: "B", label: "МОО (УДП/МО)", score: 800 },
+  СОО: { tier: "B", label: "СОО (Совфед/УДП)", score: 800 },
+  РМР: { tier: "B", label: "РМР (юстиция)", score: 800 },
+  КМР: { tier: "B", label: "КМР", score: 800 },
+  АУЕ: { tier: "C", label: "АУЕ", score: 350 },
+  ХАМ: { tier: "C", label: "ХАМ", score: 350 },
+  СММ: { tier: "C", label: "СММ (МВД)", score: 350 },
+  ОМР: { tier: "C", label: "ОМР", score: 350 },
+  УМР: { tier: "C", label: "УМР", score: 350 },
+  МУР: { tier: "C", label: "МУР", score: 350 },
+  ОКО: { tier: "C", label: "ОКО", score: 300 },
+  САС: { tier: "C", label: "САС (МВД/ФСБ)", score: 300 },
+  ВЕС: { tier: "word", label: "ВЕС", score: 120 },
+  КОТ: { tier: "word", label: "КОТ", score: 120 },
+  МЕР: { tier: "word", label: "МЕР", score: 120 },
+  ТОМ: { tier: "word", label: "ТОМ", score: 120 },
+  МАХ: { tier: "word", label: "МАХ", score: 120 },
+  РОТ: { tier: "word", label: "РОТ", score: 120 },
+  СОН: { tier: "word", label: "СОН", score: 120 },
+};
+
+const NEGATIVE_BLAT = new Set(["ССУ", "СРУ", "ХЕР", "МУН"]);
+
+export interface PlatePrestigeBreakdown {
+  total: number;
+  base: number;
+  lines: string[];
+  multipliers: string[];
+  regionHint?: string;
+}
+
+function plateLetters3(p: VehiclePlateParts): string {
+  return `${p.l1}${p.l2}`;
+}
+
+function isTripleLetter(p: VehiclePlateParts): boolean {
+  return p.l1 === p.l2[0] && p.l1 === p.l2[1];
+}
+
+function isPairLetters(p: VehiclePlateParts): boolean {
+  return p.l2[0] === p.l2[1];
+}
+
+function isTripleDigit(digits: string): boolean {
+  return digits[0] === digits[1] && digits[1] === digits[2];
+}
+
+function isPalindromeDigit(digits: string): boolean {
+  return digits[0] === digits[2];
+}
+
+function hasTwoSameDigits(digits: string): boolean {
+  return digits[0] === digits[1] || digits[1] === digits[2] || digits[0] === digits[2];
+}
+
+function isSpecialDigit(digits: string): boolean {
+  if (["001", "007", "911", "100", "200", "300", "500"].includes(digits)) return true;
+  const n = Number(digits);
+  return n > 0 && n % 100 === 0 && n <= 900;
+}
+
+function digitScore(digits: string): { score: number; label?: string } {
+  if (isTripleDigit(digits)) return { score: 500, label: `тройка ${digits}` };
+  if (isPalindromeDigit(digits) && !isTripleDigit(digits)) return { score: 160, label: `зеркало ${digits}` };
+  if (isSpecialDigit(digits)) return { score: 90, label: `особые ${digits}` };
+  if (hasTwoSameDigits(digits)) return { score: 60, label: `повтор в ${digits}` };
+  return { score: 0 };
+}
+
+function letterScore(p: VehiclePlateParts): { score: number; label?: string } {
+  const s3 = plateLetters3(p);
+  if (NEGATIVE_BLAT.has(s3)) return { score: 0, label: `${s3} (без бонуса)` };
+  if (isTripleLetter(p)) return { score: 700, label: `тройная буква ${s3}` };
+  if (isPairLetters(p)) return { score: 120, label: `пара ${p.l2}` };
+  if (p.l1 === p.l2[0] || p.l1 === p.l2[1]) return { score: 40, label: "частичное повторение" };
+  return { score: 0 };
+}
+
+function blatScore(p: VehiclePlateParts): { score: number; label?: string; tier?: BlatTier } {
+  const s3 = plateLetters3(p);
+  if (NEGATIVE_BLAT.has(s3)) return { score: 0 };
+  const hit = BLAT_SERIES[s3];
+  if (hit) return { score: hit.score, label: hit.label, tier: hit.tier };
+  return { score: 0 };
+}
+
+function regionScore(region: string): { score: number; label?: string; moscowCore?: boolean; moscowVanity?: boolean; moscowObl?: boolean; spb?: boolean } {
+  if (MOSCOW_CORE.has(region)) return { score: 500, label: `Москва ${region}`, moscowCore: true };
+  if (MOSCOW_VANITY.has(region)) return { score: 400, label: `Москва ${region}`, moscowVanity: true };
+  if (MOSCOW_OBL.has(region)) return { score: 280, label: `МО ${region}`, moscowObl: true };
+  if (SPB_REGIONS.has(region)) return { score: 320, label: `СПб ${region}`, spb: true };
+  if (CHECHNYA_REGIONS.has(region)) return { score: 150, label: `Чечня ${region}` };
+  if (VANITY_REGION_DIGITS.has(region)) return { score: 120, label: `красивый код ${region}` };
+  if (["616"].includes(region)) return { score: 100, label: `Татарстан ${region}` };
+  return { score: 0 };
+}
+
+function comboMultipliers(
+  p: VehiclePlateParts,
+  blat: ReturnType<typeof blatScore>,
+  region: ReturnType<typeof regionScore>,
+  digit: ReturnType<typeof digitScore>,
+  letter: ReturnType<typeof letterScore>,
+): { mult: number; labels: string[] } {
+  let mult = 1;
+  const labels: string[] = [];
+  const tripleL = isTripleLetter(p);
+  const tripleD = isTripleDigit(p.digits);
+  const blatS = blat.tier === "S";
+  const hasBlat = blat.score > 0;
+
+  if (tripleL && tripleD) {
+    mult *= 1.8;
+    labels.push("×1,8 тройные буквы + цифры");
+  }
+  if (blatS && region.moscowCore) {
+    mult *= 1.55;
+    labels.push("×1,55 спецсерия + Москва **77**");
+  } else if (blatS && region.moscowVanity) {
+    mult *= 1.45;
+    labels.push("×1,45 спецсерия + московский регион");
+  } else if (blatS && region.moscowObl) {
+    mult *= 1.35;
+    labels.push("×1,35 спецсерия + МО (**50/90/150**…)");
+  } else if (hasBlat && region.moscowCore) {
+    mult *= 1.4;
+    labels.push("×1,4 блат + Москва **77**");
+  } else if (hasBlat && (region.moscowVanity || region.moscowObl)) {
+    mult *= 1.25;
+    labels.push("×1,25 блат + московский регион");
+  }
+  if (tripleD && region.moscowCore) {
+    mult *= 1.35;
+    labels.push("×1,35 тройные цифры + **77**");
+  }
+  if (hasBlat && tripleD && mult === 1) {
+    mult *= 1.25;
+    labels.push("×1,25 блат + тройные цифры");
+  }
+
+  return { mult, labels: [...new Set(labels)] };
+}
+
+function regionComboHint(p: VehiclePlateParts, blat: ReturnType<typeof blatScore>, region: ReturnType<typeof regionScore>): string | undefined {
+  const s3 = plateLetters3(p);
+  if (blat.tier === "S" && blat.score > 0 && !region.moscowCore && !region.moscowVanity && !region.moscowObl) {
+    if (s3 === "ЕКХ") return "Подсказка: **ЕКХ** ценится с **77, 99, 177, 199, 97** — попробуйте сменить регион.";
+    if (s3 === "АМР") return "Подсказка: **АМР** максимален с **77** (на **50/90** — слабее, но дешевле крутить).";
+    if (["ООО", "ССС", "МММ", "ХХХ"].includes(s3)) return "Подсказка: **" + s3 + "** с **77** или **99** — топ; **МО 50/90/150** — хороший компромисс.";
+    return "Подсказка: спецсерия **" + s3 + "** с **77/99/777** даст больше престижа.";
+  }
+  if (s3 === "СКР" && !SKR_REGIONS.has(p.region)) {
+    return "Подсказка: **СКР** логичнее с **197** или **199**.";
+  }
+  if (s3 === "КРА" && !CHECHNYA_REGIONS.has(p.region)) {
+    return "Подсказка: **КРА** ассоциируется с **95/195/995**.";
+  }
+  if (s3 === "ЕРЕ" && !region.moscowCore && !region.moscowVanity) {
+    return "Подсказка: **ЕРЕ** ценится с **177** или московскими **77/97/99**.";
+  }
+  if (s3 === "АММ" && region.moscowObl) {
+    return "Подсказка: **АММ** на **150** — редкая московская область (см. статьи).";
+  }
+  return undefined;
+}
+
+export function computePlatePrestige(p: VehiclePlateParts): PlatePrestigeBreakdown {
+  const digit = digitScore(p.digits);
+  const letter = letterScore(p);
+  const blat = blatScore(p);
+  const region = regionScore(p.region);
+
+  const lines: string[] = [];
+  let base = 0;
+
+  if (digit.score > 0) {
+    base += digit.score;
+    lines.push(`цифры **+${digit.score}** (${digit.label})`);
+  }
+  if (letter.score > 0) {
+    base += letter.score;
+    lines.push(`буквы **+${letter.score}** (${letter.label})`);
+  }
+  if (blat.score > 0) {
+    base += blat.score;
+    lines.push(`серия **+${blat.score}** (${blat.label})`);
+  }
+  if (region.score > 0) {
+    base += region.score;
+    lines.push(`регион **+${region.score}** (${region.label})`);
+  }
+
+  const { mult, labels } = comboMultipliers(p, blat, region, digit, letter);
+  let total = Math.floor(base * mult);
+  total = Math.min(PLATE_PRESTIGE_CAP, total);
+
+  const regionHint = regionComboHint(p, blat, region);
+
+  return { total, base, lines, multipliers: labels, regionHint };
+}
+
+export function formatPlatePrestigeBreakdownShort(b: PlatePrestigeBreakdown): string {
+  const parts: string[] = [];
+  if (b.lines.length) parts.push(b.lines.join("; "));
+  if (b.multipliers.length) parts.push(b.multipliers.join("; "));
+  return parts.join(" · ") || "без бонусов";
+}
+
+/** Сообщение после оформления/смены: номер + престиж в скобках. */
+export function formatPlateRollMessage(args: {
+  action: string;
+  plate: string;
+  breakdown: PlatePrestigeBreakdown;
+  prestigeDelta: number;
+  prestigeAccrued: number;
+}): string {
+  const { action, plate, breakdown, prestigeDelta, prestigeAccrued } = args;
+  const deltaStr =
+    prestigeDelta > 0
+      ? `**+${prestigeDelta.toLocaleString("ru-RU")}** престижа`
+      : prestigeDelta < 0
+        ? `${prestigeDelta.toLocaleString("ru-RU")} престижа`
+        : "престиж без изменений";
+  const detail = formatPlatePrestigeBreakdownShort(breakdown);
+  const hint = breakdown.regionHint ? `\n${breakdown.regionHint}` : "";
+  return (
+    `${action}: **${plate}** (${deltaStr}, с номера **${prestigeAccrued.toLocaleString("ru-RU")}**)\n` +
+    `(${detail})${hint}`
+  );
+}
+
+export const PLATE_SHOP_PRESTIGE_HINT_LINES = [
+  "Престиж номера **складывается** из цифр, букв, «блатных» серий (**АМР**, **ЕКХ**, **ООО**…) и региона; **×множители** за удачные сочетания.",
+  "Спецсерии с **77**, **99**, **777**, **497**, **999** и **МО 50/90/150** дают **больше** — см. подсказку после выпадения.",
+  "Тройные буквы/цифры (**А 777 АА**, **О 000 ОО**) и зеркала усиливают престиж.",
+];

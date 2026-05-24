@@ -49,10 +49,17 @@ import {
   rollRandomVehiclePlateDigits,
   rollRandomVehiclePlateLetters,
   rollRandomVehiclePlateParts,
+  type VehiclePlateParts,
   userHasOwnedCar,
   userHasVehiclePlate,
   vehiclePlatePartsToPatch,
 } from "./economyLicensePlate.js";
+import {
+  computePlatePrestige,
+  formatPlatePrestigeBreakdownShort,
+  formatPlateRollMessage,
+  PLATE_SHOP_PRESTIGE_HINT_LINES,
+} from "./economyPlatePrestige.js";
 import { cancelRentAndBikeOnAssetPurchase, clearSovietHousingRentPatch } from "./economyHousingUtil.js";
 import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub, userHasActiveHousing } from "./economyHousing.js";
 import {
@@ -271,6 +278,8 @@ export function buildShopPlateEmbed(member: GuildMember): EmbedBuilder {
   const letCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
   const regioCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
   const plate = formatVehiclePlateFromUser(u);
+  const plateParts = parseVehiclePlateParts(u);
+  const platePrestige = plateParts ? computePlatePrestige(plateParts) : undefined;
   const lines = [
     `Баланс: **${fmt(u.rubles)}** ₽`,
     "",
@@ -278,13 +287,23 @@ export function buildShopPlateEmbed(member: GuildMember): EmbedBuilder {
     "Номер **сохраняется** при замене авто на лучшее; при **продаже** авто госномер **теряется**.",
     "Буквы и цифры в серии **могут повторяться** (например **А 777 АА**).",
     "",
+    ...PLATE_SHOP_PRESTIGE_HINT_LINES,
+    "",
     plate ? `Текущий номер: **${plate}**` : "Госномер: **не оформлен**",
+  ];
+  if (platePrestige && platePrestige.total > 0) {
+    lines.push(`Престиж номера: **${fmt(platePrestige.total)}** (${formatPlatePrestigeBreakdownShort(platePrestige)})`);
+    if (platePrestige.regionHint) lines.push(platePrestige.regionHint);
+  } else if (plate) {
+    lines.push("Престиж номера: **0**");
+  }
+  lines.push(
     "",
     `• **Оформить** — **${fmt(regCost)}** ₽ (случайная серия и регион)`,
     `• **Сменить цифры** — **${fmt(digCost)}** ₽`,
     `• **Сменить буквы** — **${fmt(letCost)}** ₽`,
     `• **Сменить регион** — **${fmt(regioCost)}** ₽`,
-  ];
+  );
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Гос.номер").setDescription(lines.join("\n"));
 }
 
@@ -804,64 +823,166 @@ export function purchaseCar(member: GuildMember, cid: string): { ok: true } | { 
   return { ok: true };
 }
 
-export function registerVehiclePlate(member: GuildMember): { ok: true; plate: string } | { ok: false; reply: string } {
+function patchUserPlateWithPrestige(
+  guildId: string,
+  userId: string,
+  u: EconomyUser,
+  parts: VehiclePlateParts,
+  rublesAfter: number,
+): { breakdown: ReturnType<typeof computePlatePrestige>; prestigeDelta: number; prestigeAccrued: number } {
+  const breakdown = computePlatePrestige(parts);
+  const oldAccrued = u.vehiclePlatePrestige ?? 0;
+  const prestigeDelta = breakdown.total - oldAccrued;
+  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
+    prestigeDelta,
+    domesticDelta: 0,
+  });
+  patchEconomyUser(guildId, userId, {
+    rubles: rublesAfter,
+    ...vehiclePlatePartsToPatch(parts),
+    vehiclePlatePrestige: breakdown.total,
+    ...stats,
+  });
+  return { breakdown, prestigeDelta, prestigeAccrued: breakdown.total };
+}
+
+/** Однократная синхронизация престижа номера (миграция старых сохранений). */
+export function syncVehiclePlatePrestige(member: GuildMember): void {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const parts = parseVehiclePlateParts(u);
+  if (!parts) return;
+  const total = computePlatePrestige(parts).total;
+  const accrued = u.vehiclePlatePrestige ?? 0;
+  if (total === accrued) return;
+  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
+    prestigeDelta: total - accrued,
+    domesticDelta: 0,
+  });
+  patchEconomyUser(member.guild.id, member.id, { vehiclePlatePrestige: total, ...stats });
+}
+
+export function registerVehiclePlate(
+  member: GuildMember,
+): { ok: true; plate: string; rollMessage: string } | { ok: false; reply: string } {
   const u = getEconomyUser(member.guild.id, member.id);
   if (!userHasOwnedCar(u)) return { ok: false, reply: "Сначала купите **авто**." };
   if (userHasVehiclePlate(u)) return { ok: false, reply: "Госномер **уже оформлен**." };
   const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_REGISTER_BASE_RUB);
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   const parts = rollRandomVehiclePlateParts();
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles - cost,
-    ...vehiclePlatePartsToPatch(parts),
-  });
+  const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
+    member.guild.id,
+    member.id,
+    u,
+    parts,
+    u.rubles - cost,
+  );
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
-  return { ok: true, plate: formatVehiclePlate(parts) };
+  const plate = formatVehiclePlate(parts);
+  return {
+    ok: true,
+    plate,
+    rollMessage: formatPlateRollMessage({
+      action: "Оформлен госномер",
+      plate,
+      breakdown,
+      prestigeDelta,
+      prestigeAccrued,
+    }),
+  };
 }
 
-export function changeVehiclePlateDigits(member: GuildMember): { ok: true; plate: string } | { ok: false; reply: string } {
+export function changeVehiclePlateDigits(
+  member: GuildMember,
+): { ok: true; plate: string; rollMessage: string } | { ok: false; reply: string } {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = parseVehiclePlateParts(u);
   if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
   const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   const next = { ...cur, digits: rollRandomVehiclePlateDigits() };
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles - cost,
-    ...vehiclePlatePartsToPatch(next),
-  });
+  const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
+    member.guild.id,
+    member.id,
+    u,
+    next,
+    u.rubles - cost,
+  );
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
-  return { ok: true, plate: formatVehiclePlate(next) };
+  const plate = formatVehiclePlate(next);
+  return {
+    ok: true,
+    plate,
+    rollMessage: formatPlateRollMessage({
+      action: "Новые цифры",
+      plate,
+      breakdown,
+      prestigeDelta,
+      prestigeAccrued,
+    }),
+  };
 }
 
-export function changeVehiclePlateLetters(member: GuildMember): { ok: true; plate: string } | { ok: false; reply: string } {
+export function changeVehiclePlateLetters(
+  member: GuildMember,
+): { ok: true; plate: string; rollMessage: string } | { ok: false; reply: string } {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = parseVehiclePlateParts(u);
   if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
   const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   const next = { ...cur, ...rollRandomVehiclePlateLetters() };
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles - cost,
-    ...vehiclePlatePartsToPatch(next),
-  });
+  const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
+    member.guild.id,
+    member.id,
+    u,
+    next,
+    u.rubles - cost,
+  );
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
-  return { ok: true, plate: formatVehiclePlate(next) };
+  const plate = formatVehiclePlate(next);
+  return {
+    ok: true,
+    plate,
+    rollMessage: formatPlateRollMessage({
+      action: "Новые буквы",
+      plate,
+      breakdown,
+      prestigeDelta,
+      prestigeAccrued,
+    }),
+  };
 }
 
-export function changeVehiclePlateRegion(member: GuildMember): { ok: true; plate: string } | { ok: false; reply: string } {
+export function changeVehiclePlateRegion(
+  member: GuildMember,
+): { ok: true; plate: string; rollMessage: string } | { ok: false; reply: string } {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = parseVehiclePlateParts(u);
   if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
   const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   const next = { ...cur, region: pickRandomPlateRegion() };
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles - cost,
-    ...vehiclePlatePartsToPatch(next),
-  });
+  const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
+    member.guild.id,
+    member.id,
+    u,
+    next,
+    u.rubles - cost,
+  );
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
-  return { ok: true, plate: formatVehiclePlate(next) };
+  const plate = formatVehiclePlate(next);
+  return {
+    ok: true,
+    plate,
+    rollMessage: formatPlateRollMessage({
+      action: "Новый регион",
+      plate,
+      breakdown,
+      prestigeDelta,
+      prestigeAccrued,
+    }),
+  };
 }
 
 export function sellOwnedCar(member: GuildMember): { ok: true; refund: number } | { ok: false; reply: string } {
@@ -869,14 +990,16 @@ export function sellOwnedCar(member: GuildMember): { ok: true; refund: number } 
   const cur = getCarDef(u.ownedCarId);
   if (!cur) return { ok: false, reply: "Нет **авто** для продажи." };
   const refund = Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_SELL_REFUND_RATE);
+  const platePrestige = u.vehiclePlatePrestige ?? 0;
   const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
-    prestigeDelta: -cur.prestigeDelta,
+    prestigeDelta: -cur.prestigeDelta - platePrestige,
     domesticDelta: -cur.domesticDelta,
   });
   patchEconomyUser(member.guild.id, member.id, {
     rubles: u.rubles + refund,
     ownedCarId: undefined,
     ...clearVehiclePlatePatch(),
+    vehiclePlatePrestige: undefined,
     ...stats,
   });
   return { ok: true, refund };

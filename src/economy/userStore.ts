@@ -84,6 +84,8 @@ export interface EconomyUser {
   vehiclePlateDigits?: string;
   vehiclePlateL2?: string;
   vehiclePlateRegion?: string;
+  /** Престиж, уже учтённый в prestigePoints от текущего госномера. */
+  vehiclePlatePrestige?: number;
 
   /** Советское жильё: нет / аренда / своя квартира. */
   housingKind?: HousingKind;
@@ -456,11 +458,15 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     typeof (u as any)?.vehiclePlateL2 === "string" ? String((u as any).vehiclePlateL2).toUpperCase() : undefined;
   let vehiclePlateRegion =
     typeof (u as any)?.vehiclePlateRegion === "string" ? String((u as any).vehiclePlateRegion) : undefined;
+  let vehiclePlatePrestige = Number.isFinite((u as any)?.vehiclePlatePrestige)
+    ? Math.max(0, Math.floor((u as any).vehiclePlatePrestige))
+    : undefined;
   if (!ownedCarId) {
     vehiclePlateL1 = undefined;
     vehiclePlateDigits = undefined;
     vehiclePlateL2 = undefined;
     vehiclePlateRegion = undefined;
+    vehiclePlatePrestige = undefined;
   } else if (vehiclePlateL1 && vehiclePlateDigits && vehiclePlateL2 && vehiclePlateRegion) {
     if (
       !isValidVehiclePlateParts({
@@ -474,12 +480,14 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
       vehiclePlateDigits = undefined;
       vehiclePlateL2 = undefined;
       vehiclePlateRegion = undefined;
+      vehiclePlatePrestige = undefined;
     }
   } else {
     vehiclePlateL1 = undefined;
     vehiclePlateDigits = undefined;
     vehiclePlateL2 = undefined;
     vehiclePlateRegion = undefined;
+    vehiclePlatePrestige = undefined;
   }
 
   if (ownedApartmentId) {
@@ -561,6 +569,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     vehiclePlateDigits,
     vehiclePlateL2,
     vehiclePlateRegion,
+    vehiclePlatePrestige,
     housingKind: housingKind === "none" ? undefined : housingKind,
     housingRentNextDueMs,
     housingRentPlan,

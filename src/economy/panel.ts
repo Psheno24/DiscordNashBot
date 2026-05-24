@@ -138,6 +138,7 @@ import {
   buildShopPlateRows,
   buildShopCarSellConfirmEmbed,
   buildShopCarSellConfirmRows,
+  syncVehiclePlatePrestige,
   registerVehiclePlate,
   changeVehiclePlateDigits,
   changeVehiclePlateLetters,
@@ -3255,6 +3256,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_SHOP_PLATE) {
+    syncVehiclePlatePrestige(member);
     await replyOrUpdate(interaction, {
       embeds: [buildShopPlateEmbed(member)],
       components: buildShopPlateRows(member),
@@ -3272,7 +3274,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       embeds: [buildShopPlateEmbed(member)],
       components: buildShopPlateRows(member),
     });
-    await interaction.followUp({ content: `Оформлен госномер: **${r.plate}**`, flags: MessageFlags.Ephemeral });
+    await interaction.followUp({ content: r.rollMessage, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -3286,7 +3288,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       embeds: [buildShopPlateEmbed(member)],
       components: buildShopPlateRows(member),
     });
-    await interaction.followUp({ content: `Новый номер: **${r.plate}**`, flags: MessageFlags.Ephemeral });
+    await interaction.followUp({ content: r.rollMessage, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -3300,7 +3302,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       embeds: [buildShopPlateEmbed(member)],
       components: buildShopPlateRows(member),
     });
-    await interaction.followUp({ content: `Новый номер: **${r.plate}**`, flags: MessageFlags.Ephemeral });
+    await interaction.followUp({ content: r.rollMessage, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -3314,7 +3316,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       embeds: [buildShopPlateEmbed(member)],
       components: buildShopPlateRows(member),
     });
-    await interaction.followUp({ content: `Новый номер: **${r.plate}**`, flags: MessageFlags.Ephemeral });
+    await interaction.followUp({ content: r.rollMessage, flags: MessageFlags.Ephemeral });
     return true;
   }
 
