@@ -483,7 +483,14 @@ function buildVoiceLadderProgressLines(psTotal: number): string[] {
   return lines;
 }
 
-function buildProfilePurchasesBlock(u: ReturnType<typeof getEconomyUser>): string[] {
+function ownedApartmentProfileBlockLine(guildId: string, aptId: string | undefined): string {
+  const apt = getApartmentDef(aptId);
+  if (!apt) return "—";
+  const util = inflatedApartmentUtilityRub(guildId, apt.id);
+  return `**${apt.label}** · ЖКХ **${fmt(util)}** ₽/мес.`;
+}
+
+function buildProfilePurchasesBlock(guildId: string, u: ReturnType<typeof getEconomyUser>): string[] {
   const lines: string[] = [];
   if (!u.hasPhone) {
     lines.push("Телефон: **нет**");
@@ -498,12 +505,16 @@ function buildProfilePurchasesBlock(u: ReturnType<typeof getEconomyUser>): strin
   lines.push(economyCarDisplayLine(u));
   const hk = u.housingKind ?? "none";
   const homeSov =
-    hk === "rent" ? "аренда (сов.)" : hk === "owned" ? (getApartmentDef(u.ownedApartmentId)?.label ?? "сов.") : "нет (сов.)";
+    hk === "rent"
+      ? "**аренда** (советское жильё)"
+      : hk === "owned"
+        ? ownedApartmentProfileBlockLine(guildId, u.ownedApartmentId)
+        : "**нет** (сов.)";
   const homeFor =
     u.housingForeignKind === "owned"
-      ? getApartmentDef(u.ownedForeignApartmentId)?.label ?? "зам."
-      : "нет (зам.)";
-  lines.push(`Жильё: **${homeSov}** · **${homeFor}**`);
+      ? ownedApartmentProfileBlockLine(guildId, u.ownedForeignApartmentId)
+      : "**нет** (зам.)";
+  lines.push(`Жильё: ${homeSov} · ${homeFor}`);
   lines.push(`Престиж: **${fmt(u.prestigePoints ?? 0)}** · Быт: **${fmt(u.domesticPoints ?? 0)}**`);
   if (u.ownedPetId) lines.push(`Питомец: **${getPetDef(u.ownedPetId)?.label ?? "—"}**`);
   return lines;
@@ -752,7 +763,7 @@ function buildProfileEmbed(member: GuildMember): EmbedBuilder {
         ...buildVoiceLadderProgressLines(u.psTotal),
         "",
         "**Покупки:**",
-        ...buildProfilePurchasesBlock(u),
+        ...buildProfilePurchasesBlock(member.guild.id, u),
         "",
         "Голос даёт **100%** в **СР** (без ₽). **Быт** усиливает СР с голоса и за смены.",
         `Работа: **${jobName}**`,

@@ -17,6 +17,7 @@ import {
   PET_TRADE_IN_RATE,
   PHONE_SELL_REFUND_RATE,
   PHONE_TRADE_IN_RATE,
+  apartmentShopShortLabel,
   apartmentsByOrigin,
   carsByOrigin,
   getApartmentDef,
@@ -34,6 +35,7 @@ import {
   shopPhonePurchaseCostRub,
   statDeltasOnReplace,
   type CatalogOrigin,
+  type ApartmentDef,
   type HousingRentPlan,
 } from "./economyCatalog.js";
 import {
@@ -167,6 +169,11 @@ function shopApartmentTradeInLines(): string[] {
   return [
     `Переезд на **лучшее** жильё той же ветки: зачёт **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE)}** каталожной цены; если владели **30+ суток** — **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE_AFTER_MONTH)}**.`,
   ];
+}
+
+function apartmentShopListLine(guildId: string, a: ApartmentDef): string {
+  const util = inflatedApartmentUtilityRub(guildId, a.id);
+  return `• **${a.label}** — **${fmt(inflatedCatalogApartmentPrice(guildId, a.id))}** ₽ (${statLabel(a)}) · ЖКХ **${fmt(util)}** ₽/мес. (1-е числа, МСК)`;
 }
 
 const SHOP_BRANCH_NONE = "**нет**";
@@ -607,6 +614,7 @@ export function buildShopHousePickEmbed(member: GuildMember): EmbedBuilder {
     "",
     "**Советское** — покупка (быт). **Заморское** — покупка (престиж). Можно владеть **обоими** сразу.",
     "**Аренда** — только советское жильё, для работ 2+ уровня.",
+    "**ЖКХ** — ежемесячно с **собственной** квартиры (тариф у каждого объекта, списание **1-го числа**, МСК).",
   ];
   if (hk === "owned" && u.ownedApartmentId) {
     lines.push("", "Своя **советская** квартира — аренда **недоступна**.");
@@ -818,20 +826,32 @@ export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin)
 
 export function buildShopHouseListEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
   const lines: string[] = [`Баланс: **${fmt(u.rubles)}** ₽`, ""];
   if (origin === "soviet") {
     if (u.housingKind === "owned" && u.ownedApartmentId) {
-      lines.push(`Своё: **${getApartmentDef(u.ownedApartmentId)?.label ?? "—"}**`, "");
+      const cur = getApartmentDef(u.ownedApartmentId);
+      lines.push(
+        `Своё: **${cur?.label ?? "—"}**`,
+        cur ? `ЖКХ: **${fmt(inflatedApartmentUtilityRub(gid, cur.id))}** ₽/мес.` : "",
+        "",
+      );
     } else {
       lines.push("Покупка **советского** жилья. Аренда — отдельная кнопка в меню жилья.", "");
     }
   } else if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId) {
-    lines.push(`Своё: **${getApartmentDef(u.ownedForeignApartmentId)?.label ?? "—"}**`, "");
+    const cur = getApartmentDef(u.ownedForeignApartmentId);
+    lines.push(
+      `Своё: **${cur?.label ?? "—"}**`,
+      cur ? `ЖКХ: **${fmt(inflatedApartmentUtilityRub(gid, cur.id))}** ₽/мес.` : "",
+      "",
+    );
   }
   lines.push("", ...shopApartmentTradeInLines());
   lines.push(shopPlainSellLine(APARTMENT_SELL_REFUND_RATE), "");
+  lines.push("На кнопках — **краткое** имя (район); ниже — **полное** название и ЖКХ.", "");
   for (const a of apartmentsByOrigin(origin)) {
-    lines.push(`• **${a.label}** — **${fmt(inflatedCatalogApartmentPrice(member.guild.id, a.id))}** ₽ (${statLabel(a)})`);
+    lines.push(apartmentShopListLine(gid, a));
   }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle(`Жильё · ${originTitle(origin)}`).setDescription(lines.join("\n"));
 }
@@ -889,7 +909,7 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
             (origin === "foreign" && u.housingForeignKind === "owned" && u.ownedForeignApartmentId === a.id);
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_APT_BUY_PREFIX}${a.id}`)
-            .setLabel(shopItemButtonLabel(a.label.slice(0, 12), cost))
+            .setLabel(shopItemButtonLabel(apartmentShopShortLabel(a.label), cost))
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(downgrade || u.rubles < cost || ownedSame);
         }),

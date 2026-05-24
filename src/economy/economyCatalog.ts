@@ -462,6 +462,13 @@ export function apartmentsByOrigin(origin: CatalogOrigin): ApartmentDef[] {
   return APARTMENT_MODELS.filter((a) => a.origin === origin);
 }
 
+/** Краткое имя для кнопки магазина (район из скобок или первое слово полного названия). */
+export function apartmentShopShortLabel(label: string): string {
+  const m = label.match(/\(([^)]+)\)\s*$/);
+  if (m?.[1]) return m[1].trim();
+  return label.split(/\s+/)[0] ?? label;
+}
+
 export function apartmentTradeInRate(purchasedAtMs: number | undefined, nowMs: number = Date.now()): number {
   if (purchasedAtMs != null && nowMs - purchasedAtMs >= APARTMENT_TRADE_IN_MONTH_MS) {
     return APARTMENT_TRADE_IN_RATE_AFTER_MONTH;

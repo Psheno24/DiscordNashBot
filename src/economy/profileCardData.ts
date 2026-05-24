@@ -1,4 +1,5 @@
 import { getApartmentDef, getPetDef, getPhoneDef } from "./economyCatalog.js";
+import { inflatedApartmentUtilityRub } from "./economyMacro.js";
 import { economyCarDisplayLine } from "./economyLicensePlate.js";
 import { economyJobTitle } from "./jobTitles.js";
 import { computeGuildEconomyRanks, formatServerPlace, type GuildEconomyRanks } from "./profileCardRanks.js";
@@ -25,17 +26,24 @@ function truncateLine(s: string, max = 52): string {
   return `${s.slice(0, max - 1)}…`;
 }
 
-function housingLine(u: EconomyUser): string {
+function ownedApartmentProfileText(guildId: string, aptId: string | undefined): string {
+  const apt = getApartmentDef(aptId);
+  if (!apt) return "—";
+  const util = inflatedApartmentUtilityRub(guildId, apt.id);
+  return `${apt.label} · ЖКХ ${fmt(util)} ₽/мес.`;
+}
+
+function housingLine(u: EconomyUser, guildId: string): string {
   const hk = u.housingKind ?? "none";
   const homeSov =
     hk === "rent"
-      ? "аренда (сов.)"
+      ? "аренда (советское жильё)"
       : hk === "owned"
-        ? (getApartmentDef(u.ownedApartmentId)?.label ?? "сов.")
+        ? ownedApartmentProfileText(guildId, u.ownedApartmentId)
         : "нет (сов.)";
   const homeFor =
     u.housingForeignKind === "owned"
-      ? (getApartmentDef(u.ownedForeignApartmentId)?.label ?? "зам.")
+      ? ownedApartmentProfileText(guildId, u.ownedForeignApartmentId)
       : "нет (зам.)";
   return `Жильё: ${homeSov} · ${homeFor}`;
 }
@@ -70,7 +78,7 @@ export function buildProfileCardContent(
     "",
     truncateLine(phoneLine(u)),
     truncateLine(economyCarDisplayLine(u, { markdown: false })),
-    truncateLine(housingLine(u)),
+    truncateLine(housingLine(u, guildId)),
     truncateLine(`Питомец: ${pet?.label ?? "нет"}`),
     "",
     truncateLine(`Работа: ${jobName}`),
