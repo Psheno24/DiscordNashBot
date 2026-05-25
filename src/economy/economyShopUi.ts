@@ -928,15 +928,17 @@ export function buildShopAnimalsEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = getPetDef(u.ownedPetId);
   const gid = member.guild.id;
-  const lines = PET_MODELS.map((p) => {
+  const lines: string[] = [];
+  for (const p of PET_MODELS) {
+    if (lines.length > 0) lines.push("");
     const cost = scaledShopPrice(gid, petPurchaseCostRub(cur, p));
     const upkeep = scaledEconomyExpense(gid, p.dailyUpkeepRub);
     const psDay = scaledEconomyPsIncome(gid, p.dailyPsRub);
-    return [
+    lines.push(
       `• **${p.label}** — покупка **${fmt(cost)}** ₽, **${fmt(upkeep)}** ₽/сут, **+${fmt(psDay)}** СР/сут`,
       `  Требования: ${petRequirementsLine(p)}`,
-    ].join("\n");
-  });
+    );
+  }
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Животные")

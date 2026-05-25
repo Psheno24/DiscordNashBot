@@ -13,7 +13,7 @@ import {
   type PhoneDef,
 } from "./economyCatalog.js";
 import { isMskFirstCalendarDay, mskMonthFirstDayMs, mskTodayYmd } from "./mskCalendar.js";
-import { roundEconomyPrice } from "./economyRound.js";
+import { roundEconomyPrice, roundEconomyPs } from "./economyRound.js";
 import { getShopVatPercent } from "./taxTreasury.js";
 
 export { roundEconomyPrice } from "./economyRound.js";
@@ -72,10 +72,11 @@ export function scaledEconomyExpense(guildId: string, baseRub: number): number {
   return scalePositiveIncome(guildId, baseRub);
 }
 
-/** СР и прочие неденежные «доходы», растущие вместе с индексацией (округление как у ₽). */
+/** СР с индексацией экономики (округление по целым, не как у крупных сумм ₽). */
 export function scaledEconomyPsIncome(guildId: string, basePs: number): number {
   if (basePs <= 0) return 0;
-  return scalePositiveIncome(guildId, basePs);
+  const scaled = basePs * getSalaryIncomeMultiplier(guildId);
+  return roundEconomyPs(scaled);
 }
 
 export function mskYearMonth(nowMs: number = Date.now()): string {
