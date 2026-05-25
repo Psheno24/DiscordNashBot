@@ -296,6 +296,85 @@ export function rollRandomVehiclePlateParts(): VehiclePlateParts {
   return { ...rollRandomVehiclePlateSerial(), region: pickRandomPlateRegion() };
 }
 
+/** Канонический ключ номера для сравнения «полного сходства». */
+export function vehiclePlateKey(parts: VehiclePlateParts): string {
+  return `${parts.l1}|${parts.digits}|${parts.l2}|${parts.region}`;
+}
+
+const MAX_UNIQUE_PLATE_ATTEMPTS = 200;
+
+/**
+ * Случайные цифры (**001–999**), при которых полный номер не совпадёт ни с одним
+ * из `takenKeys`. Если все 999 цифр заняты при таких буквах и регионе — вернёт
+ * случайные (теоретически не достигается на нашем масштабе).
+ */
+export function rollUniqueVehiclePlateDigits(
+  takenKeys: ReadonlySet<string>,
+  fixed: Pick<VehiclePlateParts, "l1" | "l2" | "region">,
+): string {
+  for (let i = 0; i < MAX_UNIQUE_PLATE_ATTEMPTS; i++) {
+    const digits = rollRandomVehiclePlateDigits();
+    if (!takenKeys.has(vehiclePlateKey({ ...fixed, digits }))) return digits;
+  }
+  for (let v = 1; v <= 999; v++) {
+    const digits = String(v).padStart(3, "0");
+    if (!takenKeys.has(vehiclePlateKey({ ...fixed, digits }))) return digits;
+  }
+  return rollRandomVehiclePlateDigits();
+}
+
+/**
+ * Случайные буквы серии (l1+l2), при которых полный номер не совпадёт
+ * ни с одним из `takenKeys`.
+ */
+export function rollUniqueVehiclePlateLetters(
+  takenKeys: ReadonlySet<string>,
+  fixed: Pick<VehiclePlateParts, "digits" | "region">,
+): Pick<VehiclePlateParts, "l1" | "l2"> {
+  for (let i = 0; i < MAX_UNIQUE_PLATE_ATTEMPTS; i++) {
+    const letters = rollRandomVehiclePlateLetters();
+    if (!takenKeys.has(vehiclePlateKey({ ...fixed, ...letters }))) return letters;
+  }
+  for (const a of VEHICLE_PLATE_LETTERS) {
+    for (const b of VEHICLE_PLATE_LETTERS) {
+      for (const c of VEHICLE_PLATE_LETTERS) {
+        const letters = { l1: a, l2: `${b}${c}` };
+        if (!takenKeys.has(vehiclePlateKey({ ...fixed, ...letters }))) return letters;
+      }
+    }
+  }
+  return rollRandomVehiclePlateLetters();
+}
+
+/**
+ * Случайный регион, при котором полный номер не совпадёт
+ * ни с одним из `takenKeys`.
+ */
+export function rollUniqueVehiclePlateRegion(
+  takenKeys: ReadonlySet<string>,
+  fixed: Pick<VehiclePlateParts, "l1" | "digits" | "l2">,
+): string {
+  for (let i = 0; i < MAX_UNIQUE_PLATE_ATTEMPTS; i++) {
+    const region = pickRandomPlateRegion();
+    if (!takenKeys.has(vehiclePlateKey({ ...fixed, region }))) return region;
+  }
+  for (const region of VEHICLE_PLATE_REGION_CODES) {
+    if (!takenKeys.has(vehiclePlateKey({ ...fixed, region }))) return region;
+  }
+  return pickRandomPlateRegion();
+}
+
+/** Полностью случайный, уникальный по полному совпадению номер. */
+export function rollUniqueVehiclePlateParts(
+  takenKeys: ReadonlySet<string>,
+): VehiclePlateParts {
+  for (let i = 0; i < MAX_UNIQUE_PLATE_ATTEMPTS; i++) {
+    const parts = rollRandomVehiclePlateParts();
+    if (!takenKeys.has(vehiclePlateKey(parts))) return parts;
+  }
+  return rollRandomVehiclePlateParts();
+}
+
 export function formatVehiclePlate(parts: VehiclePlateParts): string {
   return `${parts.l1} ${parts.digits} ${parts.l2} | ${parts.region} RUS`;
 }

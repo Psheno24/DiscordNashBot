@@ -77,6 +77,8 @@ export interface EconomyUser {
     walletRub: number;
     ps: number;
     treasuryRub: number;
+    /** Доля престижа в зачислении (нетто, после налога). */
+    prestigeRub: number;
     atMs: number;
   };
 
@@ -390,9 +392,10 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     const walletRub = Number.isFinite(rawLs.walletRub) ? Math.round(rawLs.walletRub * 100) / 100 : NaN;
     const ps = Number.isFinite(rawLs.ps) ? Math.max(0, Math.floor(rawLs.ps)) : NaN;
     const treasuryRub = Number.isFinite(rawLs.treasuryRub) ? Math.max(0, Math.round(rawLs.treasuryRub * 100) / 100) : NaN;
+    const prestigeRub = Number.isFinite(rawLs.prestigeRub) ? Math.max(0, Math.floor(rawLs.prestigeRub)) : 0;
     const atMs = Number.isFinite(rawLs.atMs) ? Math.max(0, Math.floor(rawLs.atMs)) : NaN;
     if (Number.isFinite(walletRub) && Number.isFinite(ps) && Number.isFinite(treasuryRub) && Number.isFinite(atMs)) {
-      lastShiftSummary = { walletRub, ps, treasuryRub, atMs };
+      lastShiftSummary = { walletRub, ps, treasuryRub, prestigeRub, atMs };
     }
   }
 

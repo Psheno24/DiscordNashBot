@@ -48,10 +48,11 @@ import {
   formatVehiclePlate,
   formatVehiclePlateFromUser,
   parseVehiclePlateParts,
-  pickRandomPlateRegion,
-  rollRandomVehiclePlateDigits,
-  rollRandomVehiclePlateLetters,
-  rollRandomVehiclePlateParts,
+  rollUniqueVehiclePlateDigits,
+  rollUniqueVehiclePlateLetters,
+  rollUniqueVehiclePlateParts,
+  rollUniqueVehiclePlateRegion,
+  vehiclePlateKey,
   type VehiclePlateParts,
   userHasOwnedCar,
   userHasVehiclePlate,
@@ -82,7 +83,7 @@ import {
 } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { remitShopPurchaseVatToTreasury } from "./taxTreasury.js";
-import { getEconomyUser, patchEconomyUser, type EconomyUser } from "./userStore.js";
+import { getEconomyUser, listEconomyUsers, patchEconomyUser, type EconomyUser } from "./userStore.js";
 
 const PANEL_COLOR = 0x2b2d31;
 
@@ -1094,6 +1095,17 @@ function plateLastRoll(
   return { action, plate, breakdown, prestigeDelta };
 }
 
+/** Полные госномера других игроков на сервере (свой не включается). */
+function guildTakenVehiclePlateKeys(guildId: string, excludeUserId: string): Set<string> {
+  const taken = new Set<string>();
+  for (const { userId, user } of listEconomyUsers(guildId)) {
+    if (userId === excludeUserId) continue;
+    const parts = parseVehiclePlateParts(user);
+    if (parts) taken.add(vehiclePlateKey(parts));
+  }
+  return taken;
+}
+
 export function registerVehiclePlate(
   member: GuildMember,
 ): { ok: true; plate: string; lastRoll: PlateShopLastRoll } | { ok: false; reply: string } {
@@ -1102,7 +1114,8 @@ export function registerVehiclePlate(
   if (userHasVehiclePlate(u)) return { ok: false, reply: "Госномер **уже оформлен**." };
   const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_REGISTER_BASE_RUB);
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  const parts = rollRandomVehiclePlateParts();
+  const taken = guildTakenVehiclePlateKeys(member.guild.id, member.id);
+  const parts = rollUniqueVehiclePlateParts(taken);
   const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
     member.guild.id,
     member.id,
@@ -1127,7 +1140,11 @@ export function changeVehiclePlateDigits(
   if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
   const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  const next = { ...cur, digits: rollRandomVehiclePlateDigits() };
+  const taken = guildTakenVehiclePlateKeys(member.guild.id, member.id);
+  const next = {
+    ...cur,
+    digits: rollUniqueVehiclePlateDigits(taken, { l1: cur.l1, l2: cur.l2, region: cur.region }),
+  };
   const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
     member.guild.id,
     member.id,
@@ -1152,7 +1169,11 @@ export function changeVehiclePlateLetters(
   if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
   const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  const next = { ...cur, ...rollRandomVehiclePlateLetters() };
+  const taken = guildTakenVehiclePlateKeys(member.guild.id, member.id);
+  const next = {
+    ...cur,
+    ...rollUniqueVehiclePlateLetters(taken, { digits: cur.digits, region: cur.region }),
+  };
   const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
     member.guild.id,
     member.id,
@@ -1177,7 +1198,11 @@ export function changeVehiclePlateRegion(
   if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
   const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  const next = { ...cur, region: pickRandomPlateRegion() };
+  const taken = guildTakenVehiclePlateKeys(member.guild.id, member.id);
+  const next = {
+    ...cur,
+    region: rollUniqueVehiclePlateRegion(taken, { l1: cur.l1, digits: cur.digits, l2: cur.l2 }),
+  };
   const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
     member.guild.id,
     member.id,

@@ -2816,6 +2816,10 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
   }
 
   const walletDeltaRub = rublesNext - u.rubles;
+  const netPrestigeRub =
+    walletDeltaRub > 0 && prestigeRubBonus > 0
+      ? feedNetPrestigeRubBonus(jobTotal, prestigeRubBonus, payToWallet)
+      : 0;
   const patch: Partial<EconomyUser> = {
     rubles: rublesNext,
     psTotal: u.psTotal + psGain,
@@ -2823,14 +2827,16 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     courierPhonePaidUntilMs: phoneUntilNext,
     lastWorkAtByJob: { ...(u.lastWorkAtByJob ?? {}), [jobId]: now },
     jobExp: { ...(u.jobExp ?? {}), [jobId]: expAfter },
-    lastShiftSummary: { walletRub: walletDeltaRub, ps: psGain, treasuryRub, atMs: now },
+    lastShiftSummary: {
+      walletRub: walletDeltaRub,
+      ps: psGain,
+      treasuryRub,
+      prestigeRub: netPrestigeRub,
+      atMs: now,
+    },
     ...spamPatch,
   };
   patchEconomyUser(guildId, member.id, patch);
-  const netPrestigeRub =
-    walletDeltaRub > 0 && prestigeRubBonus > 0
-      ? feedNetPrestigeRubBonus(jobTotal, prestigeRubBonus, payToWallet)
-      : 0;
   const feedRubMain =
     walletDeltaRub > 0 && netPrestigeRub > 0 ? walletDeltaRub - netPrestigeRub : walletDeltaRub;
   const feedParts = [formatDelta(feedRubMain)];
@@ -2889,6 +2895,7 @@ export function economyFormatTelegramWorkScreen(member: GuildMember): string {
   const ls = u.lastShiftSummary;
   if (ls) {
     const parts = [tgFmtDelta(ls.walletRub)];
+    if (ls.prestigeRub > 0) parts.push(`+${tgFmtRub(ls.prestigeRub)} ₽ за престиж`);
     if (ls.ps > 0) parts.push(`+${tgFmtRub(ls.ps)} СР`);
     if (ls.treasuryRub > 0) parts.push(`казна ${tgFmtRub(ls.treasuryRub)} ₽`);
     lines.push(`Последняя смена: ${parts.join(" · ")}`);
