@@ -245,6 +245,7 @@ import {
   tier3OfficeShiftBonusLine,
 } from "./jobEconomyText.js";
 import {
+  applyShiftPayCoeffToGrossRub,
   formatAccCdHours,
   shiftPayCoeffApplies,
   shiftPayCoeffFromAccMs,
@@ -2763,16 +2764,18 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     }
   }
 
+  let shiftTaxableGrossRub = jobTotal;
   let spamPatch: Partial<EconomyUser> = {};
   const shiftCdMs = effectiveShiftCooldownMs(u, jobId, now);
   if (shiftPayCoeffApplies(shiftCdMs)) {
     const ymd = mskTodayYmd(now);
     const accBefore = u.workShiftMskYmd === ymd ? (u.workShiftCdAccMs ?? 0) : 0;
-    const sm = shiftPayCoeffFromAccMs(accBefore);
-    if (sm < 1 - 1e-9) {
-      jobTotal = Math.floor(jobTotal * sm);
+    const { grossRub, coeff } = applyShiftPayCoeffToGrossRub(shiftTaxableGrossRub, accBefore);
+    if (coeff < 1 - 1e-9) {
+      shiftTaxableGrossRub = grossRub;
+      if (prestigeRubBonus > 0) prestigeRubBonus = Math.floor(prestigeRubBonus * coeff);
       notes.push(
-        `коэффициент по накопленному КД за сутки: **×${sm}** (до смены **${formatAccCdHours(accBefore)}** ч)`,
+        `коэффициент по накопленному КД за сутки: **×${coeff}** (до смены **${formatAccCdHours(accBefore)}** ч)`,
       );
     }
     spamPatch = { workShiftMskYmd: ymd, workShiftCdAccMs: accBefore + shiftCdMs };
@@ -2791,16 +2794,16 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     }
   }
 
-  if (jobTotal > 0) {
-    const beforePlate = jobTotal;
-    jobTotal = applyUnregisteredVehiclePenalty(u, jobTotal);
-    if (jobTotal < beforePlate) notes.push("без госномера: **−10%** к выплате");
+  if (shiftTaxableGrossRub > 0) {
+    const beforePlate = shiftTaxableGrossRub;
+    shiftTaxableGrossRub = applyUnregisteredVehiclePenalty(u, shiftTaxableGrossRub);
+    if (shiftTaxableGrossRub < beforePlate) notes.push("без госномера: **−10%** к выплате");
   }
 
-  let payToWallet = jobTotal;
+  let payToWallet = shiftTaxableGrossRub;
   let treasuryRub = 0;
-  if (jobTotal > 0 && isLegalTaxableJob(jobId)) {
-    const { netRub, taxRub } = withholdLegalIncomeTax(guildId, jobTotal);
+  if (shiftTaxableGrossRub > 0 && isLegalTaxableJob(jobId)) {
+    const { netRub, taxRub } = withholdLegalIncomeTax(guildId, shiftTaxableGrossRub);
     payToWallet = netRub;
     treasuryRub = taxRub;
     if (taxRub > 0) notes.push(`налог **${fmt(taxRub)}** ₽ → казна`);
@@ -2818,7 +2821,7 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
   const walletDeltaRub = rublesNext - u.rubles;
   const netPrestigeRub =
     walletDeltaRub > 0 && prestigeRubBonus > 0
-      ? feedNetPrestigeRubBonus(jobTotal, prestigeRubBonus, payToWallet)
+      ? feedNetPrestigeRubBonus(shiftTaxableGrossRub, prestigeRubBonus, payToWallet)
       : 0;
   const patch: Partial<EconomyUser> = {
     rubles: rublesNext,

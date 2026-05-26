@@ -16,6 +16,18 @@ export function shiftPayCoeffFromAccMs(accCdMsBeforeShift: number): number {
   return 0.35;
 }
 
+/** Применить суточный коэффициент к gross выплаты за смену (до налога и штрафа за номер). */
+export function applyShiftPayCoeffToGrossRub(
+  grossRub: number,
+  accCdMsBeforeShift: number,
+): { grossRub: number; coeff: number } {
+  const g = Math.floor(grossRub);
+  if (g <= 0) return { grossRub: g, coeff: 1 };
+  const coeff = shiftPayCoeffFromAccMs(accCdMsBeforeShift);
+  if (coeff >= 1 - 1e-9) return { grossRub: g, coeff: 1 };
+  return { grossRub: Math.floor(g * coeff), coeff };
+}
+
 export function formatAccCdHours(accMs: number): string {
   const h = accMs / (60 * 60 * 1000);
   if (Math.abs(h - Math.round(h)) < 0.05) return String(Math.round(h));
