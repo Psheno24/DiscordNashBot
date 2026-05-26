@@ -224,7 +224,7 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
       break;
     case "assembler":
       main = [
-        "**КД:** **3** ч без **личного** транспорта; с **авто** из магазина — по классу (например **скутер ~2,5 ч** … **не ниже 1 ч 45 мин**).",
+        "**КД:** **3** ч без **личного** транспорта; с **авто** из магазина — по классу (например **скутер ~2,5 ч** … **топ ~1 ч**).",
         `**Оплата за смену:** случайно **${fmtJobIncomeRange(guildId, 15_000, 18_000)}** ₽.`,
         `**3%** штраф **${fmtJobIncome(guildId, -4500)}…${fmtJobIncome(guildId, -6500)}** ₽ · каждая **7-я** смена: **+${fmtJobIncome(guildId, ASSEMBLER_7TH_BONUS_BASE_RUB)}** ₽.`,
         "**После:** **×ранг** тир-2.",

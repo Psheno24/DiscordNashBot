@@ -281,7 +281,6 @@ const ECON_COURIER_BIKE_3D = "econ:work:courierbike:3d";
 const ECON_COURIER_BIKE_7D = "econ:work:courierbike:7d";
 
 const ASSEMBLER_BASE_CD_MS = 3 * 60 * 60 * 1000;
-const ASSEMBLER_MIN_CD_MS = Math.round(1.75 * 60 * 60 * 1000);
 
 const ECON_PROFILE_BUTTON_INFO = "econ:profile:info";
 const ECON_PROFILE_BUTTON_CARD = "econ:profile:card";
@@ -976,7 +975,7 @@ const JOBS_TIER2: JobDef[] = [
     baseCooldownMs: ASSEMBLER_BASE_CD_MS,
     basePayoutRub: 16_500,
     description: [
-      "**КД:** **3** ч без **личного** транспорта; с **авто** из магазина — по классу (например **скутер ~2,5 ч** … **не ниже 1 ч 45 мин**).",
+      "**КД:** **3** ч без **личного** авто; с **авто** из магазина — по классу (например **скутер ~2,5 ч** … **топ ~1 ч**).",
       "**Оплата за смену:** случайно **15 000–18 000** ₽. **3%** штраф; каждая **7-я** смена — премия **22 000** ₽; **множитель ранга** тир-2 — в карточке. Лимит выплаты по накопленному **КД** за сутки — в **Подробнее**.",
     ].join("\n"),
     reqSkills: { discipline: 28, logistics: 20 },
@@ -1609,10 +1608,10 @@ function effectiveCourierCooldownMs(u: ReturnType<typeof getEconomyUser>, now: n
   return def.baseCooldownMs;
 }
 
-/** Склад: без личного авто — **3** ч; с авто из магазина — КД по классу (мин. **1 ч 45 мин**). */
+/** Склад: без личного авто — **3** ч; с авто из магазина — КД по классу машины. */
 function effectiveAssemblerCooldownMs(u: ReturnType<typeof getEconomyUser>, _now?: number): number {
   const car = getCarDef(u.ownedCarId);
-  if (car) return Math.max(ASSEMBLER_MIN_CD_MS, car.courierShiftCdMs);
+  if (car) return car.courierShiftCdMs;
   return ASSEMBLER_BASE_CD_MS;
 }
 
@@ -1630,17 +1629,17 @@ export function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: JobId, n
   return { ok: false, msLeft: next - now };
 }
 
-/** Подсказка КД склада: база **3** ч или личное авто из магазина. */
+/** Подсказка КД склада: **3** ч без авто или КД по классу машины. */
 function assemblerWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
   const cdMs = effectiveAssemblerCooldownMs(u, now);
-  const h = (cdMs / 3600000).toFixed(2).replace(/\.?0+$/, "");
+  const h = cdHoursLabel(cdMs);
   const car = getCarDef(u.ownedCarId);
   if (car) {
-    return [`**Склад:** с авто **${car.label}** — КД смены **${h}** ч (**не ниже 1 ч 45 мин**).`];
+    return [`**Склад:** с авто **${car.label}** — КД смены **${h}** ч.`];
   }
   return [
-    "**Склад:** без личного транспорта — КД смены **3** ч.",
-    "Купите **авто** в магазине терминала (например **скутер** — ~**2,5** ч), чтобы сократить КД.",
+    "**Склад:** без личного авто — КД смены **3** ч.",
+    "Купите **авто** в магазине терминала — **КД** по классу машины (см. каталог **Авто**).",
   ];
 }
 
