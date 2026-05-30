@@ -179,6 +179,8 @@ import {
   ECON_SHOP_APPEARANCE,
   shopNavBottomRow,
   buildShopSimEmbed,
+  buildShopSimChangeEmbed,
+  buildShopSimChangeRows,
   buildShopSimRows,
   changeSimLast,
   changeSimMid,
@@ -187,6 +189,7 @@ import {
   syncSimPrestige,
   ECON_SHOP_SIM,
   ECON_SHOP_SIM_REGISTER,
+  ECON_SHOP_SIM_CHANGE,
   ECON_SHOP_SIM_OPERATOR,
   ECON_SHOP_SIM_MID,
   ECON_SHOP_SIM_LAST,
@@ -2489,6 +2492,7 @@ function isEconomyButton(id: string): boolean {
       ECON_SHOP_ANIMALS,
       ECON_SHOP_SIM,
       ECON_SHOP_SIM_REGISTER,
+      ECON_SHOP_SIM_CHANGE,
       ECON_SHOP_SIM_OPERATOR,
       ECON_SHOP_SIM_MID,
       ECON_SHOP_SIM_LAST,
@@ -3890,6 +3894,19 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_SHOP_SIM_CHANGE) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (!userHasSimNumber(u)) {
+      await interaction.reply({ content: "Сначала **купите симку**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopSimChangeEmbed(member)],
+      components: buildShopSimChangeRows(member),
+    });
+    return true;
+  }
+
   if (id === ECON_SHOP_SIM_OPERATOR) {
     const r = changeSimOperator(member);
     if (!r.ok) {
@@ -3897,8 +3914,8 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopSimEmbed(member, r.lastRoll)],
-      components: buildShopSimRows(member),
+      embeds: [buildShopSimChangeEmbed(member, r.lastRoll)],
+      components: buildShopSimChangeRows(member),
     });
     return true;
   }
@@ -3910,8 +3927,8 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopSimEmbed(member, r.lastRoll)],
-      components: buildShopSimRows(member),
+      embeds: [buildShopSimChangeEmbed(member, r.lastRoll)],
+      components: buildShopSimChangeRows(member),
     });
     return true;
   }
@@ -3923,8 +3940,8 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopSimEmbed(member, r.lastRoll)],
-      components: buildShopSimRows(member),
+      embeds: [buildShopSimChangeEmbed(member, r.lastRoll)],
+      components: buildShopSimChangeRows(member),
     });
     return true;
   }

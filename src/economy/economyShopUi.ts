@@ -272,6 +272,7 @@ export function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
 
 export const ECON_SHOP_SIM = "econ:shop:sim";
 export const ECON_SHOP_SIM_REGISTER = "econ:shop:sim:reg";
+export const ECON_SHOP_SIM_CHANGE = "econ:shop:sim:change";
 export const ECON_SHOP_SIM_OPERATOR = "econ:shop:sim:op";
 export const ECON_SHOP_SIM_MID = "econ:shop:sim:mid";
 export const ECON_SHOP_SIM_LAST = "econ:shop:sim:last";
@@ -1425,19 +1426,13 @@ function inflatedSimShopPrice(guildId: string, baseRub: number): number {
   return scaledShopPrice(guildId, baseRub);
 }
 
-export function buildShopSimEmbed(member: GuildMember, lastRoll?: SimShopLastRoll): EmbedBuilder {
+function shopSimCommonEmbedLines(member: GuildMember): string[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const sim = formatSimNumberFromUser(u);
   const simParts = parseSimNumberParts(u);
   const simPrestige = simParts ? computeSimPrestige(simParts) : undefined;
-  const gid = member.guild.id;
-  const opCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_OPERATOR_BASE_RUB);
-  const midCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_MID_BASE_RUB);
-  const lastCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_LAST_BASE_RUB);
-  const regCost = SHOP_SIM_REGISTER_BASE_RUB;
-
   const lines = [
-    `Баланс: **${fmt(u.rubles)}** ₽`,
+    `Баланс счёта: **${fmt(u.rubles)}** ₽`,
     "",
     "Формат: **+7 9XX-XXX-XX-XX** — полный номер **уникален** на сервере.",
     "",
@@ -1451,77 +1446,115 @@ export function buildShopSimEmbed(member: GuildMember, lastRoll?: SimShopLastRol
   } else if (sim) {
     lines.push("Престиж с номера: **0**");
   }
-  if (!sim) {
-    lines.push("", `**Первая симка** — **${regCost} ₽**, случайный номер, на баланс сим **+${SHOP_SIM_START_BALANCE_RUB} ₽**.`);
-  } else {
-    lines.push(
-      "",
-      `Смена **оператора** — **${fmt(opCost)}** ₽ · **середины** — **${fmt(midCost)}** ₽ · **конца** — **${fmt(lastCost)}** ₽.`,
-      "При смене одного блока **два других** могут совпасть с чужим номером.",
-      `Баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**`,
-    );
+  if (sim) {
+    lines.push(`Баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**`);
   }
-  lines.push("", "**Пополнение**", "Сумма в ₽ списывается с основного счёта на баланс сим.");
   if (!u.hasPhone) {
     lines.push("", "Сначала купите **телефон** в магазине.");
+  }
+  return lines;
+}
+
+export function buildShopSimEmbed(member: GuildMember, lastRoll?: SimShopLastRoll): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const hasSim = userHasSimNumber(u);
+  const regCost = SHOP_SIM_REGISTER_BASE_RUB;
+  const lines = [...shopSimCommonEmbedLines(member)];
+  if (!hasSim) {
+    lines.push("", `**Первая симка** — **${regCost} ₽**, случайный свободный номер, на баланс сим **+${SHOP_SIM_START_BALANCE_RUB} ₽**.`);
+  } else {
+    lines.push("", "**Пополнение** — с основного счёта на баланс сим.", "**Изменить номер** — смена оператора, середины или конца.");
   }
   if (lastRoll) lines.push(...formatSimRollEmbedFooter(lastRoll));
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Симка").setDescription(lines.join("\n"));
 }
 
-export function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
-  const u = getEconomyUser(member.guild.id, member.id);
+export function buildShopSimChangeEmbed(member: GuildMember, lastRoll?: SimShopLastRoll): EmbedBuilder {
   const gid = member.guild.id;
-  const hasSim = userHasSimNumber(u);
-  const regCost = SHOP_SIM_REGISTER_BASE_RUB;
   const opCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_OPERATOR_BASE_RUB);
   const midCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_MID_BASE_RUB);
   const lastCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_LAST_BASE_RUB);
+  const lines = [
+    ...shopSimCommonEmbedLines(member),
+    "",
+    "**Смена номера**",
+    `**Оператор** (код **9XX**) — **${fmt(opCost)}** ₽`,
+    `**Середина** (**XXX**) — **${fmt(midCost)}** ₽`,
+    `**Конец** (**XX-XX**) — **${fmt(lastCost)}** ₽`,
+    "",
+    "При смене одного блока **два других** могут совпасть с чужим номером.",
+  ];
+  if (lastRoll) lines.push(...formatSimRollEmbedFooter(lastRoll));
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Магазин · Симка · изменить номер")
+    .setDescription(lines.join("\n"));
+}
 
-  const opBtn = new ButtonBuilder()
-    .setCustomId(ECON_SHOP_SIM_OPERATOR)
-    .setLabel(`Оператор · ${fmt(opCost)}₽`)
-    .setStyle(ButtonStyle.Secondary)
-    .setDisabled(!hasSim || !u.hasPhone || u.rubles < opCost);
-  const midBtn = new ButtonBuilder()
-    .setCustomId(ECON_SHOP_SIM_MID)
-    .setLabel(`Середина · ${fmt(midCost)}₽`)
-    .setStyle(ButtonStyle.Secondary)
-    .setDisabled(!hasSim || !u.hasPhone || u.rubles < midCost);
-  const lastBtn = new ButtonBuilder()
-    .setCustomId(ECON_SHOP_SIM_LAST)
-    .setLabel(`Конец · ${fmt(lastCost)}₽`)
-    .setStyle(ButtonStyle.Secondary)
-    .setDisabled(!hasSim || !u.hasPhone || u.rubles < lastCost);
-
+export function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const hasSim = userHasSimNumber(u);
+  const regCost = SHOP_SIM_REGISTER_BASE_RUB;
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+
   if (!hasSim) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_SIM_REGISTER)
-          .setLabel(`Купить симку (${regCost} ₽)`)
+          .setLabel(`Купить симку · ${regCost}₽`)
           .setStyle(ButtonStyle.Success)
           .setDisabled(!u.hasPhone || u.rubles < regCost),
-        opBtn.setDisabled(true),
-        midBtn.setDisabled(true),
-        lastBtn.setDisabled(true),
       ),
     );
   } else {
-    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(opBtn, midBtn, lastBtn));
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ECON_SHOP_SIM_TOPUP_OPEN)
+          .setLabel("Пополнить сим…")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(!u.hasPhone),
+        new ButtonBuilder()
+          .setCustomId(ECON_SHOP_SIM_CHANGE)
+          .setLabel("Изменить номер")
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!u.hasPhone),
+      ),
+    );
   }
-  rows.push(
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(ECON_SHOP_SIM_TOPUP_OPEN)
-        .setLabel("Пополнить сим…")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!u.hasPhone || !hasSim),
-    ),
-  );
   rows.push(shopNavBottomRow(ECON_SHOP_HUB));
   return rows;
+}
+
+export function buildShopSimChangeRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const hasSim = userHasSimNumber(u);
+  const opCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_OPERATOR_BASE_RUB);
+  const midCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_MID_BASE_RUB);
+  const lastCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_LAST_BASE_RUB);
+
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_SIM_OPERATOR)
+        .setLabel(`Оператор · ${fmt(opCost)}₽`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasSim || !u.hasPhone || u.rubles < opCost),
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_SIM_MID)
+        .setLabel(`Середина · ${fmt(midCost)}₽`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasSim || !u.hasPhone || u.rubles < midCost),
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_SIM_LAST)
+        .setLabel(`Конец · ${fmt(lastCost)}₽`)
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasSim || !u.hasPhone || u.rubles < lastCost),
+    ),
+    shopNavBottomRow(ECON_SHOP_SIM),
+  ];
 }
 
 function patchUserSimWithPrestige(
