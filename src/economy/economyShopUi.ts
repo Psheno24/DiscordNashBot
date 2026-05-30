@@ -65,7 +65,7 @@ import {
   PLATE_SHOP_PRESTIGE_HINT_LINES,
   type PlateShopLastRoll,
 } from "./economyPlatePrestige.js";
-import { cancelRentAndBikeOnAssetPurchase, clearSovietHousingRentPatch } from "./economyHousingUtil.js";
+import { cancelRentAndBikeOnAssetPurchase } from "./economyHousingUtil.js";
 import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub, userHasActiveHousing } from "./economyHousing.js";
 import {
   inflatedApartmentPurchaseCost,
@@ -1284,13 +1284,12 @@ export function purchaseApartment(member: GuildMember, aid: string): { ok: true;
     const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, statDeltasOnReplace(curA, defA));
     patchEconomyUser(member.guild.id, member.id, {
       rubles: u.rubles + rentRefund - cost,
-      housingKind: "owned",
       ownedApartmentId: defA.id,
       ownedApartmentPurchasedAtMs: now,
       housingUtilityNextDueMs: nextHousingUtilityDueMs(now),
-      ...clearSovietHousingRentPatch(),
+      ...cancelRentAndBikeOnAssetPurchase(u),
       ...stats,
-      courierBikeUntilMs: undefined,
+      housingKind: "owned",
     });
     remitShopPurchaseVatToTreasury(gid, cost);
     return { ok: true, refund: rentRefund };

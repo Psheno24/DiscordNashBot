@@ -528,6 +528,9 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     }
   }
 
+  if (ownedApartmentId && housingKind !== "owned") {
+    housingKind = "owned";
+  }
   if (housingKind === "owned" && !ownedApartmentId) {
     housingKind = "none";
   }
