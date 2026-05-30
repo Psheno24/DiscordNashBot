@@ -1,24 +1,5 @@
-/** Престиж 5-значного номера сим-карты (упрощённая версия госномера). */
-
-export const SIM_PRESTIGE_CAP = 2_500;
-
-const LUCKY_EDGE_DIGITS = "13779";
-
-const SPECIAL_SIM_NUMBERS: Readonly<Record<string, { score: number; label: string }>> = {
-  "00700": { score: 420, label: "007" },
-  "00707": { score: 400, label: "007" },
-  "12345": { score: 380, label: "последовательность 1→5" },
-  "54321": { score: 380, label: "последовательность 5→1" },
-  "69696": { score: 350, label: "69696" },
-  "42069": { score: 340, label: "42069" },
-  "80085": { score: 320, label: "80085" },
-  "77777": { score: 500, label: "семёрки" },
-  "88888": { score: 480, label: "восьмёрки" },
-  "99999": { score: 460, label: "девятки" },
-  "10000": { score: 280, label: "круглая 10k" },
-  "50000": { score: 300, label: "круглая 50k" },
-  "90000": { score: 290, label: "круглая 90k" },
-};
+import type { SimNumberParts } from "./economySimNumber.js";
+import { isValidSimNumberParts, simFullDigits } from "./economySimNumber.js";
 
 export interface SimPrestigeBreakdown {
   total: number;
@@ -27,34 +8,26 @@ export interface SimPrestigeBreakdown {
   multipliers: string[];
 }
 
-function isAllSameDigit(d: string): boolean {
-  return d[0] === d[1] && d[1] === d[2] && d[2] === d[3] && d[3] === d[4];
+function isTriple(d: string): boolean {
+  return d.length === 3 && d[0] === d[1] && d[1] === d[2];
 }
 
-function isPalindrome5(d: string): boolean {
-  return d[0] === d[4] && d[1] === d[3];
+function isPalindrome3(d: string): boolean {
+  return d.length === 3 && d[0] === d[2];
 }
 
-/** ABABA (72727, 80808) — полное зеркало по центру. */
-function isAbaba(d: string): boolean {
-  return d[0] === d[2] && d[2] === d[4] && d[1] === d[3] && d[0] !== d[1];
+function hasPair3(d: string): boolean {
+  return d[0] === d[1] || d[1] === d[2] || d[0] === d[2];
 }
 
-function isAscendingRun(d: string): boolean {
-  for (let i = 0; i < 4; i++) {
-    if (Number(d[i]) + 1 !== Number(d[i + 1])) return false;
-  }
-  return true;
+function isAllSame(d: string): boolean {
+  return d.length > 0 && [...d].every((ch) => ch === d[0]);
 }
 
-function isDescendingRun(d: string): boolean {
-  for (let i = 0; i < 4; i++) {
-    if (Number(d[i]) - 1 !== Number(d[i + 1])) return false;
-  }
-  return true;
+function isPalindrome(s: string): boolean {
+  return s === [...s].reverse().join("");
 }
 
-/** Самая длинная серия **одинаковых цифр подряд**. */
 function maxConsecutiveRun(d: string): { len: number; digit: string } {
   let bestLen = 1;
   let bestDigit = d[0] ?? "0";
@@ -73,106 +46,272 @@ function maxConsecutiveRun(d: string): { len: number; digit: string } {
 }
 
 function maxSameDigitCount(d: string): number {
-  let best = 1;
-  for (let i = 0; i < d.length; i++) {
-    let n = 1;
-    for (let j = i + 1; j < d.length && d[j] === d[i]; j++) n++;
-    best = Math.max(best, n);
+  const counts = new Map<string, number>();
+  for (const ch of d) counts.set(ch, (counts.get(ch) ?? 0) + 1);
+  return Math.max(0, ...counts.values());
+}
+
+function isAscendingRun(d: string): boolean {
+  for (let i = 0; i < d.length - 1; i++) {
+    if (Number(d[i]) + 1 !== Number(d[i + 1])) return false;
   }
-  return best;
+  return true;
 }
 
-function hasPairBlock(d: string): boolean {
-  return /(\d)\1(?!\1)(\d)\2/.test(d) || /(\d)\1\1(?!\1)/.test(d);
+function isDescendingRun(d: string): boolean {
+  for (let i = 0; i < d.length - 1; i++) {
+    if (Number(d[i]) - 1 !== Number(d[i + 1])) return false;
+  }
+  return true;
 }
 
-function digitPatternScore(d: string): { score: number; label?: string } {
-  const special = SPECIAL_SIM_NUMBERS[d];
-  if (special) return special;
+function isAbac4(d: string): boolean {
+  return d.length === 4 && d[0] === d[2] && d[1] === d[3] && d[0] !== d[1];
+}
 
-  if (isAllSameDigit(d)) {
-    const ch = d[0];
-    if (ch === "7") return { score: 500, label: `все ${ch}` };
-    if (ch === "8") return { score: 480, label: `все ${ch}` };
-    return { score: 400, label: `все ${ch}` };
+/** Повтор короткого фрагмента (напр. **29** в **9292929**). */
+function hasRepeatingChunk(s: string, chunkLen: number, minRepeats: number): boolean {
+  if (s.length < chunkLen * minRepeats) return false;
+  for (let start = 0; start <= s.length - chunkLen * minRepeats; start++) {
+    const chunk = s.slice(start, start + chunkLen);
+    let reps = 1;
+    let pos = start + chunkLen;
+    while (pos + chunkLen <= s.length && s.slice(pos, pos + chunkLen) === chunk) {
+      reps++;
+      pos += chunkLen;
+    }
+    if (reps >= minRepeats) return true;
+  }
+  return false;
+}
+
+/** Ритм **AB** по всему номеру (9292929292…). */
+function isAlternatingPairRhythm(s: string): boolean {
+  if (s.length < 6) return false;
+  const a = s[0]!;
+  const b = s[1]!;
+  if (a === b) return false;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== (i % 2 === 0 ? a : b)) return false;
+  }
+  return true;
+}
+
+function digitBlockScore(d: string, kind: "op" | "mid" | "last"): { score: number; label?: string; allNine?: boolean; triple?: boolean } {
+  if (d.length === 0) return { score: 0 };
+
+  if (isAllSame(d)) {
+    const ch = d[0]!;
+    if (ch === "9") {
+      const cap = kind === "last" ? 380 : kind === "mid" ? 320 : 300;
+      return { score: cap, label: kind === "op" ? "все девятки в коде" : `все ${ch} (${d})`, allNine: true, triple: d.length === 3 };
+    }
+    const cap = kind === "last" ? 260 : 220;
+    return { score: cap, label: `все ${ch}`, triple: d.length === 3 && isTriple(d) };
+  }
+
+  if (d.length === 3 && isTriple(d)) {
+    if (d[0] === "9") return { score: 280, label: `тройка ${d}`, triple: true, allNine: false };
+    return { score: 200, label: `тройка ${d}`, triple: true };
+  }
+
+  if (d.length === 4 && maxConsecutiveRun(d).len >= 4) {
+    const ch = maxConsecutiveRun(d).digit;
+    return { score: ch === "9" ? 300 : 220, label: `четверо «${ch}» подряд` };
+  }
+
+  if (d.length === 3 && isPalindrome3(d) && !isTriple(d)) {
+    return { score: 120, label: `зеркало ${d}` };
+  }
+  if (d.length === 4 && isPalindrome(d)) {
+    return { score: 140, label: `палиндром ${d}` };
+  }
+  if (d.length === 4 && isAbac4(d)) {
+    return { score: 150, label: `зеркало ${d}` };
   }
 
   const run = maxConsecutiveRun(d);
-  if (run.len >= 4) {
-    return { score: 310, label: `четыре «${run.digit}» подряд` };
+  if (run.len >= 3) {
+    return { score: run.digit === "9" ? 180 : 130, label: `три «${run.digit}» подряд` };
   }
 
-  if (isAbaba(d)) return { score: 350, label: `зеркало ${d}` };
-  if (isPalindrome5(d)) return { score: 300, label: `палиндром ${d}` };
+  if (d.length === 4 && (isAscendingRun(d) || isDescendingRun(d))) {
+    return { score: 150, label: isAscendingRun(d) ? "лестница вверх" : "лестница вниз" };
+  }
 
-  if (isAscendingRun(d)) return { score: 380, label: "1→5 подряд" };
-  if (isDescendingRun(d)) return { score: 380, label: "5→1 подряд" };
+  if (hasPair3(d) || /(\d)\1/.test(d)) {
+    return { score: 55, label: "повтор цифр" };
+  }
 
-  if (run.len >= 3) return { score: 220, label: `три «${run.digit}» подряд` };
-
-  if (hasPairBlock(d)) return { score: 150, label: "пары цифр" };
-
-  const scattered = maxSameDigitCount(d);
-  if (scattered >= 4) return { score: 240, label: "четыре одинаковых (не подряд)" };
-  if (scattered >= 3) return { score: 120, label: "три одинаковых (не подряд)" };
-  if (scattered >= 2) return { score: 45, label: "две одинаковых" };
-
-  if (d.endsWith("00") || d.startsWith("00")) return { score: 60, label: "двойной ноль" };
+  if (d.endsWith("00") || d.startsWith("00")) {
+    return { score: 40, label: "двойной ноль" };
+  }
 
   return { score: 0 };
 }
 
-function comboMultipliers(d: string, pattern: { score: number; label?: string }): { mult: number; labels: string[] } {
+function fullNumberScore(full: string): { score: number; label?: string; allNine?: boolean; rhythm?: boolean } {
+  if (full.length !== 10) return { score: 0 };
+
+  if (isAllSame(full) && full[0] === "9") {
+    return { score: 900, label: "все 10 цифр — девятки", allNine: true };
+  }
+
+  if (isAllSame(full)) {
+    return { score: 520, label: `все цифры «${full[0]}»` };
+  }
+
+  const nineCount = [...full].filter((ch) => ch === "9").length;
+  if (nineCount >= 8) {
+    return { score: 620, label: `${nineCount}/10 девяток`, allNine: true };
+  }
+  if (nineCount >= 6) {
+    return { score: 380, label: `${nineCount}/10 девяток` };
+  }
+
+  if (isPalindrome(full)) {
+    return { score: 320, label: `палиндром ${full}` };
+  }
+
+  if (isAlternatingPairRhythm(full)) {
+    return { score: 340, label: `ритм ${full.slice(0, 2)} по всему номеру`, rhythm: true };
+  }
+
+  if (hasRepeatingChunk(full, 2, 4) || hasRepeatingChunk(full, 3, 3)) {
+    return { score: 300, label: "повторяющийся фрагмент", rhythm: true };
+  }
+
+  const run = maxConsecutiveRun(full);
+  if (run.len >= 6) {
+    return { score: run.digit === "9" ? 400 : 280, label: `${run.len} «${run.digit}» подряд` };
+  }
+  if (run.len >= 5) {
+    return { score: run.digit === "9" ? 320 : 220, label: `${run.len} «${run.digit}» подряд` };
+  }
+
+  if (maxSameDigitCount(full) >= 7) {
+    const dominant = [...full].sort((a, b) => [...full].filter((x) => x === b).length - [...full].filter((x) => x === a).length)[0];
+    return { score: dominant === "9" ? 280 : 180, label: `доминирует «${dominant}»` };
+  }
+
+  if (isAscendingRun(full) || isDescendingRun(full)) {
+    return { score: 260, label: "лестница на весь номер" };
+  }
+
+  if (hasRepeatingChunk(full, 2, 3)) {
+    return { score: 200, label: "пары по всему номеру" };
+  }
+
+  const blocksMatch = full.slice(0, 3) === full.slice(3, 6) || full.slice(3, 6) === full.slice(6, 10);
+  if (blocksMatch) {
+    return { score: 160, label: "эхо блоков" };
+  }
+
+  return { score: 0 };
+}
+
+function comboMultipliers(
+  p: SimNumberParts,
+  full: string,
+  op: ReturnType<typeof digitBlockScore>,
+  mid: ReturnType<typeof digitBlockScore>,
+  last: ReturnType<typeof digitBlockScore>,
+  whole: ReturnType<typeof fullNumberScore>,
+): { mult: number; labels: string[] } {
   const labels: string[] = [];
   let mult = 1;
 
-  if (isAllSameDigit(d)) {
+  const allNineBlocks = (op.allNine ? 1 : 0) + (mid.allNine ? 1 : 0) + (last.allNine ? 1 : 0);
+  if (allNineBlocks >= 2) {
+    mult *= 1.35;
+    labels.push("×1,35 девятки в нескольких блоках");
+  }
+  if (allNineBlocks === 3 || whole.allNine) {
+    mult *= 1.45;
+    labels.push("×1,45 почти все девятки");
+  }
+
+  if (op.triple && isTriple(p.mid)) {
+    mult *= 1.25;
+    labels.push("×1,25 тройки в коде и середине");
+  }
+  if (isPalindrome3(p.mid) && isPalindrome(p.last)) {
     mult *= 1.2;
-    labels.push("×1,2 все цифры");
+    labels.push("×1,2 зеркала середины и конца");
   }
-  const luckyStart = LUCKY_EDGE_DIGITS.includes(d[0] ?? "");
-  const luckyEnd = LUCKY_EDGE_DIGITS.includes(d[4] ?? "");
-  if (luckyStart && luckyEnd && pattern.score >= 150) {
-    mult *= 1.08;
-    labels.push("×1,08 «счастливые» края");
+  if (whole.rhythm && (mid.score > 0 || last.score > 0)) {
+    mult *= 1.22;
+    labels.push("×1,22 ритм на весь номер");
+  }
+  if (maxConsecutiveRun(full).len >= 5 && last.score >= 130) {
+    mult *= 1.18;
+    labels.push("×1,18 длинная серия + красивый конец");
   }
 
-  return { mult, labels };
+  return { mult, labels: [...new Set(labels)] };
 }
 
-export function isValidSimNumber(digits: string | undefined): boolean {
-  return typeof digits === "string" && /^\d{5}$/.test(digits) && digits !== "00000";
-}
-
-export function computeSimPrestige(digits: string): SimPrestigeBreakdown {
-  const d = digits.trim();
-  if (!isValidSimNumber(d)) {
+export function computeSimPrestige(parts: SimNumberParts): SimPrestigeBreakdown {
+  if (!isValidSimNumberParts(parts)) {
     return { total: 0, base: 0, lines: [], multipliers: [] };
   }
 
-  const pattern = digitPatternScore(d);
+  const full = simFullDigits(parts);
+  const op = digitBlockScore(parts.operator, "op");
+  const mid = digitBlockScore(parts.mid, "mid");
+  const last = digitBlockScore(parts.last, "last");
+  const whole = fullNumberScore(full);
+
   const lines: string[] = [];
   let base = 0;
-  if (pattern.score > 0) {
-    base = pattern.score;
-    lines.push(`Паттерн: **+${pattern.score}** (${pattern.label})`);
+
+  if (op.score > 0) {
+    base += op.score;
+    lines.push(`оператор **+${op.score}** (${op.label})`);
+  }
+  if (mid.score > 0) {
+    base += mid.score;
+    lines.push(`середина **+${mid.score}** (${mid.label})`);
+  }
+  if (last.score > 0) {
+    base += last.score;
+    lines.push(`конец **+${last.score}** (${last.label})`);
+  }
+  if (whole.score > 0) {
+    base += whole.score;
+    lines.push(`весь номер **+${whole.score}** (${whole.label})`);
   }
 
-  const { mult, labels } = comboMultipliers(d, pattern);
-  let total = Math.floor(base * mult);
-  total = Math.min(SIM_PRESTIGE_CAP, total);
+  const { mult, labels } = comboMultipliers(parts, full, op, mid, last, whole);
+  const total = Math.floor(base * mult);
 
   return { total, base, lines, multipliers: labels };
 }
 
 export function formatSimPrestigeBreakdownShort(b: SimPrestigeBreakdown): string {
   const parts: string[] = [];
-  if (b.lines.length) parts.push(b.lines.map((l) => l.replace(/\*\*/g, "")).join("; "));
+  if (b.lines.length) parts.push(b.lines.join("; "));
   if (b.multipliers.length) parts.push(b.multipliers.join("; "));
   return parts.join(" · ") || "без бонусов";
 }
 
-/** Строки для embed магазина (по одной на строку). */
+export type SimShopLastRoll = {
+  action: string;
+  number: string;
+  breakdown: SimPrestigeBreakdown;
+  prestigeDelta: number;
+};
+
+export function formatSimRollEmbedFooter(roll: SimShopLastRoll): string[] {
+  const lines = ["", "---", `**${roll.action}:** ${roll.number}`];
+  const d = roll.prestigeDelta;
+  if (d > 0) lines.push(`**+${d.toLocaleString("ru-RU")}** к престижу профиля`);
+  else if (d < 0) lines.push(`**${d.toLocaleString("ru-RU")}** к престижу профиля`);
+  else lines.push("Престиж профиля без изменений");
+  lines.push(`(${formatSimPrestigeBreakdownShort(roll.breakdown)})`);
+  return lines;
+}
+
 export function formatSimPrestigeBreakdownEmbedLines(b: SimPrestigeBreakdown): string[] {
   if (b.total <= 0) return [];
   const out: string[] = [...b.lines];
@@ -181,7 +320,6 @@ export function formatSimPrestigeBreakdownEmbedLines(b: SimPrestigeBreakdown): s
 }
 
 export const SIM_SHOP_PRESTIGE_HINT_LINES = [
-  "Чем «красивее» паттерн цифр, тем выше **престиж** (учитывается в общем престиже профиля).",
-  "Сильнее всего: **5/4/3 цифры подряд**, **зеркало** (72727), **палиндром**, **12345**/**54321**, пары и **особые** номера.",
-  "Края **1·3·7·9** с обеих сторон дают **×1,08** к уже найденному паттерну.",
+  "Престиж за **красоту цифр**: повторы, зеркала, серии, ритмы — по **блокам** и за **весь номер** (ниже, чем у госномера).",
+  "Максимум — **все девятки**; сильны номера вроде **9292929292** (ритм и повторы). Полный номер **уникален** на сервере.",
 ];

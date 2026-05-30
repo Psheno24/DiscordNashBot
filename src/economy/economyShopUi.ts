@@ -65,6 +65,31 @@ import {
   PLATE_SHOP_PRESTIGE_HINT_LINES,
   type PlateShopLastRoll,
 } from "./economyPlatePrestige.js";
+import {
+  SHOP_SIM_CHANGE_LAST_BASE_RUB,
+  SHOP_SIM_CHANGE_MID_BASE_RUB,
+  SHOP_SIM_CHANGE_OPERATOR_BASE_RUB,
+  SHOP_SIM_REGISTER_BASE_RUB,
+  SHOP_SIM_START_BALANCE_RUB,
+  formatSimNumber,
+  formatSimNumberFromUser,
+  parseSimNumberParts,
+  rollUniqueSimLast,
+  rollUniqueSimMid,
+  rollUniqueSimNumberParts,
+  rollUniqueSimOperator,
+  simNumberKey,
+  simNumberPartsToPatch,
+  userHasSimNumber,
+  type SimNumberParts,
+} from "./economySimNumber.js";
+import {
+  computeSimPrestige,
+  formatSimPrestigeBreakdownShort,
+  formatSimRollEmbedFooter,
+  SIM_SHOP_PRESTIGE_HINT_LINES,
+  type SimShopLastRoll,
+} from "./economySimPrestige.js";
 import { cancelRentAndBikeOnAssetPurchase } from "./economyHousingUtil.js";
 import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub, userHasActiveHousing } from "./economyHousing.js";
 import {
@@ -246,6 +271,11 @@ export function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
 }
 
 export const ECON_SHOP_SIM = "econ:shop:sim";
+export const ECON_SHOP_SIM_REGISTER = "econ:shop:sim:reg";
+export const ECON_SHOP_SIM_OPERATOR = "econ:shop:sim:op";
+export const ECON_SHOP_SIM_MID = "econ:shop:sim:mid";
+export const ECON_SHOP_SIM_LAST = "econ:shop:sim:last";
+export const ECON_SHOP_SIM_TOPUP_OPEN = "econ:shop:sim:topupOpen";
 export const ECON_SHOP_LOTTERY = "econ:shop:lottery";
 export const ECON_SHOP_APPEARANCE = "econ:shop:appearance";
 
@@ -1389,4 +1419,245 @@ export function sellForeignApartment(member: GuildMember): { ok: true; refund: n
     ...quitJob,
   });
   return { ok: true, refund };
+}
+
+function inflatedSimShopPrice(guildId: string, baseRub: number): number {
+  return scaledShopPrice(guildId, baseRub);
+}
+
+export function buildShopSimEmbed(member: GuildMember, lastRoll?: SimShopLastRoll): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const sim = formatSimNumberFromUser(u);
+  const simParts = parseSimNumberParts(u);
+  const simPrestige = simParts ? computeSimPrestige(simParts) : undefined;
+  const gid = member.guild.id;
+  const opCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_OPERATOR_BASE_RUB);
+  const midCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_MID_BASE_RUB);
+  const lastCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_LAST_BASE_RUB);
+  const regCost = SHOP_SIM_REGISTER_BASE_RUB;
+
+  const lines = [
+    `Баланс: **${fmt(u.rubles)}** ₽`,
+    "",
+    "Формат: **+7 9XX-XXX-XX-XX** — полный номер **уникален** на сервере.",
+    "",
+    ...SIM_SHOP_PRESTIGE_HINT_LINES,
+    "",
+    sim ? `Текущий номер: **${sim}**` : "Симка: **не оформлена**",
+  ];
+  if (simPrestige && simPrestige.total > 0) {
+    lines.push(`Престиж с номера: **${fmt(simPrestige.total)}**`);
+    lines.push(`(${formatSimPrestigeBreakdownShort(simPrestige)})`);
+  } else if (sim) {
+    lines.push("Престиж с номера: **0**");
+  }
+  if (!sim) {
+    lines.push("", `**Первая симка** — **${regCost} ₽**, случайный номер, на баланс сим **+${SHOP_SIM_START_BALANCE_RUB} ₽**.`);
+  } else {
+    lines.push(
+      "",
+      `Смена **оператора** — **${fmt(opCost)}** ₽ · **середины** — **${fmt(midCost)}** ₽ · **конца** — **${fmt(lastCost)}** ₽.`,
+      "При смене одного блока **два других** могут совпасть с чужим номером.",
+      `Баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**`,
+    );
+  }
+  lines.push("", "**Пополнение**", "Сумма в ₽ списывается с основного счёта на баланс сим.");
+  if (!u.hasPhone) {
+    lines.push("", "Сначала купите **телефон** в магазине.");
+  }
+  if (lastRoll) lines.push(...formatSimRollEmbedFooter(lastRoll));
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Симка").setDescription(lines.join("\n"));
+}
+
+export function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const hasSim = userHasSimNumber(u);
+  const regCost = SHOP_SIM_REGISTER_BASE_RUB;
+  const opCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_OPERATOR_BASE_RUB);
+  const midCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_MID_BASE_RUB);
+  const lastCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_LAST_BASE_RUB);
+
+  const opBtn = new ButtonBuilder()
+    .setCustomId(ECON_SHOP_SIM_OPERATOR)
+    .setLabel(`Оператор · ${fmt(opCost)}₽`)
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(!hasSim || !u.hasPhone || u.rubles < opCost);
+  const midBtn = new ButtonBuilder()
+    .setCustomId(ECON_SHOP_SIM_MID)
+    .setLabel(`Середина · ${fmt(midCost)}₽`)
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(!hasSim || !u.hasPhone || u.rubles < midCost);
+  const lastBtn = new ButtonBuilder()
+    .setCustomId(ECON_SHOP_SIM_LAST)
+    .setLabel(`Конец · ${fmt(lastCost)}₽`)
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(!hasSim || !u.hasPhone || u.rubles < lastCost);
+
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (!hasSim) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ECON_SHOP_SIM_REGISTER)
+          .setLabel(`Купить симку (${regCost} ₽)`)
+          .setStyle(ButtonStyle.Success)
+          .setDisabled(!u.hasPhone || u.rubles < regCost),
+        opBtn.setDisabled(true),
+        midBtn.setDisabled(true),
+        lastBtn.setDisabled(true),
+      ),
+    );
+  } else {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(opBtn, midBtn, lastBtn));
+  }
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_SIM_TOPUP_OPEN)
+        .setLabel("Пополнить сим…")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!u.hasPhone || !hasSim),
+    ),
+  );
+  rows.push(shopNavBottomRow(ECON_SHOP_HUB));
+  return rows;
+}
+
+function patchUserSimWithPrestige(
+  guildId: string,
+  userId: string,
+  u: EconomyUser,
+  parts: SimNumberParts,
+  rublesAfter: number,
+  extra?: Partial<EconomyUser>,
+): { breakdown: ReturnType<typeof computeSimPrestige>; prestigeDelta: number } {
+  const breakdown = computeSimPrestige(parts);
+  const oldAccrued = u.courierSimPrestige ?? 0;
+  const prestigeDelta = breakdown.total - oldAccrued;
+  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
+    prestigeDelta,
+    domesticDelta: 0,
+  });
+  patchEconomyUser(guildId, userId, {
+    rubles: rublesAfter,
+    courierSimNumber: undefined,
+    ...simNumberPartsToPatch(parts),
+    courierSimPrestige: breakdown.total,
+    ...stats,
+    ...extra,
+  });
+  return { breakdown, prestigeDelta };
+}
+
+export function syncSimPrestige(member: GuildMember): void {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const parts = parseSimNumberParts(u);
+  if (!parts) return;
+  const total = computeSimPrestige(parts).total;
+  const accrued = u.courierSimPrestige ?? 0;
+  if (total === accrued) return;
+  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
+    prestigeDelta: total - accrued,
+    domesticDelta: 0,
+  });
+  patchEconomyUser(member.guild.id, member.id, { courierSimPrestige: total, ...stats });
+}
+
+function simLastRoll(
+  action: string,
+  number: string,
+  breakdown: ReturnType<typeof computeSimPrestige>,
+  prestigeDelta: number,
+): SimShopLastRoll {
+  return { action, number, breakdown, prestigeDelta };
+}
+
+function guildTakenSimNumberKeys(guildId: string, excludeUserId: string): Set<string> {
+  const taken = new Set<string>();
+  for (const { userId, user } of listEconomyUsers(guildId)) {
+    if (userId === excludeUserId) continue;
+    const parts = parseSimNumberParts(user);
+    if (parts) taken.add(simNumberKey(parts));
+  }
+  return taken;
+}
+
+export function registerSimNumber(
+  member: GuildMember,
+): { ok: true; number: string; lastRoll: SimShopLastRoll } | { ok: false; reply: string } {
+  const u = getEconomyUser(member.guild.id, member.id);
+  if (!u.hasPhone) return { ok: false, reply: "Сначала купите **телефон**." };
+  if (userHasSimNumber(u)) return { ok: false, reply: "Симка **уже оформлена**." };
+  const cost = SHOP_SIM_REGISTER_BASE_RUB;
+  if (u.rubles < cost) return { ok: false, reply: `Нужно **${cost} ₽**.` };
+  const taken = guildTakenSimNumberKeys(member.guild.id, member.id);
+  const parts = rollUniqueSimNumberParts(taken);
+  const { breakdown, prestigeDelta } = patchUserSimWithPrestige(member.guild.id, member.id, u, parts, u.rubles - cost, {
+    simBalanceRub: SHOP_SIM_START_BALANCE_RUB,
+  });
+  remitShopPurchaseVatToTreasury(member.guild.id, cost);
+  const number = formatSimNumber(parts);
+  return {
+    ok: true,
+    number,
+    lastRoll: simLastRoll("Оформлена симка", number, breakdown, prestigeDelta),
+  };
+}
+
+export function changeSimOperator(
+  member: GuildMember,
+): { ok: true; number: string; lastRoll: SimShopLastRoll } | { ok: false; reply: string } {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = parseSimNumberParts(u);
+  if (!cur) return { ok: false, reply: "Сначала **оформите** симку." };
+  const cost = inflatedSimShopPrice(member.guild.id, SHOP_SIM_CHANGE_OPERATOR_BASE_RUB);
+  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  const taken = guildTakenSimNumberKeys(member.guild.id, member.id);
+  const next = {
+    ...cur,
+    operator: rollUniqueSimOperator(taken, { mid: cur.mid, last: cur.last }),
+  };
+  const { breakdown, prestigeDelta } = patchUserSimWithPrestige(member.guild.id, member.id, u, next, u.rubles - cost);
+  remitShopPurchaseVatToTreasury(member.guild.id, cost);
+  const number = formatSimNumber(next);
+  return { ok: true, number, lastRoll: simLastRoll("Новый оператор", number, breakdown, prestigeDelta) };
+}
+
+export function changeSimMid(
+  member: GuildMember,
+): { ok: true; number: string; lastRoll: SimShopLastRoll } | { ok: false; reply: string } {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = parseSimNumberParts(u);
+  if (!cur) return { ok: false, reply: "Сначала **оформите** симку." };
+  const cost = inflatedSimShopPrice(member.guild.id, SHOP_SIM_CHANGE_MID_BASE_RUB);
+  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  const taken = guildTakenSimNumberKeys(member.guild.id, member.id);
+  const next = {
+    ...cur,
+    mid: rollUniqueSimMid(taken, { operator: cur.operator, last: cur.last }),
+  };
+  const { breakdown, prestigeDelta } = patchUserSimWithPrestige(member.guild.id, member.id, u, next, u.rubles - cost);
+  remitShopPurchaseVatToTreasury(member.guild.id, cost);
+  const number = formatSimNumber(next);
+  return { ok: true, number, lastRoll: simLastRoll("Новая середина", number, breakdown, prestigeDelta) };
+}
+
+export function changeSimLast(
+  member: GuildMember,
+): { ok: true; number: string; lastRoll: SimShopLastRoll } | { ok: false; reply: string } {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const cur = parseSimNumberParts(u);
+  if (!cur) return { ok: false, reply: "Сначала **оформите** симку." };
+  const cost = inflatedSimShopPrice(member.guild.id, SHOP_SIM_CHANGE_LAST_BASE_RUB);
+  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  const taken = guildTakenSimNumberKeys(member.guild.id, member.id);
+  const next = {
+    ...cur,
+    last: rollUniqueSimLast(taken, { operator: cur.operator, mid: cur.mid }),
+  };
+  const { breakdown, prestigeDelta } = patchUserSimWithPrestige(member.guild.id, member.id, u, next, u.rubles - cost);
+  remitShopPurchaseVatToTreasury(member.guild.id, cost);
+  const number = formatSimNumber(next);
+  return { ok: true, number, lastRoll: simLastRoll("Новый конец", number, breakdown, prestigeDelta) };
 }

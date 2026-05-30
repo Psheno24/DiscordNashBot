@@ -178,6 +178,19 @@ import {
   ECON_SHOP_CAR_SELL_CANCEL,
   ECON_SHOP_APPEARANCE,
   shopNavBottomRow,
+  buildShopSimEmbed,
+  buildShopSimRows,
+  changeSimLast,
+  changeSimMid,
+  changeSimOperator,
+  registerSimNumber,
+  syncSimPrestige,
+  ECON_SHOP_SIM,
+  ECON_SHOP_SIM_REGISTER,
+  ECON_SHOP_SIM_OPERATOR,
+  ECON_SHOP_SIM_MID,
+  ECON_SHOP_SIM_LAST,
+  ECON_SHOP_SIM_TOPUP_OPEN,
 } from "./economyShopUi.js";
 import {
   applyUnregisteredVehiclePenalty,
@@ -225,11 +238,7 @@ import {
   scaleSignedIncome,
   scaledShopPrice,
 } from "./economyMacro.js";
-import {
-  computeSimPrestige,
-  formatSimPrestigeBreakdownEmbedLines,
-  SIM_SHOP_PRESTIGE_HINT_LINES,
-} from "./economySimPrestige.js";
+import { formatSimNumberFromUser, userHasSimNumber } from "./economySimNumber.js";
 import { lotteryPeriodMskYmd, msUntilNextLotteryDrawMsk } from "./lotteryDraw.js";
 import {
   addLotteryTickets,
@@ -268,9 +277,6 @@ const ECON_HOUSING_EXT_PREFIX = "econ:housing:ext:";
 const ECON_SHOP_HOUSE_RENEW_AFTER_REQ_PREFIX = "econ:shop:house:renewReq:";
 const ECON_SHOP_HOUSE_RENEW_AFTER_CNF_PREFIX = "econ:shop:house:renewCnf:";
 const ECON_SHOP_HOUSE_RENEW_AFTER_CAN = "econ:shop:house:renewCan";
-const ECON_SHOP_SIM = "econ:shop:sim";
-const ECON_SHOP_SIM_NEW = "econ:shop:sim:new";
-const ECON_SHOP_SIM_TOPUP_OPEN = "econ:shop:sim:topupOpen";
 const ECON_SHOP_LOTTERY_BUY_OPEN = "econ:shop:lottery:buyOpen";
 const ECON_LOTTERY_CONFIRM_PREFIX = "econ:lottery:confirm:";
 const ECON_LOTTERY_CANCEL = "econ:lottery:cancel";
@@ -334,8 +340,6 @@ const PANEL_COLOR = 0x263238;
 const PROFILE_COLOR = 0x1b5e20;
 const FEED_COLOR = 0x0d47a1;
 
-const SHOP_SIM_NEW_PRICE_RUB = 100;
-const SHOP_SIM_START_BALANCE_RUB = 50;
 const BIKE_1D_MS = 1 * 86400000;
 const BIKE_3D_MS = 3 * 86400000;
 const BIKE_7D_MS = 7 * 86400000;
@@ -496,10 +500,11 @@ function buildProfilePurchasesBlock(guildId: string, u: ReturnType<typeof getEco
     lines.push("Телефон: **нет**");
   } else {
     const pl = getPhoneDef(u.phoneModelId)?.label ?? "есть";
-    if (!u.courierSimNumber) {
+    if (!userHasSimNumber(u)) {
       lines.push(`Телефон: **${pl}** (сим **нет**)`);
     } else {
-      lines.push(`Телефон: **${pl}** (сим **${u.courierSimNumber}**, баланс **${fmt(u.simBalanceRub ?? 0)}** ₽)`);
+      const simFmt = formatSimNumberFromUser(u) ?? "—";
+      lines.push(`Телефон: **${pl}** (сим **${simFmt}**, баланс **${fmt(u.simBalanceRub ?? 0)}** ₽)`);
     }
   }
   lines.push(economyCarDisplayLine(u));
@@ -1214,25 +1219,6 @@ function rollSolePropStaffOutcome(u: EconomyUser, now: number): { patch: Partial
   return { patch, detail: "Персонал без заметных изменений." };
 }
 
-/** Равномерно среди **10 000…99 999**, исключая номера, уже выданные кому-либо на сервере. */
-function rollNewSimDigits(guildId: string): string {
-  const taken = new Set<string>();
-  for (const { user } of listEconomyUsers(guildId)) {
-    const n = user.courierSimNumber;
-    if (n && /^\d{5}$/.test(n)) taken.add(n);
-  }
-  const freeCount = 90_000 - taken.size;
-  if (freeCount <= 0) return String(randInt(10_000, 99_999));
-  let k = Math.floor(Math.random() * freeCount);
-  for (let v = 10_000; v <= 99_999; v++) {
-    const s = String(v);
-    if (taken.has(s)) continue;
-    if (k === 0) return s;
-    k--;
-  }
-  return String(randInt(10_000, 99_999));
-}
-
 function hasActiveBikeRental(u: ReturnType<typeof getEconomyUser>, now: number): boolean {
   return Number.isFinite(u.courierBikeUntilMs) && (u.courierBikeUntilMs ?? 0) > now;
 }
@@ -1434,62 +1420,6 @@ function buildMyRentEditRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   }
   rows.push(shopNavBottomRow(ECON_HOUSING_BACK));
   return rows;
-}
-
-function buildShopSimEmbed(member: GuildMember): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const hasSim = Boolean(u.courierSimNumber);
-  const simBreakdown = hasSim && u.courierSimNumber ? computeSimPrestige(u.courierSimNumber) : null;
-  const lines: string[] = [
-    hasSim
-      ? "**Замена номера** — новый случайный 5-значный номер (**" +
-        SHOP_SIM_NEW_PRICE_RUB +
-        " ₽**), **равновероятно** среди свободных на сервере."
-      : "**Первая симка** — номер **10 000…99 999**, **равновероятно** среди свободных на сервере (**" +
-        SHOP_SIM_NEW_PRICE_RUB +
-        " ₽**).",
-    hasSim ? "Баланс симки при замене **не меняется**." : `На баланс симки **+${SHOP_SIM_START_BALANCE_RUB} ₽**.`,
-    "",
-    "**Престиж номера**",
-    ...SIM_SHOP_PRESTIGE_HINT_LINES,
-    "",
-    "**Пополнение**",
-    "Введите сумму в ₽ — **столько же** зачислится на баланс симки (списание с основного счёта).",
-  ];
-  if (!u.hasPhone) {
-    lines.push("", "**Телефон**", "Сначала купите **телефон** в магазине — без него симку оформить нельзя.");
-  }
-  lines.push("", "**Ваш номер**");
-  if (hasSim) {
-    lines.push(`Номер: **${u.courierSimNumber}**`, `Баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**`);
-    if (simBreakdown && simBreakdown.total > 0) {
-      lines.push(`Престиж: **${simBreakdown.total.toLocaleString("ru-RU")}**`, ...formatSimPrestigeBreakdownEmbedLines(simBreakdown));
-    }
-  } else {
-    lines.push("Симки пока **нет**.");
-  }
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Симка").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
-}
-
-function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const canNew = u.hasPhone && u.rubles >= SHOP_SIM_NEW_PRICE_RUB;
-  const canTop = u.hasPhone && Boolean(u.courierSimNumber);
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(ECON_SHOP_SIM_NEW)
-        .setLabel(u.courierSimNumber ? "Заменить сим" : "Купить симку")
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(!canNew),
-      new ButtonBuilder()
-        .setCustomId(ECON_SHOP_SIM_TOPUP_OPEN)
-        .setLabel("Пополнить сим…")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!canTop),
-    ),
-    shopNavBottomRow(ECON_SHOP_HUB),
-  ];
 }
 
 function lotteryDrawUnixTs(nowMs: number = Date.now()): number {
@@ -2558,7 +2488,10 @@ function isEconomyButton(id: string): boolean {
       ECON_SHOP_HOUSE,
       ECON_SHOP_ANIMALS,
       ECON_SHOP_SIM,
-      ECON_SHOP_SIM_NEW,
+      ECON_SHOP_SIM_REGISTER,
+      ECON_SHOP_SIM_OPERATOR,
+      ECON_SHOP_SIM_MID,
+      ECON_SHOP_SIM_LAST,
       ECON_SHOP_SIM_TOPUP_OPEN,
       ECON_SHOP_LOTTERY,
       ECON_SHOP_LOTTERY_BUY_OPEN,
@@ -2649,7 +2582,7 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
 
   if (jobId === "courier") {
     if (!u.hasPhone) return { ok: false, kind: "ephemeral", message: "Купите **телефон** в магазине терминала." };
-    if (!u.courierSimNumber) return { ok: false, kind: "ephemeral", message: "Оформите **симку** в магазине." };
+    if (!userHasSimNumber(u)) return { ok: false, kind: "ephemeral", message: "Оформите **симку** в магазине." };
     const onlineDue = !u.courierPhonePaidUntilMs || now >= u.courierPhonePaidUntilMs;
     if (onlineDue && (u.simBalanceRub ?? 0) < COURIER_SIM_MONTHLY_FEE_RUB) {
       return {
@@ -3934,6 +3867,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_SHOP_SIM) {
+    syncSimPrestige(member);
     const su = getEconomyUser(member.guild.id, member.id);
     if (!su.hasPhone) {
       await interaction.reply({ content: "Без **телефона** симку оформить нельзя — сначала купите телефон в магазине.", flags: MessageFlags.Ephemeral });
@@ -3943,26 +3877,55 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
-  if (id === ECON_SHOP_SIM_NEW) {
-    const u = getEconomyUser(member.guild.id, member.id);
-    if (!u.hasPhone) {
-      await interaction.reply({ content: "Без **телефона** симку купить нельзя.", flags: MessageFlags.Ephemeral });
+  if (id === ECON_SHOP_SIM_REGISTER) {
+    const r = registerSimNumber(member);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (u.rubles < SHOP_SIM_NEW_PRICE_RUB) {
-      await interaction.reply({ content: `Нужно **${SHOP_SIM_NEW_PRICE_RUB} ₽**.`, flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    const old = u.courierSimNumber;
-    const next = rollNewSimDigits(member.guild.id);
-    const replacing = Boolean(old);
-    patchEconomyUser(member.guild.id, member.id, {
-      rubles: u.rubles - SHOP_SIM_NEW_PRICE_RUB,
-      courierSimNumber: next,
-      simBalanceRub: replacing ? (u.simBalanceRub ?? 0) : SHOP_SIM_START_BALANCE_RUB,
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopSimEmbed(member, r.lastRoll)],
+      components: buildShopSimRows(member),
     });
-    remitShopPurchaseVatToTreasury(member.guild.id, SHOP_SIM_NEW_PRICE_RUB);
-    await replyOrUpdate(interaction, { embeds: [buildShopSimEmbed(member)], components: buildShopSimRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_SIM_OPERATOR) {
+    const r = changeSimOperator(member);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopSimEmbed(member, r.lastRoll)],
+      components: buildShopSimRows(member),
+    });
+    return true;
+  }
+
+  if (id === ECON_SHOP_SIM_MID) {
+    const r = changeSimMid(member);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopSimEmbed(member, r.lastRoll)],
+      components: buildShopSimRows(member),
+    });
+    return true;
+  }
+
+  if (id === ECON_SHOP_SIM_LAST) {
+    const r = changeSimLast(member);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopSimEmbed(member, r.lastRoll)],
+      components: buildShopSimRows(member),
+    });
     return true;
   }
 
@@ -3972,7 +3935,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await interaction.reply({ content: "Нужен **телефон**.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (!u.courierSimNumber) {
+    if (!userHasSimNumber(u)) {
       await interaction.reply({ content: "Сначала купите симку.", flags: MessageFlags.Ephemeral });
       return true;
     }
@@ -4586,7 +4549,7 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
       return true;
     }
     const u = getEconomyUser(mem.guild.id, mem.id);
-    if (!u.hasPhone || !u.courierSimNumber) {
+    if (!u.hasPhone || !userHasSimNumber(u)) {
       await interaction.reply({ content: "Нужны телефон и активная симка.", flags: MessageFlags.Ephemeral });
       return true;
     }
