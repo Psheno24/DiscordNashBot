@@ -66,6 +66,11 @@ export function formatSimNumber(parts: SimNumberParts): string {
   return `+7 ${parts.operator}-${parts.mid}-${a}-${b}`;
 }
 
+/** Все 10 цифр после **+7** (код + абонентская часть). */
+export function simFullDigits(parts: SimNumberParts): string {
+  return `${parts.operator}${parts.mid}${parts.last}`;
+}
+
 export function simNumberPartsToPatch(
   parts: SimNumberParts,
 ): Pick<EconomyUser, "courierSimOperator" | "courierSimMid" | "courierSimLast"> {
@@ -76,19 +81,21 @@ export function simNumberPartsToPatch(
   };
 }
 
-/** Старый 5-значный номер → новый формат: код **9XX** и префикс из `stableSeed`, сохранены **5** цифр абонента. */
+/**
+ * Старый 5-значный номер → **+7 9XX-XXd-DD-DD** (напр. **12345** → **+7 947-671-23-45**):
+ * случайный код **9XX**, середина **??** + первая цифра старого номера, конец — оставшиеся **4** цифры.
+ */
 export function migrateLegacySim5ToParts(legacy5: string, stableSeed?: string): SimNumberParts {
   let h = 0;
   const seed = stableSeed ?? legacy5;
   for (let i = 0; i < seed.length; i++) h = (h << 5) - h + seed.charCodeAt(i);
   const abs = Math.abs(h | 0);
-  const prefix2 = String(abs % 100).padStart(2, "0");
-  const sub7 = prefix2 + legacy5;
   const operator = String(SIM_OPERATOR_MIN + ((abs >>> 8) % (SIM_OPERATOR_MAX - SIM_OPERATOR_MIN + 1)));
+  const rand2 = String(abs % 100).padStart(2, "0");
   return {
     operator,
-    mid: sub7.slice(0, 3),
-    last: sub7.slice(3, 7),
+    mid: rand2 + legacy5[0],
+    last: legacy5.slice(1, 5),
   };
 }
 

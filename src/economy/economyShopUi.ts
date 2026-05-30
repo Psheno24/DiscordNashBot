@@ -1448,7 +1448,6 @@ export function buildShopSimEmbed(member: GuildMember, lastRoll?: SimShopLastRol
   if (simPrestige && simPrestige.total > 0) {
     lines.push(`Престиж с номера: **${fmt(simPrestige.total)}**`);
     lines.push(`(${formatSimPrestigeBreakdownShort(simPrestige)})`);
-    if (simPrestige.comboHint) lines.push(simPrestige.comboHint);
   } else if (sim) {
     lines.push("Престиж с номера: **0**");
   }
@@ -1457,7 +1456,7 @@ export function buildShopSimEmbed(member: GuildMember, lastRoll?: SimShopLastRol
   } else {
     lines.push(
       "",
-      `Смена **кода** — **${fmt(opCost)}** ₽ · блок **XXX** — **${fmt(midCost)}** ₽ · хвост **XX-XX** — **${fmt(lastCost)}** ₽.`,
+      `Смена **оператора** — **${fmt(opCost)}** ₽ · **середины** — **${fmt(midCost)}** ₽ · **конца** — **${fmt(lastCost)}** ₽.`,
       "При смене одного блока **два других** могут совпасть с чужим номером.",
       `Баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**`,
     );
@@ -1481,17 +1480,17 @@ export function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBu
 
   const opBtn = new ButtonBuilder()
     .setCustomId(ECON_SHOP_SIM_OPERATOR)
-    .setLabel(`Код (${fmt(opCost)} ₽)`)
+    .setLabel(`Оператор · ${fmt(opCost)}₽`)
     .setStyle(ButtonStyle.Secondary)
     .setDisabled(!hasSim || !u.hasPhone || u.rubles < opCost);
   const midBtn = new ButtonBuilder()
     .setCustomId(ECON_SHOP_SIM_MID)
-    .setLabel(`XXX (${fmt(midCost)} ₽)`)
+    .setLabel(`Середина · ${fmt(midCost)}₽`)
     .setStyle(ButtonStyle.Secondary)
     .setDisabled(!hasSim || !u.hasPhone || u.rubles < midCost);
   const lastBtn = new ButtonBuilder()
     .setCustomId(ECON_SHOP_SIM_LAST)
-    .setLabel(`Хвост (${fmt(lastCost)} ₽)`)
+    .setLabel(`Конец · ${fmt(lastCost)}₽`)
     .setStyle(ButtonStyle.Secondary)
     .setDisabled(!hasSim || !u.hasPhone || u.rubles < lastCost);
 
@@ -1622,7 +1621,7 @@ export function changeSimOperator(
   const { breakdown, prestigeDelta } = patchUserSimWithPrestige(member.guild.id, member.id, u, next, u.rubles - cost);
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const number = formatSimNumber(next);
-  return { ok: true, number, lastRoll: simLastRoll("Новый код оператора", number, breakdown, prestigeDelta) };
+  return { ok: true, number, lastRoll: simLastRoll("Новый оператор", number, breakdown, prestigeDelta) };
 }
 
 export function changeSimMid(
@@ -1641,7 +1640,7 @@ export function changeSimMid(
   const { breakdown, prestigeDelta } = patchUserSimWithPrestige(member.guild.id, member.id, u, next, u.rubles - cost);
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const number = formatSimNumber(next);
-  return { ok: true, number, lastRoll: simLastRoll("Новый блок XXX", number, breakdown, prestigeDelta) };
+  return { ok: true, number, lastRoll: simLastRoll("Новая середина", number, breakdown, prestigeDelta) };
 }
 
 export function changeSimLast(
@@ -1660,5 +1659,5 @@ export function changeSimLast(
   const { breakdown, prestigeDelta } = patchUserSimWithPrestige(member.guild.id, member.id, u, next, u.rubles - cost);
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const number = formatSimNumber(next);
-  return { ok: true, number, lastRoll: simLastRoll("Новый хвост XX-XX", number, breakdown, prestigeDelta) };
+  return { ok: true, number, lastRoll: simLastRoll("Новый конец", number, breakdown, prestigeDelta) };
 }
