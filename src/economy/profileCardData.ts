@@ -1,5 +1,4 @@
 import { getApartmentDef, getPetDef, getPhoneDef } from "./economyCatalog.js";
-import { inflatedApartmentUtilityRub } from "./economyMacro.js";
 import { economyCarDisplayLine } from "./economyLicensePlate.js";
 import { economyJobTitle } from "./jobTitles.js";
 import { computeGuildEconomyRanks, formatServerPlace, type GuildEconomyRanks } from "./profileCardRanks.js";
@@ -26,26 +25,17 @@ function truncateLine(s: string, max = 52): string {
   return `${s.slice(0, max - 1)}…`;
 }
 
-function ownedApartmentProfileText(guildId: string, aptId: string | undefined): string {
-  const apt = getApartmentDef(aptId);
-  if (!apt) return "—";
-  const util = inflatedApartmentUtilityRub(guildId, apt.id);
-  return `${apt.label} · ЖКХ ${fmt(util)} ₽/мес.`;
+function apartmentLabel(aptId: string | undefined): string {
+  return getApartmentDef(aptId)?.label ?? "—";
 }
 
-function housingLine(u: EconomyUser, guildId: string): string {
+function housingLine(u: EconomyUser): string {
   const hk = u.housingKind ?? "none";
-  const homeSov =
-    hk === "rent"
-      ? "аренда (советское жильё)"
-      : hk === "owned"
-        ? ownedApartmentProfileText(guildId, u.ownedApartmentId)
-        : "нет (сов.)";
-  const homeFor =
-    u.housingForeignKind === "owned"
-      ? ownedApartmentProfileText(guildId, u.ownedForeignApartmentId)
-      : "нет (зам.)";
-  return `Жильё: ${homeSov} · ${homeFor}`;
+  const parts: string[] = [];
+  if (hk === "rent") parts.push("Аренда");
+  else if (hk === "owned") parts.push(apartmentLabel(u.ownedApartmentId));
+  if (u.housingForeignKind === "owned") parts.push(apartmentLabel(u.ownedForeignApartmentId));
+  return `Жильё: ${parts.length > 0 ? parts.join(" · ") : "нет"}`;
 }
 
 function phoneLine(u: EconomyUser): string {
@@ -78,7 +68,7 @@ export function buildProfileCardContent(
     "",
     truncateLine(phoneLine(u)),
     truncateLine(economyCarDisplayLine(u, { markdown: false })),
-    truncateLine(housingLine(u, guildId)),
+    truncateLine(housingLine(u)),
     truncateLine(`Питомец: ${pet?.label ?? "нет"}`),
     "",
     truncateLine(`Работа: ${jobName}`),
