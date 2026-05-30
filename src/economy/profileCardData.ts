@@ -1,5 +1,6 @@
 import { getApartmentDef, getPetDef, getPhoneDef } from "./economyCatalog.js";
 import { economyCarDisplayLine } from "./economyLicensePlate.js";
+import { formatSimNumberFromUser } from "./economySimNumber.js";
 import { economyJobTitle } from "./jobTitles.js";
 import { computeGuildEconomyRanks, formatServerPlace, type GuildEconomyRanks } from "./profileCardRanks.js";
 import { resolveProfileCardStyle, type ProfileFrameColorId } from "./profileThemes.js";
@@ -41,8 +42,9 @@ function housingLine(u: EconomyUser): string {
 function phoneLine(u: EconomyUser): string {
   if (!u.hasPhone) return "Телефон: нет";
   const pl = getPhoneDef(u.phoneModelId)?.label ?? "есть";
-  if (!u.courierSimNumber) return `Телефон: ${pl} (сим нет)`;
-  return `Телефон: ${pl} · сим ${u.courierSimNumber}`;
+  const sim = formatSimNumberFromUser(u);
+  if (!sim) return `Телефон: ${pl} (сим нет)`;
+  return `Телефон: ${pl} · ${sim}`;
 }
 
 export function buildProfileCardContent(

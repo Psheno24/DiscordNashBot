@@ -14,7 +14,8 @@ import {
 } from "./economyCatalog.js";
 import { isValidVehiclePlateParts } from "./economyLicensePlate.js";
 import { computePlatePrestige } from "./economyPlatePrestige.js";
-import { computeSimPrestige, isValidSimNumber } from "./economySimPrestige.js";
+import { migrateLegacySim5ToParts, parseSimNumberParts } from "./economySimNumber.js";
+import { computeSimPrestige } from "./economySimPrestige.js";
 import { nextHousingUtilityDueMs } from "./economyMacro.js";
 import { SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS } from "./shiftPayCoeff.js";
 
@@ -138,8 +139,14 @@ export interface EconomyUser {
   /** Нет ₽ на содержание — бонус СР приостановлен. */
   petPausedNoFunds?: boolean;
 
-  /** 5-значный номер симки (уникален среди игроков на сервере). */
+  /** @deprecated Старый 5-значный номер; мигрируется в courierSimOperator/Mid/Last. */
   courierSimNumber?: string;
+  /** Код оператора сим (**900–999**). */
+  courierSimOperator?: string;
+  /** Первые 3 цифры абонентской части. */
+  courierSimMid?: string;
+  /** Последние 4 цифры абонентской части. */
+  courierSimLast?: string;
   /** Престиж, уже учтённый в prestigePoints от текущего номера симки. */
   courierSimPrestige?: number;
   /** Баланс симки (пополнение в магазине); тариф доставки списывается отсюда. */
@@ -452,10 +459,31 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
       ? (u as any).housingLastMskYmd
       : undefined;
 
+  let courierSimOperator =
+    typeof (u as any)?.courierSimOperator === "string" ? String((u as any).courierSimOperator) : undefined;
+  let courierSimMid = typeof (u as any)?.courierSimMid === "string" ? String((u as any).courierSimMid) : undefined;
+  let courierSimLast = typeof (u as any)?.courierSimLast === "string" ? String((u as any).courierSimLast) : undefined;
   let courierSimNumber =
-    typeof (u as any)?.courierSimNumber === "string" && isValidSimNumber((u as any).courierSimNumber)
-      ? (u as any).courierSimNumber
-      : undefined;
+    typeof (u as any)?.courierSimNumber === "string" ? String((u as any).courierSimNumber) : undefined;
+
+  const rawSimForParse = {
+    courierSimOperator,
+    courierSimMid,
+    courierSimLast,
+    courierSimNumber,
+  } as EconomyUser;
+  let simParts = parseSimNumberParts(rawSimForParse, { migrateSeed: userIdForMigration ?? "legacy" });
+  if (simParts) {
+    courierSimOperator = simParts.operator;
+    courierSimMid = simParts.mid;
+    courierSimLast = simParts.last;
+    courierSimNumber = undefined;
+  } else {
+    courierSimOperator = undefined;
+    courierSimMid = undefined;
+    courierSimLast = undefined;
+    courierSimNumber = undefined;
+  }
   let simBalanceRub = Number.isFinite((u as any)?.simBalanceRub) ? Math.max(0, Math.floor((u as any).simBalanceRub)) : undefined;
   let courierPhonePaidUntilMs = Number.isFinite((u as any)?.courierPhonePaidUntilMs)
     ? Math.max(0, Math.floor((u as any).courierPhonePaidUntilMs))
@@ -467,8 +495,15 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   // Одноразовая логика поверх старых полей «смен сим/вела» (без записи в JSON до следующего patch).
   if (!hasPhone && (legacySimShifts > 0 || legacyBikeShifts > 0)) hasPhone = true;
   if (!phoneModelId && hasPhone) phoneModelId = "phone_sov_elta";
-  if (!courierSimNumber && legacySimShifts > 0) {
-    courierSimNumber = stableLegacySimDigits(userIdForMigration ?? "legacy");
+  if (!simParts && legacySimShifts > 0) {
+    const legacy5 = stableLegacySimDigits(userIdForMigration ?? "legacy");
+    simParts = migrateLegacySim5ToParts(legacy5, userIdForMigration ?? "legacy");
+    if (simParts) {
+      courierSimOperator = simParts.operator;
+      courierSimMid = simParts.mid;
+      courierSimLast = simParts.last;
+      courierSimNumber = undefined;
+    }
   }
   if (simBalanceRub == null && legacySimShifts > 0) simBalanceRub = Math.min(120, legacySimShifts * 12);
   if (!courierPhonePaidUntilMs && legacySimShifts > 0) courierPhonePaidUntilMs = Date.now() + 24 * 60 * 60 * 1000;
@@ -528,6 +563,9 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     }
   }
 
+  if (ownedApartmentId && housingKind !== "owned") {
+    housingKind = "owned";
+  }
   if (housingKind === "owned" && !ownedApartmentId) {
     housingKind = "none";
   }
@@ -586,8 +624,8 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   }
 
   let courierSimPrestige: number | undefined;
-  if (courierSimNumber) {
-    courierSimPrestige = computeSimPrestige(courierSimNumber).total;
+  if (simParts) {
+    courierSimPrestige = computeSimPrestige(simParts).total;
     prestigePoints += courierSimPrestige;
   } else {
     courierSimPrestige = undefined;
@@ -647,6 +685,9 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     petLastMskYmd,
     petPausedNoFunds,
     courierSimNumber,
+    courierSimOperator,
+    courierSimMid,
+    courierSimLast,
     courierSimPrestige,
     simBalanceRub,
     courierPhonePaidUntilMs,
