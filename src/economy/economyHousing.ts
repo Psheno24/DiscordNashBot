@@ -1,7 +1,6 @@
 import { inflatedApartmentUtilityRub, inflatedHousingRentPrice, nextHousingUtilityDueMs } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
 import {
-  getApartmentDef,
   housingRentPlanPeriodMs,
   housingRentPlanPriceRub,
   type HousingRentPlan,
@@ -85,7 +84,6 @@ function processForeignUtility(
     u.housingForeignUtilityNextDueMs != null &&
     nowMs >= u.housingForeignUtilityNextDueMs
   ) {
-    const apt = getApartmentDef(u.ownedForeignApartmentId);
     const util = inflatedApartmentUtilityRub(guildId, u.ownedForeignApartmentId);
     if (util > 0 && u.rubles >= util) {
       patchEconomyUser(guildId, userId, {
@@ -94,22 +92,8 @@ function processForeignUtility(
         ...mark,
       });
       remitShopPurchaseVatToTreasury(guildId, util);
-      appendFeedEvent({
-        ts: nowMs,
-        guildId,
-        type: "job:passive",
-        actorUserId: userId,
-        text: `ЖКХ (**${apt?.label ?? "заморское жильё"}**): **−${util.toLocaleString("ru-RU")}** ₽.`,
-      });
     } else if (util > 0) {
       patchEconomyUser(guildId, userId, { ...mark });
-      appendFeedEvent({
-        ts: nowMs,
-        guildId,
-        type: "job:passive",
-        actorUserId: userId,
-        text: `**ЖКХ (зам.) не списано** — недостаточно ₽.`,
-      });
     } else {
       patchEconomyUser(guildId, userId, { ...mark });
     }
@@ -187,7 +171,6 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
     u.housingUtilityNextDueMs != null &&
     nowMs >= u.housingUtilityNextDueMs
   ) {
-    const apt = getApartmentDef(u.ownedApartmentId);
     const util = inflatedApartmentUtilityRub(guildId, u.ownedApartmentId);
     if (util > 0 && u.rubles >= util) {
       patchEconomyUser(guildId, userId, {
@@ -196,22 +179,8 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
         ...mark,
       });
       remitShopPurchaseVatToTreasury(guildId, util);
-      appendFeedEvent({
-        ts: nowMs,
-        guildId,
-        type: "job:passive",
-        actorUserId: userId,
-        text: `ЖКХ (**${apt?.label ?? "квартира"}**): **−${util.toLocaleString("ru-RU")}** ₽.`,
-      });
     } else if (util > 0) {
       patchEconomyUser(guildId, userId, { ...mark });
-      appendFeedEvent({
-        ts: nowMs,
-        guildId,
-        type: "job:passive",
-        actorUserId: userId,
-        text: `**ЖКХ не списано** — недостаточно ₽.`,
-      });
     } else {
       patchEconomyUser(guildId, userId, { ...mark });
     }
