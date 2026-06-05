@@ -256,6 +256,7 @@ export function computePlatePrestige(p: VehiclePlateParts): PlatePrestigeBreakdo
   const { thematicMult, vanityMult, labels } = comboMultipliers(p, series, digitPart, visualPart);
 
   let total: number;
+  const multiplierLines = [...labels];
   if (series.isStatus && thematicMult > 1) {
     total = Math.floor((coreSubtotal + digitPart) * thematicMult + visualPart);
   } else if (vanityMult > 1) {
@@ -264,13 +265,19 @@ export function computePlatePrestige(p: VehiclePlateParts): PlatePrestigeBreakdo
     total = base;
   }
 
-  return { total, base, lines, multipliers: labels };
+  const multBonus = total - base;
+  if (multBonus > 0 && labels.length > 0) {
+    multiplierLines[labels.length - 1] = `${labels[labels.length - 1]!} **+${multBonus.toLocaleString("ru-RU")}**`;
+  }
+
+  return { total, base, lines, multipliers: multiplierLines };
 }
 
 export function formatPlatePrestigeBreakdownShort(b: PlatePrestigeBreakdown): string {
   const parts: string[] = [];
   if (b.lines.length) parts.push(b.lines.join("; "));
   if (b.multipliers.length) parts.push(b.multipliers.join("; "));
+  if (b.total !== b.base) parts.push(`база **${b.base.toLocaleString("ru-RU")}** → **${b.total.toLocaleString("ru-RU")}**`);
   return parts.join(" · ") || "без бонусов";
 }
 
