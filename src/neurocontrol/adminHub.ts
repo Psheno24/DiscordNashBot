@@ -9,6 +9,7 @@ export const NEURO_ADMIN_BUTTON_TAKE_RUB = "neuroAdmin:takeRub";
 export const NEURO_MAIN_ADMIN = "neuro:main:admin";
 export const NEURO_MAIN_INFO = "neuro:main:info";
 export const NEURO_ADMIN_ECON = "neuroAdmin:econ";
+export const NEURO_ADMIN_LOTTERY = "neuroAdmin:lottery";
 
 /** Корень «Настройки» (каналы / налоги). */
 export const NEURO_BUTTON_ADMIN_SETTINGS_ROOT = "neuro:admin:settingsRoot";
@@ -55,6 +56,7 @@ export function buildAdminEconEmbed(): EmbedBuilder {
     .setDescription(
       [
         "Управление ставками для всех админов с правом **Manage Server**.",
+        "**Лотерея** — журнал розыгрышей и текущее состояние джекпота.",
         "**Выдать ₽** и **Забрать ₽** видны и доступны только **владельцу сервера**.",
         "**Назад** — в админ-хаб.",
       ].join("\n"),
@@ -65,6 +67,7 @@ export function buildAdminEconEmbed(): EmbedBuilder {
 export function buildAdminEconRows(isGuildOwner: boolean): ActionRowBuilder<ButtonBuilder>[] {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("neuroAdmin:bets").setLabel("Ставки").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(NEURO_ADMIN_LOTTERY).setLabel("Лотерея").setStyle(ButtonStyle.Secondary),
   );
   if (isGuildOwner) {
     row.addComponents(

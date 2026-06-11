@@ -30,8 +30,11 @@ import {
   NEURO_ADMIN_BUTTON_GRANT_RUB,
   NEURO_ADMIN_BUTTON_TAKE_RUB,
   NEURO_ADMIN_ECON,
+  NEURO_ADMIN_LOTTERY,
   NEURO_MAIN_ADMIN,
 } from "../neurocontrol/adminHub.js";
+import { buildLotteryAdminEmbed, buildLotteryAdminRows, NEURO_ADMIN_LOTTERY_PAGE_PREFIX } from "../economy/lotteryAdminUi.js";
+import { ensureDueLotteryDraws } from "../economy/lotteryDraw.js";
 import { giveMoneyCommandName, takeMoneyCommandName } from "../welcomePreview.js";
 import { getBetEvent, listBetEvents, upsertBetEvent, type BetEvent, type PlacedBet } from "./store.js";
 
@@ -238,12 +241,14 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
       NEURO_ADMIN_BUTTON_GRANT_RUB,
       NEURO_ADMIN_BUTTON_TAKE_RUB,
       NEURO_ADMIN_BUTTON_BETS,
+      NEURO_ADMIN_LOTTERY,
     ].includes(id) &&
     !id.startsWith(ADMIN_BET_MANAGE_PREFIX) &&
     !id.startsWith(ADMIN_BET_CHOOSE_PREFIX) &&
     !id.startsWith(ADMIN_BET_CONFIRM_PREFIX) &&
     !id.startsWith(ADMIN_BET_CANCEL_PREFIX) &&
-    !id.startsWith(ADMIN_BET_EDIT_PREFIX)
+    !id.startsWith(ADMIN_BET_EDIT_PREFIX) &&
+    !id.startsWith(NEURO_ADMIN_LOTTERY_PAGE_PREFIX)
   ) {
     return false;
   }
@@ -301,6 +306,23 @@ export async function handleNeuroAdminButton(interaction: ButtonInteraction): Pr
     );
 
     await replyOrUpdateEphemeral(interaction, { embeds: [embed], components: rows });
+    return true;
+  }
+
+  if (id === NEURO_ADMIN_LOTTERY || id.startsWith(NEURO_ADMIN_LOTTERY_PAGE_PREFIX)) {
+    const guild = interaction.guild;
+    if (!guild) {
+      await replyOrUpdateEphemeral(interaction, { content: "Лотерея доступна только на сервере." });
+      return true;
+    }
+    ensureDueLotteryDraws(guild, Date.now(), "catch-up");
+    const page = id.startsWith(NEURO_ADMIN_LOTTERY_PAGE_PREFIX)
+      ? Number.parseInt(id.slice(NEURO_ADMIN_LOTTERY_PAGE_PREFIX.length), 10) || 0
+      : 0;
+    await replyOrUpdateEphemeral(interaction, {
+      embeds: [buildLotteryAdminEmbed(guild.id, page)],
+      components: buildLotteryAdminRows(page, guild.id),
+    });
     return true;
   }
 

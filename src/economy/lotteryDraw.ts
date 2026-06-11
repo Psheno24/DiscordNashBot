@@ -1,12 +1,12 @@
 import type { Client, Guild } from "discord.js";
 import { appendFeedEvent } from "./feedStore.js";
+import { appendLotteryDrawLog, type LotteryDrawReason, type LotteryDrawWinnerLog } from "./lotteryLogStore.js";
 import {
   ensureJackpotFloor,
   getLotteryState,
-  LOTTERY_MIN_JACKPOT_RUB,
+  getStoredLotteryState,
   LOTTERY_TICKET_PRICE_RUB,
   saveLotteryState,
-  type GuildLotteryState,
   type LotteryTicketEntry,
 } from "./lotteryStore.js";
 import { applyUnregisteredVehiclePenalty } from "./economyLicensePlate.js";
@@ -35,10 +35,18 @@ export function lotteryPeriodMskYmd(nowMs: number = Date.now()): string {
   return new Date(noon + 86400000).toLocaleDateString("sv-SE", { timeZone: "Europe/Moscow" });
 }
 
+export function periodDrawAtMs(periodYmd: string): number {
+  return Date.parse(`${periodYmd}T21:00:00+03:00`);
+}
+
+export function isPeriodDrawOverdue(periodYmd: string, nowMs: number = Date.now()): boolean {
+  return nowMs >= periodDrawAtMs(periodYmd);
+}
+
 export function msUntilNextLotteryDrawMsk(nowMs: number = Date.now()): number {
   const period = lotteryPeriodMskYmd(nowMs);
-  const drawAt = Date.parse(`${period}T21:00:00+03:00`);
-  const target = drawAt > nowMs ? drawAt : Date.parse(`${mskTodayYmd(nowMs + 86400000)}T21:00:00+03:00`);
+  const drawAt = periodDrawAtMs(period);
+  const target = drawAt > nowMs ? drawAt : periodDrawAtMs(mskTodayYmd(nowMs + 86400000));
   return Math.max(5_000, target - nowMs);
 }
 
@@ -67,14 +75,48 @@ function rollPerTicketRefund(): number {
   return 0;
 }
 
-export function runLotteryDrawForGuild(guild: Guild, periodYmd: string, nowMs: number = Date.now()): string[] {
-  const st = getLotteryState(guild.id, periodYmd);
+function groupWinnersForLog(payouts: DrawOutcome[]): LotteryDrawWinnerLog[] {
+  const byUser = new Map<string, { rub: number; labels: string[] }>();
+  for (const p of payouts) {
+    const cur = byUser.get(p.userId) ?? { rub: 0, labels: [] };
+    cur.rub += p.rub;
+    cur.labels.push(p.label);
+    byUser.set(p.userId, cur);
+  }
+  return [...byUser.entries()]
+    .map(([userId, v]) => ({ userId, rub: v.rub, labels: v.labels }))
+    .sort((a, b) => b.rub - a.rub);
+}
+
+export function runLotteryDrawForGuild(
+  guild: Guild,
+  periodYmd: string,
+  nowMs: number = Date.now(),
+  reason: LotteryDrawReason = "scheduled",
+): string[] {
+  const st = getStoredLotteryState(guild.id);
+  if (!st || st.periodMskYmd !== periodYmd) return [];
+
+  const jackpotBefore = st.jackpotRub;
+
   if (!st.tickets.length) {
+    const nextPeriod = lotteryPeriodMskYmd(nowMs + 60_000);
+    const nextJackpot = ensureJackpotFloor(st.jackpotRub);
     saveLotteryState(guild.id, {
-      periodMskYmd: lotteryPeriodMskYmd(nowMs + 60_000),
-      jackpotRub: ensureJackpotFloor(st.jackpotRub),
+      periodMskYmd: nextPeriod,
+      jackpotRub: nextJackpot,
       tickets: [],
       ticketsSold: 0,
+    });
+    appendLotteryDrawLog({
+      ts: nowMs,
+      guildId: guild.id,
+      periodMskYmd: periodYmd,
+      reason,
+      ticketsSold: 0,
+      jackpotBefore,
+      jackpotAfter: nextJackpot,
+      winners: [],
     });
     return [];
   }
@@ -130,6 +172,17 @@ export function runLotteryDrawForGuild(guild: Guild, periodYmd: string, nowMs: n
     ticketsSold: 0,
   });
 
+  appendLotteryDrawLog({
+    ts: nowMs,
+    guildId: guild.id,
+    periodMskYmd: periodYmd,
+    reason,
+    ticketsSold: st.ticketsSold,
+    jackpotBefore,
+    jackpotAfter: nextJackpot,
+    winners: groupWinnersForLog(payouts),
+  });
+
   const jackpotLine = `**Джекпот** → **${nextJackpot.toLocaleString("ru-RU")}** ₽`;
   const header = `**Розыгрыш лотереи** (${periodYmd}, 21:00 МСК)`;
 
@@ -155,42 +208,38 @@ export function runLotteryDrawForGuild(guild: Guild, periodYmd: string, nowMs: n
   return feedWinners.map((w) => `<@${w.userId}>: лотерея **+${w.credit.toLocaleString("ru-RU")}** ₽`);
 }
 
-const drawnPeriods = new Set<string>();
+const MAX_CATCHUP_DRAWS = 12;
+
+export function ensureDueLotteryDraws(guild: Guild, nowMs: number = Date.now(), reason: LotteryDrawReason = "catch-up"): void {
+  for (let i = 0; i < MAX_CATCHUP_DRAWS; i++) {
+    const st = getStoredLotteryState(guild.id);
+    if (!st || !isPeriodDrawOverdue(st.periodMskYmd, nowMs)) return;
+    runLotteryDrawForGuild(guild, st.periodMskYmd, nowMs, reason);
+  }
+  console.warn(`lottery: catch-up limit reached for guild ${guild.id}`);
+}
+
+export function ensureDueLotteryDrawsAllGuilds(client: Client, nowMs: number = Date.now(), reason: LotteryDrawReason = "scheduled"): void {
+  for (const guild of client.guilds.cache.values()) {
+    try {
+      ensureDueLotteryDraws(guild, nowMs, reason);
+    } catch (e) {
+      console.error(`lottery draw guild ${guild.id}:`, e);
+    }
+  }
+}
+
 
 export function scheduleLotteryDrawTick(client: Client): void {
   const run = async () => {
     try {
-      const now = Date.now();
-      const parts = new Intl.DateTimeFormat("sv-SE", {
-        timeZone: "Europe/Moscow",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      })
-        .formatToParts(now)
-        .reduce<Record<string, string>>((acc, p) => {
-          if (p.type !== "literal") acc[p.type] = p.value;
-          return acc;
-        }, {});
-      const hour = Number.parseInt(parts.hour ?? "0", 10);
-      const minute = Number.parseInt(parts.minute ?? "0", 10);
-      if (hour === 21 && minute === 0) {
-        const period = lotteryPeriodMskYmd(now - 60_000);
-        for (const guild of client.guilds.cache.values()) {
-          const key = `${guild.id}:${period}`;
-          if (drawnPeriods.has(key)) continue;
-          drawnPeriods.add(key);
-          runLotteryDrawForGuild(guild, period, now);
-          if (drawnPeriods.size > 500) drawnPeriods.clear();
-        }
-      }
+      ensureDueLotteryDrawsAllGuilds(client, Date.now(), "scheduled");
     } catch (e) {
       console.error("lottery draw tick:", e);
     }
     scheduleLotteryDrawTick(client);
   };
   const delay = msUntilNextLotteryDrawMsk();
-  const msTo21 = delay;
-  const checkIn = Math.min(msTo21, 60_000);
+  const checkIn = Math.min(delay, 30_000);
   setTimeout(run, checkIn);
 }

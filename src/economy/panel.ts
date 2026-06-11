@@ -242,7 +242,7 @@ import {
   scaledShopPrice,
 } from "./economyMacro.js";
 import { formatSimNumberFromUser, userHasSimNumber } from "./economySimNumber.js";
-import { lotteryPeriodMskYmd, msUntilNextLotteryDrawMsk } from "./lotteryDraw.js";
+import { ensureDueLotteryDraws, lotteryPeriodMskYmd, msUntilNextLotteryDrawMsk } from "./lotteryDraw.js";
 import {
   addLotteryTickets,
   getLotteryState,
@@ -1431,6 +1431,7 @@ function lotteryDrawUnixTs(nowMs: number = Date.now()): number {
 }
 
 function buildShopLotteryEmbed(member: GuildMember): EmbedBuilder {
+  ensureDueLotteryDraws(member.guild);
   const gid = member.guild.id;
   const period = lotteryPeriodMskYmd();
   const st = getLotteryState(gid, period);
@@ -3851,6 +3852,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     patchEconomyUser(member.guild.id, member.id, { rubles: u.rubles - total });
     remitShopPurchaseVatToTreasury(member.guild.id, total);
+    ensureDueLotteryDraws(member.guild);
     const period = lotteryPeriodMskYmd();
     addLotteryTickets(member.guild.id, period, member.id, qty);
     appendFeedEvent({

@@ -51,11 +51,17 @@ function defaultState(periodMskYmd: string): GuildLotteryState {
   };
 }
 
-export function getLotteryState(guildId: string, periodMskYmd: string): GuildLotteryState {
+export function getStoredLotteryState(guildId: string): GuildLotteryState | null {
   const s = readStore();
   const cur = s.guilds[guildId];
-  if (!cur || cur.periodMskYmd !== periodMskYmd) return defaultState(periodMskYmd);
+  if (!cur) return null;
   return { ...cur, tickets: [...cur.tickets] };
+}
+
+export function getLotteryState(guildId: string, periodMskYmd: string): GuildLotteryState {
+  const cur = getStoredLotteryState(guildId);
+  if (!cur || cur.periodMskYmd !== periodMskYmd) return defaultState(periodMskYmd);
+  return cur;
 }
 
 export function saveLotteryState(guildId: string, state: GuildLotteryState): void {
