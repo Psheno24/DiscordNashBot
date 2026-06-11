@@ -39,7 +39,7 @@ export const JOBS_TIER3: Tier3JobDef[] = [
     description: [
       "**Легальный** тир-3: основной доход — **суточный оклад** (пассивно); смены — заметное дополнение. Стаж **30 дней** → ранг и **выше оклад**.",
       "**Смена:** **45–55k** ₽ плюс надбавки от ранга/стрика; **3%** шанс **служебного штрафа**. Лимит выплаты по накопленному **КД** за сутки — в **Подробнее**.",
-      "**Отчёт** и **совещание** (КД **24 ч** каждое) — бонус **10–30%** от ориентира **суточного оклада**.",
+      "**Совещание** (КД **24 ч**): случайно **+2…+7** / **без изменений** / **−2…−6** дн. к стрику (без выплат).",
     ].join("\n"),
     reqSkills: { communication: 30, logistics: 28, discipline: 35 },
     archetype: "legal",
@@ -100,6 +100,34 @@ export function randInt(min: number, max: number): number {
   const b = Math.floor(max);
   if (b <= a) return a;
   return Math.floor(a + Math.random() * (b - a + 1));
+}
+
+export type OfficeMeetingStreakResult = {
+  nextStreak: number;
+  detail: string;
+};
+
+/** Совещание офиса: только стрик, без выплат. */
+export function applyOfficeMeetingStreak(streakDays: number): OfficeMeetingStreakResult {
+  const streak = Math.max(0, streakDays);
+  const r = Math.random();
+  let delta: number;
+  if (r < 0.35) {
+    delta = randInt(2, 7);
+  } else if (r < 0.7) {
+    return { nextStreak: streak, detail: "Совещание прошло штатно — стрик **без изменений**." };
+  } else {
+    delta = -randInt(2, 6);
+  }
+  const nextStreak = Math.max(0, streak + delta);
+  const actual = nextStreak - streak;
+  if (actual > 0) {
+    return { nextStreak, detail: `Совещание удалось: **+${actual}** дн. к стрику.` };
+  }
+  if (actual < 0) {
+    return { nextStreak, detail: `Совещание подорвало доверие: **${actual}** дн. к стрику.` };
+  }
+  return { nextStreak: streak, detail: "Совещание прошло штатно — стрик **без изменений**." };
 }
 
 function passiveMultFromRank(rank: number): number {

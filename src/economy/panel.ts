@@ -48,6 +48,7 @@ import {
   SOLE_PROP_CAP_MAX,
   SOLE_PROP_CONTROL_CD_MS,
   SOLE_PROP_STAFF_CD_MS,
+  applyOfficeMeetingStreak,
   TIER3_BOSS_CD_MS,
   TIER3_MAX_PROMOTION_RANK,
   TIER3_SIDE_GIG_CD_MS,
@@ -1898,8 +1899,6 @@ function tier3StatusLines(guildId: string, u: ReturnType<typeof getEconomyUser>,
   lines.push(`**Должность:** **${rankTitle}** (ранг **${rank}**) · стрик: **${u.jobMskDayStreak ?? 0}** дн.`);
   if (def.archetype === "legal") {
     lines.push(`**Суточный оклад** (пассивно) — **основной** доход; смены — дополнение.`);
-    const ref = tier3ReferencePassiveRubFromStreak(guildId, u.jobMskDayStreak ?? 0);
-    lines.push(`Ориентир суточного оклада для бонусов: **~${fmt(ref)}** ₽.`);
   } else if (def.archetype === "illegal") {
     lines.push(`Суточного пассивного оклада **нет**; смены + мелкие действия **24 ч** КД каждое.`);
   } else {
@@ -1933,11 +1932,14 @@ function tier3StatusLines(guildId: string, u: ReturnType<typeof getEconomyUser>,
     lines.push(...solePropPassiveExampleLines(guildId, u));
     return lines;
   }
-  const sideLeft = (u.tier3SideGigReadyAt ?? 0) - now;
   const bossLeft = (u.tier3BossReadyAt ?? 0) - now;
-  lines.push(sideLeft > 0 ? `Связь: через **${formatCooldown(sideLeft)}**.` : `Связь: **доступна**.`);
-  const bossLabel = def.archetype === "illegal" ? "Куратор" : "Совещание";
-  lines.push(bossLeft > 0 ? `${bossLabel}: через **${formatCooldown(bossLeft)}**.` : `${bossLabel}: **доступно**.`);
+  if (def.archetype === "illegal") {
+    const sideLeft = (u.tier3SideGigReadyAt ?? 0) - now;
+    lines.push(sideLeft > 0 ? `Связь: через **${formatCooldown(sideLeft)}**.` : `Связь: **доступна**.`);
+    lines.push(bossLeft > 0 ? `Куратор: через **${formatCooldown(bossLeft)}**.` : `Куратор: **доступен**.`);
+  } else {
+    lines.push(bossLeft > 0 ? `Совещание: через **${formatCooldown(bossLeft)}**.` : `Совещание: **доступно**.`);
+  }
   return lines;
 }
 
@@ -1991,18 +1993,29 @@ function buildTier3ActionRows(member: GuildMember, jobId: JobId): ActionRowBuild
     ];
   }
 
-  const sideReady = !u.tier3SideGigReadyAt || now >= u.tier3SideGigReadyAt;
   const bossReady = !u.tier3BossReadyAt || now >= u.tier3BossReadyAt;
+  if (def.archetype === "legal") {
+    return [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder()
+          .setCustomId(ECON_TIER3_BOSS)
+          .setLabel("Совещание")
+          .setStyle(ButtonStyle.Primary)
+          .setDisabled(!bossReady),
+      ),
+    ];
+  }
+  const sideReady = !u.tier3SideGigReadyAt || now >= u.tier3SideGigReadyAt;
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder()
+      new ButtonBuilder()
         .setCustomId(ECON_TIER3_SIDE)
         .setLabel("Связь")
         .setStyle(ButtonStyle.Primary)
         .setDisabled(!sideReady),
       new ButtonBuilder()
         .setCustomId(ECON_TIER3_BOSS)
-        .setLabel(def.archetype === "illegal" ? "Куратор" : "Совещание")
+        .setLabel("Куратор")
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(!bossReady),
     ),
@@ -4148,6 +4161,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
 
     if (id === ECON_TIER3_SIDE) {
+      if (def3.archetype !== "illegal") {
+        await interaction.reply({ content: "На **офисе** нет «Связи» — только **Совещание**.", flags: MessageFlags.Ephemeral });
+        return true;
+      }
       if (u.tier3SideGigReadyAt && now < u.tier3SideGigReadyAt) {
         await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
         return true;
@@ -4155,23 +4172,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       const streak = u.jobMskDayStreak ?? 0;
       let bonus = rubFromTier3MetaPercent(member.guild.id, streak);
       bonus = applyUnregisteredVehiclePenalty(u, bonus);
-      const gid = member.guild.id;
-      let netRub = bonus;
-      let taxRub = 0;
-      if (def3.archetype === "legal") {
-        const w = withholdLegalIncomeTax(gid, bonus);
-        netRub = w.netRub;
-        taxRub = w.taxRub;
-      }
       patchEconomyUser(member.guild.id, member.id, {
-        rubles: u.rubles + netRub,
+        rubles: u.rubles + bonus,
         tier3SideGigReadyAt: now + TIER3_SIDE_GIG_CD_MS,
       });
-      const taxPart = taxRub > 0 ? ` Налог **${fmt(taxRub)}** ₽ → казна.` : "";
       await replyOrUpdate(interaction, {
         embeds: [
           buildCurrentJobEmbed(member, {
-            tier3ActionNotes: [`Связь: **${formatDelta(netRub)}** на счёт (10–30% ориентира суточного оклада).${taxPart}`],
+            tier3ActionNotes: [`Связь: **${formatDelta(bonus)}** на счёт (10–30% ориентира суточного оклада).`],
           }),
         ],
         components: buildCurrentJobRows(member),
@@ -4185,22 +4193,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         return true;
       }
       if (def3.archetype === "legal") {
-        const streak = u.jobMskDayStreak ?? 0;
-        let bonus = rubFromTier3MetaPercent(member.guild.id, streak);
-        bonus = applyUnregisteredVehiclePenalty(u, bonus);
-        const gid = member.guild.id;
-        const { netRub, taxRub } = withholdLegalIncomeTax(gid, bonus);
+        const meeting = applyOfficeMeetingStreak(u.jobMskDayStreak ?? 0);
         patchEconomyUser(member.guild.id, member.id, {
-          rubles: u.rubles + netRub,
+          jobMskDayStreak: meeting.nextStreak,
           tier3BossReadyAt: now + TIER3_BOSS_CD_MS,
         });
-        const taxPart = taxRub > 0 ? ` Налог **${fmt(taxRub)}** ₽ → казна.` : "";
         await replyOrUpdate(interaction, {
-          embeds: [
-            buildCurrentJobEmbed(member, {
-              tier3ActionNotes: [`Совещание: **${formatDelta(netRub)}** на счёт (10–30% ориентира суточного оклада).${taxPart}`],
-            }),
-          ],
+          embeds: [buildCurrentJobEmbed(member, { tier3ActionNotes: [meeting.detail] })],
           components: buildCurrentJobRows(member),
         });
         return true;
