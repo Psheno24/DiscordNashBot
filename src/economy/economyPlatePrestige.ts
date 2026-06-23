@@ -1,4 +1,4 @@
-import type { VehiclePlateParts } from "./economyLicensePlate.js";
+import { vehiclePlateKey, type VehiclePlateParts } from "./economyLicensePlate.js";
 
 /** Серия госномера: первая буква + две последние (напр. **С 222 КР** → **СКР**). */
 function plateSeries(p: VehiclePlateParts): string {
@@ -50,6 +50,15 @@ const STATUS_SERIES_SCORES: Readonly<Record<string, { score: number; label: stri
   ВОО: { score: 4500, label: "ВОО" },
   МОО: { score: 4500, label: "МОО" },
   СОО: { score: 4500, label: "СОО" },
+  РОО: { score: 4300, label: "РОО" },
+  УОО: { score: 4300, label: "УОО" },
+  ЕОО: { score: 4200, label: "ЕОО" },
+  ОМО: { score: 6000, label: "ОМО" },
+  ОСС: { score: 5200, label: "ОСС" },
+  САС: { score: 4600, label: "САС" },
+  КОО: { score: 5500, label: "КОО" },
+  ОСК: { score: 4200, label: "ОСК" },
+  ОКО: { score: 3500, label: "ОКО" },
   ОМР: { score: 4000, label: "ОМР" },
   УМР: { score: 4000, label: "УМР" },
   МУР: { score: 4000, label: "МУР" },
@@ -71,8 +80,12 @@ const REGION_SCORES: Readonly<Record<string, { score: number; label: string }>> 
   "99": { score: 9000, label: "Москва 99" },
   "50": { score: 7000, label: "МО 50" },
   "90": { score: 6500, label: "МО 90" },
+  "190": { score: 6200, label: "МО 190" },
+  "750": { score: 6000, label: "МО 750" },
+  "790": { score: 5800, label: "МО 790" },
   "78": { score: 6000, label: "СПб 78" },
   "98": { score: 5500, label: "СПб 98" },
+  "178": { score: 5000, label: "СПб 178" },
   "777": { score: 5000, label: "Москва 777" },
   "177": { score: 4500, label: "Москва 177" },
   "799": { score: 4300, label: "Москва 799" },
@@ -187,6 +200,17 @@ const THEMATIC_MULTIPLIERS: ReadonlyArray<{ series: string; region: string; mult
   { series: "СКР", region: "199", mult: 1.5, label: "×1,5 СКР + Москва 199" },
   { series: "РМР", region: "77", mult: 1.6, label: "×1,6 РМР + Москва 77" },
   { series: "АМО", region: "77", mult: 1.7, label: "×1,7 АМО + Москва 77" },
+  { series: "АМО", region: "97", mult: 1.5, label: "×1,5 АМО + Москва 97" },
+  { series: "АМО", region: "99", mult: 1.4, label: "×1,4 АМО + Москва 99" },
+  { series: "ЕОО", region: "97", mult: 1.45, label: "×1,45 ЕОО + Москва 97" },
+  { series: "ОМО", region: "97", mult: 1.45, label: "×1,45 ОМО + Москва 97" },
+  { series: "ККХ", region: "77", mult: 1.45, label: "×1,45 ККХ + Москва 77" },
+  { series: "ОСС", region: "99", mult: 1.4, label: "×1,4 ОСС + Москва 99" },
+  { series: "ОСС", region: "199", mult: 1.35, label: "×1,35 ОСС + Москва 199" },
+  { series: "САС", region: "77", mult: 1.35, label: "×1,35 САС + Москва 77" },
+  { series: "КОО", region: "77", mult: 1.4, label: "×1,4 КОО + Москва 77" },
+  { series: "ОСК", region: "78", mult: 1.35, label: "×1,35 ОСК + СПб 78" },
+  { series: "ОСК", region: "98", mult: 1.35, label: "×1,35 ОСК + СПб 98" },
   { series: "КРА", region: "95", mult: 1.6, label: "×1,6 КРА + Чечня 95" },
 ];
 
@@ -222,6 +246,7 @@ export interface PlatePrestigeBreakdown {
   lines: string[];
   multipliers: string[];
   regionHint?: string;
+  upgradeTips?: string[];
 }
 
 export function computePlatePrestige(p: VehiclePlateParts): PlatePrestigeBreakdown {
@@ -281,6 +306,85 @@ export function formatPlatePrestigeBreakdownShort(b: PlatePrestigeBreakdown): st
   return parts.join(" · ") || "без бонусов";
 }
 
+const SUGGESTION_DIGITS = ["777", "999", "111", "888", "001", "007", "222", "333", "555", "666"] as const;
+
+type UpgradeSuggestion = {
+  score: number;
+  text: string;
+};
+
+function bestRegionSuggestion(parts: VehiclePlateParts, takenKeys: ReadonlySet<string>): UpgradeSuggestion | undefined {
+  const series = plateSeries(parts);
+  const options = THEMATIC_MULTIPLIERS.filter((t) => t.series === series && t.region !== parts.region);
+  let best: UpgradeSuggestion | undefined;
+  for (const opt of options) {
+    const candidate = { ...parts, region: opt.region };
+    if (takenKeys.has(vehiclePlateKey(candidate))) continue;
+    const next = computePlatePrestige(candidate).total;
+    const now = computePlatePrestige(parts).total;
+    if (next <= now) continue;
+    const delta = next - now;
+    const suggestion = {
+      score: delta,
+      text: `С этой серией выгоднее регион **${opt.region}** (${opt.label}), если не занят: **+${delta.toLocaleString("ru-RU")}** престижа.`,
+    };
+    if (!best || suggestion.score > best.score) best = suggestion;
+  }
+  return best;
+}
+
+function bestSeriesSuggestion(parts: VehiclePlateParts, takenKeys: ReadonlySet<string>): UpgradeSuggestion | undefined {
+  const region = parts.region;
+  const currentSeries = plateSeries(parts);
+  const options = THEMATIC_MULTIPLIERS.filter((t) => t.region === region && t.series !== currentSeries);
+  let best: UpgradeSuggestion | undefined;
+  for (const opt of options) {
+    const candidate = { ...parts, l1: opt.series[0]!, l2: `${opt.series[1]!}${opt.series[2]!}` };
+    if (takenKeys.has(vehiclePlateKey(candidate))) continue;
+    const next = computePlatePrestige(candidate).total;
+    const now = computePlatePrestige(parts).total;
+    if (next <= now) continue;
+    const delta = next - now;
+    const suggestion = {
+      score: delta,
+      text: `С этим регионом можно собрать серию **${opt.series}** (${opt.label}), если не занято: **+${delta.toLocaleString("ru-RU")}** престижа.`,
+    };
+    if (!best || suggestion.score > best.score) best = suggestion;
+  }
+  return best;
+}
+
+function bestDigitsSuggestion(parts: VehiclePlateParts, takenKeys: ReadonlySet<string>): UpgradeSuggestion | undefined {
+  let best: UpgradeSuggestion | undefined;
+  for (const digits of SUGGESTION_DIGITS) {
+    if (digits === parts.digits) continue;
+    const candidate = { ...parts, digits };
+    if (takenKeys.has(vehiclePlateKey(candidate))) continue;
+    const next = computePlatePrestige(candidate).total;
+    const now = computePlatePrestige(parts).total;
+    if (next <= now) continue;
+    const delta = next - now;
+    const suggestion = {
+      score: delta,
+      text: `По цифрам здесь часто лучше **${digits}** (если свободно): **+${delta.toLocaleString("ru-RU")}** престижа.`,
+    };
+    if (!best || suggestion.score > best.score) best = suggestion;
+  }
+  return best;
+}
+
+export function buildPlateUpgradeTips(
+  parts: VehiclePlateParts,
+  takenKeys: ReadonlySet<string>,
+  maxTips: number = 3,
+): string[] {
+  const suggestions = [bestRegionSuggestion(parts, takenKeys), bestSeriesSuggestion(parts, takenKeys), bestDigitsSuggestion(parts, takenKeys)]
+    .filter((v): v is UpgradeSuggestion => Boolean(v))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, Math.max(1, maxTips));
+  return suggestions.map((s) => s.text);
+}
+
 export type PlateShopLastRoll = {
   action: string;
   plate: string;
@@ -297,6 +401,10 @@ export function formatPlateRollEmbedFooter(roll: PlateShopLastRoll): string[] {
   else lines.push("Престиж профиля без изменений");
   lines.push(`(${formatPlatePrestigeBreakdownShort(roll.breakdown)})`);
   if (roll.breakdown.regionHint) lines.push(roll.breakdown.regionHint);
+  if (roll.breakdown.upgradeTips?.length) {
+    lines.push("", "**Подсказки для апгрейда:**");
+    for (const tip of roll.breakdown.upgradeTips) lines.push(`• ${tip}`);
+  }
   return lines;
 }
 

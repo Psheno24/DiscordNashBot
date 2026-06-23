@@ -18,7 +18,7 @@ import {
   onEconomyTerminalPanelDeleted,
 } from "./economy/panel.js";
 import { ensureDueLotteryDrawsAllGuilds, scheduleLotteryDrawTick } from "./economy/lotteryDraw.js";
-import { scheduleEconomyMskMidnightTick } from "./economy/tier3Daily.js";
+import { ensureEconomyMskMidnightCatchUp, scheduleEconomyMskMidnightTick } from "./economy/tier3Daily.js";
 import {
   ensureBetsHealth,
   handleBetButton,
@@ -65,11 +65,13 @@ client.once(Events.ClientReady, async (c) => {
   await ensureEconomyTerminalPanel(c);
   await ensureEconomyFeedPanel(c);
   await ensureBetsHealth(c);
-  scheduleEconomyMskMidnightTick(c, async () => {
+  const onEconomyMskMidnight = async () => {
     await processAllGuildsMacroMonth(c);
     await ensureEconomyTerminalPanel(c);
     await ensureEconomyFeedPanel(c);
-  });
+  };
+  await ensureEconomyMskMidnightCatchUp(c, onEconomyMskMidnight);
+  scheduleEconomyMskMidnightTick(c, onEconomyMskMidnight);
   scheduleLotteryDrawTick(c);
   ensureDueLotteryDrawsAllGuilds(c, Date.now(), "startup");
   setInterval(

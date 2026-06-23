@@ -59,6 +59,7 @@ import {
   vehiclePlatePartsToPatch,
 } from "./economyLicensePlate.js";
 import {
+  buildPlateUpgradeTips,
   computePlatePrestige,
   formatPlatePrestigeBreakdownShort,
   formatPlateRollEmbedFooter,
@@ -1124,7 +1125,9 @@ function plateLastRoll(
   plate: string,
   breakdown: ReturnType<typeof computePlatePrestige>,
   prestigeDelta: number,
+  upgradeTips?: string[],
 ): PlateShopLastRoll {
+  if (upgradeTips?.length) breakdown.upgradeTips = upgradeTips;
   return { action, plate, breakdown, prestigeDelta };
 }
 
@@ -1158,10 +1161,11 @@ export function registerVehiclePlate(
   );
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const plate = formatVehiclePlate(parts);
+  const tips = buildPlateUpgradeTips(parts, taken);
   return {
     ok: true,
     plate,
-    lastRoll: plateLastRoll("Оформлен госномер", plate, breakdown, prestigeDelta),
+    lastRoll: plateLastRoll("Оформлен госномер", plate, breakdown, prestigeDelta, tips),
   };
 }
 
@@ -1187,10 +1191,11 @@ export function changeVehiclePlateDigits(
   );
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const plate = formatVehiclePlate(next);
+  const tips = buildPlateUpgradeTips(next, taken);
   return {
     ok: true,
     plate,
-    lastRoll: plateLastRoll("Новые цифры", plate, breakdown, prestigeDelta),
+    lastRoll: plateLastRoll("Новые цифры", plate, breakdown, prestigeDelta, tips),
   };
 }
 
@@ -1216,10 +1221,11 @@ export function changeVehiclePlateLetters(
   );
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const plate = formatVehiclePlate(next);
+  const tips = buildPlateUpgradeTips(next, taken);
   return {
     ok: true,
     plate,
-    lastRoll: plateLastRoll("Новые буквы", plate, breakdown, prestigeDelta),
+    lastRoll: plateLastRoll("Новые буквы", plate, breakdown, prestigeDelta, tips),
   };
 }
 
@@ -1245,10 +1251,11 @@ export function changeVehiclePlateRegion(
   );
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const plate = formatVehiclePlate(next);
+  const tips = buildPlateUpgradeTips(next, taken);
   return {
     ok: true,
     plate,
-    lastRoll: plateLastRoll("Новый регион", plate, breakdown, prestigeDelta),
+    lastRoll: plateLastRoll("Новый регион", plate, breakdown, prestigeDelta, tips),
   };
 }
 

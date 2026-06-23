@@ -134,16 +134,37 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
   }
 }
 
+const MIDNIGHT_TICK_RETRY_MS = 60_000;
+const MIDNIGHT_TICK_MAX_RETRIES = 5;
+
+async function executeEconomyMskMidnightTick(client: Client, onTick?: () => Promise<void>): Promise<void> {
+  await processEconomyMskMidnightTick(client);
+  if (onTick) await onTick();
+}
+
+/** Догоняющий тик при старте бота, если полночь МСК уже прошла, а суточные начисления не отработали. */
+export async function ensureEconomyMskMidnightCatchUp(client: Client, onTick?: () => Promise<void>): Promise<void> {
+  try {
+    await executeEconomyMskMidnightTick(client, onTick);
+  } catch (e) {
+    console.error("economy daily catch-up:", e);
+  }
+}
+
 export function scheduleEconomyMskMidnightTick(client: Client, onTick?: () => Promise<void>): void {
-  const run = async () => {
+  const run = async (retry: number) => {
     try {
-      await processEconomyMskMidnightTick(client);
-      if (onTick) await onTick();
+      await executeEconomyMskMidnightTick(client, onTick);
+      scheduleEconomyMskMidnightTick(client, onTick);
     } catch (e) {
       console.error("economy daily tick:", e);
+      if (retry < MIDNIGHT_TICK_MAX_RETRIES) {
+        setTimeout(() => void run(retry + 1), MIDNIGHT_TICK_RETRY_MS);
+      } else {
+        scheduleEconomyMskMidnightTick(client, onTick);
+      }
     }
-    scheduleEconomyMskMidnightTick(client, onTick);
   };
   const delay = msUntilNextMskMidnight();
-  setTimeout(run, delay);
+  setTimeout(() => void run(0), delay);
 }
