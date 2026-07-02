@@ -262,11 +262,8 @@ export function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
         `Баланс: **${fmt(u.rubles)}** ₽`,
         `Престиж: **${fmt(u.prestigePoints ?? 0)}** · Быт: **${fmt(u.domesticPoints ?? 0)}**`,
         "",
-        "**Советское** — быт (СР за смены и голос). **Заморское** — престиж (доп. ₽ на работах).",
-        "Жильё: можно **советское** и **заморское** одновременно. Телефон и авто — **одно** из двух веток.",
-        "",
-        "Апгрейд на лучшее в той же ветке уменьшает цену за счёт текущего: телефон **50%**, авто **75%**, жильё **90–120%**, питомец **50%** (подробнее в разделе).",
-        `Продажа без замены: телефон **${tradeInPctLabel(PHONE_SELL_REFUND_RATE)}**, авто **${tradeInPctLabel(CAR_SELL_REFUND_RATE)}**, жильё **${tradeInPctLabel(APARTMENT_SELL_REFUND_RATE)}** каталожной цены.`,
+        "**Советское** = быт, **Заморское** = престиж.",
+        "Подробные условия зачёта и продажи — внутри каждого раздела.",
       ].join("\n"),
     );
 }
@@ -282,15 +279,9 @@ export const ECON_SHOP_LOTTERY = "econ:shop:lottery";
 export const ECON_SHOP_APPEARANCE = "econ:shop:appearance";
 
 export function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
-  const u = getEconomyUser(member.guild.id, member.id);
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_SHOP_PHONE).setLabel("Телефон").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder()
-        .setCustomId(ECON_SHOP_SIM)
-        .setLabel("Симка")
-        .setStyle(ButtonStyle.Secondary)
-        .setDisabled(!u.hasPhone),
       new ButtonBuilder().setCustomId(ECON_SHOP_CAR).setLabel("Авто").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE).setLabel("Жильё").setStyle(ButtonStyle.Secondary),
     ),
@@ -330,6 +321,13 @@ export function buildShopOriginPickRows(kind: "phone" | "car", backId: string): 
       new ButtonBuilder().setCustomId(`${prefix}foreign`).setLabel("Заморское").setStyle(ButtonStyle.Secondary),
     ),
   ];
+  if (kind === "phone") {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_SHOP_SIM).setLabel("Симка").setStyle(ButtonStyle.Secondary),
+      ),
+    );
+  }
   if (kind === "car") {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1530,7 +1528,7 @@ export function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBu
       ),
     );
   }
-  rows.push(shopNavBottomRow(ECON_SHOP_HUB));
+  rows.push(shopNavBottomRow(ECON_SHOP_PHONE, "К телефону"));
   return rows;
 }
 

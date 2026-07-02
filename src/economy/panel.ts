@@ -1573,12 +1573,11 @@ function assemblerWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: num
 }
 
 const WORK_SECTION_INTRO = [
-  "Выберите профессию и после перерыва (**КД**) нажимайте **«Смена»** — рубли идут на **основной счёт** (или сумма **случайная**, если так устроена роль).",
-  "Навыки открывают **т2** и **т3**. Для них нужно **жильё**: аренда с запасом срока или своя квартира в магазине терминала.",
+  "Выберите профессию и жмите **«Смена»**, когда КД закончится.",
+  "Для **т2/т3** нужно жильё: аренда с запасом срока или своя квартира.",
+  "Лимит за сутки (КД < 6 ч): после **12 ч** суммарного КД выплата снижается.",
   "",
-  "**Лимит по КД за сутки** (роли с КД смены **ниже 6 ч**): сумма **КД** завершённых смен за календарные сутки — после **12 ч** накопленного КД выплата снижается (**×0,65**, затем **×0,35**). Учитывается **фактический** КД каждой смены.",
-  "",
-  "**Нужно:**",
+  "**Уровни:**",
   "• **Начальные (т1)** — без порога навыков.",
   "• **С навыком (т2)** — навыки по вакансии + жильё.",
   "• **Продвинутые (т3)** — высокий уровень **всех трёх** навыков + жильё.",
@@ -1590,7 +1589,7 @@ function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
     return new EmbedBuilder()
       .setColor(PANEL_COLOR)
       .setTitle("Работа")
-      .setDescription([WORK_SECTION_INTRO, "", "Текущая работа: **не выбрана**.", "", "Выберите уровень ниже."].join("\n"))
+      .setDescription([WORK_SECTION_INTRO, "", "Текущая работа: **не выбрана**."].join("\n"))
       .setFooter({ text: `Запросил: ${member.user.tag}` });
   }
   const def = getAnyJobDef(u.jobId);
@@ -1611,7 +1610,7 @@ function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Работа")
-    .setDescription([WORK_SECTION_INTRO, "", ...lines, "", "Ниже — **Моя работа**, смена и каталог по уровням."].join("\n"))
+    .setDescription([WORK_SECTION_INTRO, "", ...lines].join("\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
