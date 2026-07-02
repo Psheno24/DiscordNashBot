@@ -394,21 +394,13 @@ export type PlateShopLastRoll = {
 
 /** Строки в конец embed госномера после оформления/смены. */
 export function formatPlateRollEmbedFooter(roll: PlateShopLastRoll): string[] {
-  const lines = ["", "---", `**${roll.action}:** ${roll.plate}`];
+  const lines = ["", `**${roll.action}:** ${roll.plate}`];
   const d = roll.prestigeDelta;
-  if (d > 0) lines.push(`**+${d.toLocaleString("ru-RU")}** к престижу профиля`);
-  else if (d < 0) lines.push(`**${d.toLocaleString("ru-RU")}** к престижу профиля`);
-  else lines.push("Престиж профиля без изменений");
-  lines.push(`(${formatPlatePrestigeBreakdownShort(roll.breakdown)})`);
-  if (roll.breakdown.regionHint) lines.push(roll.breakdown.regionHint);
-  if (roll.breakdown.upgradeTips?.length) {
-    lines.push("", "**Подсказки для апгрейда:**");
-    for (const tip of roll.breakdown.upgradeTips) lines.push(`• ${tip}`);
-  }
+  if (d > 0) lines.push(`Престиж: **+${d.toLocaleString("ru-RU")}**`);
+  else if (d < 0) lines.push(`Престиж: **${d.toLocaleString("ru-RU")}**`);
   return lines;
 }
 
 export const PLATE_SHOP_PRESTIGE_HINT_LINES = [
-  "Престиж госномера отражает его статусную ценность в России.",
-  "Главный принцип: **серия** важнее региона, цифр и визуальных совпадений букв с цифрами; тематические **×множители** усиливают удачные сочетания серии и региона.",
+  "Красивые комбинации цифр и региона дают престиж. Номер **уникален** на сервере.",
 ];

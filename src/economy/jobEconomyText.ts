@@ -1,4 +1,5 @@
 import { scaleSignedIncome } from "./economyMacro.js";
+import { COURIER_SIM_MONTHLY_FEE_RUB } from "./economyCatalog.js";
 import {
   SHIFT_PAY_MIN_APPLY_CD_MS,
   shiftPayCoeffEmbedBlock,
@@ -43,10 +44,8 @@ function jobShiftPayCoeffDetailLine(jobId: JobId): string {
 export const ASSEMBLER_7TH_BONUS_BASE_RUB = 22_000;
 const OFFICE_SHIFT_RANK_BONUS_BASE_RUB = 1_000;
 const OFFICE_SHIFT_STREAK_BONUS_MAX_BASE_RUB = 500;
-const SHADOW_LINK_REFERENCE_BASE_RUB = 70_000;
 const SOLE_PROP_DAILY_BASE_RUB = 45_000;
 const SOLE_PROP_CAPITAL_RATE = 0.0045;
-const SOLE_PROP_EXAMPLE_CAPITAL_RUB = 1_000_000;
 
 function locFmt(n: number): string {
   if (!Number.isFinite(n)) return "—";
@@ -187,103 +186,68 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
   switch (jobId) {
     case "courier":
       main = [
-        "**КД:** **3** ч пешком · **2** ч с электровелом · с авто (**скутер ~2,5 ч** … **топ ~1 ч**).",
-        `**Оплата за смену:** случайно **${fmtJobIncomeRange(guildId, 6_500, 8_000)}** ₽.`,
-        "**Множитель ранга** тир-1 применяется к итогу смены (см. карточку профессии).",
-        "**Сим:** тариф фиксированный (не индексируется) — см. карточку профессии при устройстве.",
+        "**КД:** **3** ч пешком · **2** ч с велом · с авто короче (до **~1 ч**).",
+        `**Оплата:** **${fmtJobIncomeRange(guildId, 6_500, 8_000)}** ₽ · × **ранг** т1.`,
+        `**Сим:** **${locFmt(COURIER_SIM_MONTHLY_FEE_RUB)}** ₽/30 сут с баланса сим.`,
       ].join("\n\n");
       break;
     case "waiter":
       main = [
         "**КД:** **8** ч.",
-        `**Оплата за смену:** **от ${fmtJobIncome(guildId, -10_000)}** до **~${fmtJobIncome(guildId, 58_000)}** ₽ (диапазоны веток слегка дрожат).`,
-        "**Вилки и доли (ориентир при ранге 0, до умножения на ×ранг):**",
-        `• штраф **${fmtJobIncome(guildId, -10_000)}** ₽ — **8%**`,
-        `• малый плюс **~${fmtJobIncomeRange(guildId, 2800, 3200)}** ₽ — **32%**`,
-        `• норма **~${fmtJobIncomeRange(guildId, 10400, 11600)}** ₽ — **40%**`,
-        `• хорошо **~${fmtJobIncomeRange(guildId, 23800, 26200)}** ₽ — **15%**`,
-        `• джекпот **~${fmtJobIncomeRange(guildId, 52000, 58000)}** ₽ — **5%**`,
-        "**Ранг:** шанс штрафа **−1%**, джекпота **+1%** за ступень (штраф не ниже **3%**, джекпот не выше **10%**; доли «середины» пересчитываются).",
-        "**После:** итог × **ранг** тир-1.",
+        `**Оплата:** **от ${fmtJobIncome(guildId, -10_000)}** до **~${fmtJobIncome(guildId, 58_000)}** ₽ (случайно: штраф / норма / джекпот).`,
+        "**Ранг** снижает шанс штрафа и повышает джекпот. Итог × **ранг** т1.",
       ].join("\n\n");
       break;
     case "watchman":
       main = [
         "**КД:** **24** ч.",
-        `**Оплата за смену:** случайно **${fmtJobIncomeRange(guildId, 11_000, 13_000)}** ₽.`,
-        "**Множитель ранга** тир-1 применяется к итогу (см. карточку профессии).",
+        `**Оплата:** **${fmtJobIncomeRange(guildId, 11_000, 13_000)}** ₽ · × **ранг** т1.`,
       ].join("\n\n");
       break;
     case "dispatcher":
       main = [
         "**КД:** **24** ч.",
-        `**Оплата за смену:** случайно **${fmtJobIncomeRange(guildId, 26_000, 30_000)}** ₽.`,
-        "**Множитель ранга** тир-2 применяется к итогу (см. карточку профессии).",
-        "**Навыки:** коммуникация **28+**, дисциплина **20+** · нужно **жильё**.",
+        `**Оплата:** **${fmtJobIncomeRange(guildId, 26_000, 30_000)}** ₽ · × **ранг** т2.`,
+        "**Навыки:** коммуникация **28+**, дисциплина **20+** · **жильё**.",
       ].join("\n\n");
       break;
     case "assembler":
       main = [
-        "**КД:** **3** ч без **личного** транспорта; с **авто** из магазина — по классу (например **скутер ~2,5 ч** … **топ ~1 ч**).",
-        `**Оплата за смену:** случайно **${fmtJobIncomeRange(guildId, 15_000, 18_000)}** ₽.`,
-        `**3%** штраф **${fmtJobIncome(guildId, -4500)}…${fmtJobIncome(guildId, -6500)}** ₽ · каждая **7-я** смена: **+${fmtJobIncome(guildId, ASSEMBLER_7TH_BONUS_BASE_RUB)}** ₽.`,
-        "**После:** **×ранг** тир-2.",
-        "**Навыки:** дисциплина **28+**, логистика **20+** · нужно **жильё**.",
+        "**КД:** **3** ч без авто; с авто — по классу (**~2,5** … **~1** ч).",
+        `**Оплата:** **${fmtJobIncomeRange(guildId, 15_000, 18_000)}** ₽ · **7-я** смена: **+${fmtJobIncome(guildId, ASSEMBLER_7TH_BONUS_BASE_RUB)}** ₽.`,
+        "**Навыки:** дисциплина **28+**, логистика **20+** · **жильё**.",
       ].join("\n\n");
       break;
     case "expediter":
       main = [
         "**КД:** **6** ч.",
-        `**Оплата за смену:** **от ~${fmtJobIncome(guildId, -38_000)}** до **~${fmtJobIncome(guildId, 155_000)}** ₽.`,
-        "**Вилки и доли (ориентир при ранге 0, до ×ранг):**",
-        `• штраф **~${fmtJobIncome(guildId, -38_000)}…${fmtJobIncome(guildId, -32_000)}** — **8%**`,
-        `• слабый плюс **~${fmtJobIncomeRange(guildId, 7200, 8800)}** — **32%**`,
-        `• норма **~${fmtJobIncomeRange(guildId, 20500, 23500)}** — **42%**`,
-        `• крупнее **~${fmtJobIncomeRange(guildId, 51000, 59000)}** — **14%**`,
-        `• контракт **~${fmtJobIncomeRange(guildId, 135000, 155000)}** — **4%**`,
-        "**Ранг:** шанс штрафа **max(3, 8−ранг)%**, контракта **min(10, 4+ранг)%**; остальное перераспределяется по «середине».",
-        "**После:** **×ранг** тир-2 к итогу.",
-        "**Навыки:** логистика **28+**, коммуникация **20+** · нужно **жильё**.",
+        `**Оплата:** **от ~${fmtJobIncome(guildId, -38_000)}** до **~${fmtJobIncome(guildId, 155_000)}** ₽ (случайно).`,
+        "**Ранг** влияет на шансы. Итог × **ранг** т2. **Навыки:** логистика **28+**, коммуникация **20+** · **жильё**.",
       ].join("\n\n");
       break;
     case "officeAnalyst": {
       const basePass = getTier3JobDef("officeAnalyst").passiveBaseRub;
       main = [
-        `**Суточный оклад** (пассивно): **${fmtJobIncome(guildId, basePass)}** ₽ × (**1** + **8%** × **ранг**). Ранг каждые **${opts.promotionEveryDays}** дней стрика (макс. **15**).`,
-        "**КД смены:** **4** ч.",
-        `**Оплата за смену:** случайно **${fmtJobIncomeRange(guildId, 45_000, 55_000)}** ₽ + надбавки от ранга и стрика · **3%** штраф **${fmtJobIncome(guildId, -12_000)}…${fmtJobIncome(guildId, -22_000)}**.`,
-        "**Совещание** (КД **24** ч): **35%** **+2…+7** дн. к стрику · **35%** без изменений · **30%** **−2…−6** дн. (без выплат).",
+        `**Суточный оклад:** **${fmtJobIncome(guildId, basePass)}** ₽ × (**1** + **8%** × **ранг**). Ранг — каждые **${opts.promotionEveryDays}** дн. стрика.`,
+        "**КД смены:** **4** ч · **Совещание** — КД **24** ч (влияет на стрик).",
+        `**Смена:** **${fmtJobIncomeRange(guildId, 45_000, 55_000)}** ₽ + надбавки.`,
         "**Навыки:** коммуникация **30+**, логистика **28+**, дисциплина **35+** · **жильё**.",
       ].join("\n\n");
       break;
     }
-    case "shadowFixer": {
-      const linkRef = fmtJobIncome(guildId, SHADOW_LINK_REFERENCE_BASE_RUB);
+    case "shadowFixer":
       main = [
-        "**Суточного пассивного оклада нет.**",
-        "**КД смены:** **12** ч.",
-        `**Оплата за смену:** **от ${fmtJobIncome(guildId, -150_000)}** до **~${fmtJobIncome(guildId, 1_200_000)}+** ₽ (положительные ветки × **posBoost** от ранга и стрика).`,
-        "**Вилки и доли (до posBoost):**",
-        `• **${fmtJobIncome(guildId, -150_000)}** ₽ — **10%**`,
-        `• **${fmtJobIncome(guildId, -40_000)}** ₽ — **22%**`,
-        `• **~${fmtJobIncome(guildId, 40_000)}** ₽ — **32%**`,
-        `• **~${fmtJobIncome(guildId, 130_000)}** ₽ — **24%**`,
-        `• **~${fmtJobIncome(guildId, 400_000)}** ₽ — **9%**`,
-        `• **~${fmtJobIncome(guildId, 1_200_000)}** ₽ — **3%**`,
-        `**Связь:** **10–30%** ориентира **${linkRef}**×(**1**+**8%**×ранг) ₽ **за сутки**, КД **24** ч.`,
-        "**Куратор:** ускорение стрика · КД **24** ч.",
-        "**Навыки:** коммуникация **42+**, логистика **38+**, дисциплина **48+** · **жильё**.",
+        "**Пассива нет.** КД смены: **12** ч.",
+        `**Смена:** **от ${fmtJobIncome(guildId, -150_000)}** до **~${fmtJobIncome(guildId, 1_200_000)}+** ₽ (рандом × **posBoost**).`,
+        "**Связь** и **куратор** — КД **24** ч. **Навыки:** коммуникация **42+**, логистика **38+**, дисциплина **48+** · **жильё**.",
       ].join("\n\n");
       break;
-    }
     case "soleProp": {
       const base = fmtJobIncome(guildId, SOLE_PROP_DAILY_BASE_RUB);
-      const capBonus = fmtJobIncome(guildId, Math.floor(SOLE_PROP_EXAMPLE_CAPITAL_RUB * SOLE_PROP_CAPITAL_RATE));
       main = [
-        "**Суточный оклад** (пассивно): считается от **баланса бизнеса** (потолок **500 000 000** ₽).",
-        `**Формула:** \`floor((${base} + капитал × ${SOLE_PROP_CAPITAL_RATE}) × (1 + 8%×ранг) × престиж × эффективность × …)\` — риск −2…+2 даёт сдвиг множителя.`,
-        `**Пример:** при **0** ₽ на бизнесе и ранге **0** базовая часть **${base}** ₽ **за сутки** до престижа; при **${locFmt(SOLE_PROP_EXAMPLE_CAPITAL_RUB)}** ₽ на бизнесе **+${capBonus}** ₽ от капитала (до множителей).`,
-        "**Реклама / персонал / контроль** — как в панели ИП.",
+        "**Суточный оклад** от **баланса бизнеса** (потолок **500 млн** ₽).",
+        `База **${base}** ₽/сут + **${SOLE_PROP_CAPITAL_RATE * 100}%** от капитала × ранг × престиж × риск.`,
+        "**Реклама / персонал / контроль** — в панели ИП.",
         "**Навыки:** коммуникация **55+**, логистика **52+**, дисциплина **60+** · **жильё**.",
       ].join("\n\n");
       break;

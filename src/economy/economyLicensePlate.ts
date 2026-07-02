@@ -445,9 +445,7 @@ export function applyUnregisteredVehiclePenalty(u: EconomyUser, amount: number):
 }
 
 export const SHOP_CAR_PLATE_HINT_LINES = [
-  "После покупки авто **обязательно** оформите **госномер** (кнопка **Гос.номер**).",
-  "Без номера — штраф **10%** к заработку на **всех** работах, сменах и прочих начислениях.",
-  "При **замене** (апгрейде) авто госномер **сохраняется**; оформление нужно только **один раз**.",
+  "Без **госномера** — **−10%** к заработку. Оформите в **Гос.номер** (при апгрейде авто номер сохраняется).",
 ];
 
 export function economyCarDisplayLine(u: EconomyUser, opts?: { markdown?: boolean }): string {

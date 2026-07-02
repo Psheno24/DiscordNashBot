@@ -384,12 +384,7 @@ function buildTerminalPanelEmbed(guildName: string): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Терминал страны")
-    .setDescription(
-      [
-        "Управление экономикой и прогрессом — через кнопки ниже.",
-        "Большинство экранов **личные** (ephemeral), спама в канале не будет.",
-      ].join("\n"),
-    )
+    .setDescription("Профиль, работа, магазин и навыки — кнопками ниже.")
     .setFooter({ text: `Сервер: ${guildName}` });
 }
 
@@ -582,12 +577,7 @@ function buildTelegramHubEmbed(member: GuildMember): EmbedBuilder {
   } else {
     lines.push("_Код ещё не выдавался — нажми **«Новый код»**._");
   }
-  lines.push("", "В Telegram-боте: `/link КОД`");
-  lines.push(
-    "",
-    "**Важно:** если привязка **уже работает** (приходят напоминания, команды отвечают) — **новый код не нужен**.",
-    "Новый код — только для **первой** привязки, если истёк старый, или если хочешь привязать **другой** Telegram.",
-  );
+  lines.push("", "В Telegram: `/link КОД`");
   return new EmbedBuilder()
     .setColor(PROFILE_COLOR)
     .setTitle("Telegram")
@@ -601,14 +591,8 @@ function buildTelegramNewCodeConfirmEmbed(member: GuildMember): EmbedBuilder {
     .setTitle("Выдать новый код?")
     .setDescription(
       [
-        "У тебя уже есть **действующий** код привязки.",
-        "",
-        "**Новый код** отменит старый и понадобится только если:",
-        "· Telegram ещё **не** привязали,",
-        "· старый код **истёк**,",
-        "· или нужно привязать **другой** аккаунт Telegram.",
-        "",
-        "Если всё уже работает — нажми **«Отмена»**.",
+        "Действующий код привязки будет **отменён**.",
+        "Новый код нужен, если Telegram ещё не привязан, старый истёк, или нужен другой аккаунт.",
       ].join("\n"),
     )
     .setFooter({ text: `Запросил: ${member.user.tag}` });
@@ -910,32 +894,21 @@ const JOBS_STARTER: JobDef[] = [
     title: "Доставка",
     baseCooldownMs: 3 * 60 * 60 * 1000,
     basePayoutRub: 7_250,
-    description:
-      [
-        "**КД смены:** 3 ч без вела; с **арендой электровела** — 2 ч; с **авто** — по классу (**скутер ~2,5 ч** … **топ ~1 ч**).",
-        "**Оплата за смену:** случайно **6 500–8 000** ₽. **Множитель ранга** тир-1 — в карточке профессии.",
-        `Нужны **телефон** и **симка**. С **баланса сим** — **${COURIER_SIM_MONTHLY_FEE_RUB.toLocaleString("ru-RU")}** ₽ за **тариф** на **30** суток (при первой смене после перерыва); внутри оплаченного периода смены **без** доп. списаний с сим. **Основной счёт не трогается.**`,
-        "**Электровел** — посуточная аренда (если **нет** своего авто). Лимит выплаты по накопленному **КД** за сутки — в **Подробнее**.",
-      ].join("\n"),
+    description: "КД **3** ч · **6,5–8k** ₽ · телефон + симка",
   },
   {
     id: "waiter",
     title: "Уличный брокер",
     baseCooldownMs: 8 * 60 * 60 * 1000,
     basePayoutRub: 0,
-    description: [
-      "**КД:** **8 ч**. **Оплата за смену:** **от −10 000** до **~58 000** ₽ (шансы и вилки — в **Подробнее**). **Множитель ранга** тир-1 — в карточке профессии.",
-    ].join("\n"),
+    description: "КД **8** ч · рандом **−10k…58k** ₽",
   },
   {
     id: "watchman",
     title: "Кладбище",
     baseCooldownMs: 24 * 60 * 60 * 1000,
     basePayoutRub: 12_000,
-    description:
-      [
-        "**КД:** **24** ч. **Оплата за смену:** случайно **11 000–13 000** ₽. **Множитель ранга** тир-1 — в карточке профессии.",
-      ].join("\n"),
+    description: "КД **24** ч · **11–13k** ₽",
   },
 ];
 
@@ -967,9 +940,7 @@ const JOBS_TIER2: JobDef[] = [
     title: "Колл-центр",
     baseCooldownMs: 24 * 60 * 60 * 1000,
     basePayoutRub: 28_000,
-    description: [
-      "**КД:** **24** ч. **Оплата за смену:** случайно **26 000–30 000** ₽. **Множитель ранга** тир-2 — в карточке профессии.",
-    ].join("\n"),
+    description: "КД **24** ч · **26–30k** ₽ · жильё",
     reqSkills: { communication: 28, discipline: 20 },
   },
   {
@@ -977,10 +948,7 @@ const JOBS_TIER2: JobDef[] = [
     title: "Склад",
     baseCooldownMs: ASSEMBLER_BASE_CD_MS,
     basePayoutRub: 16_500,
-    description: [
-      "**КД:** **3** ч без **личного** авто; с **авто** из магазина — по классу (например **скутер ~2,5 ч** … **топ ~1 ч**).",
-      "**Оплата за смену:** случайно **15 000–18 000** ₽. **3%** штраф; каждая **7-я** смена — премия **22 000** ₽; **множитель ранга** тир-2 — в карточке. Лимит выплаты по накопленному **КД** за сутки — в **Подробнее**.",
-    ].join("\n"),
+    description: "КД **3** ч · **15–18k** ₽ · авто ускоряет · жильё",
     reqSkills: { discipline: 28, logistics: 20 },
   },
   {
@@ -988,9 +956,7 @@ const JOBS_TIER2: JobDef[] = [
     title: "Развлекательный центр",
     baseCooldownMs: 6 * 60 * 60 * 1000,
     basePayoutRub: 0,
-    description: [
-      "**КД:** **6 ч**. **Оплата за смену:** **от ~−38 000** до **~155 000** ₽ (шансы и вилки — в **Подробнее**). **Множитель ранга** тир-2 — в карточке профессии.",
-    ].join("\n"),
+    description: "КД **6** ч · рандом **−38k…155k** ₽ · жильё",
     reqSkills: { logistics: 28, communication: 20 },
   },
 ];
@@ -1047,14 +1013,12 @@ function workShiftCdAccStatusLines(u: ReturnType<typeof getEconomyUser>, jobId: 
 }
 
 function jobTaxEmbedLines(guildId: string, jobId: JobId): string[] {
-  if (jobId === "shadowFixer") {
-    return ["Подоходный налог с зачисления на личный счёт: **не удерживается**."];
-  }
+  if (jobId === "shadowFixer") return ["Налог: **не удерживается**."];
   const pct = getLegalIncomeTaxPercent(guildId);
-  const out = [`Подоходный налог с зачисления на личный счёт: **${pct}**%.`];
+  const out = [`Налог с зачисления: **${pct}**%.`];
   if (jobId === "soleProp") {
     const cap = getSolePropWeeklyCapitalTaxPercent(guildId);
-    if (cap > 0) out.push(`Еженедельный налог с капитала бизнеса (**по понедельникам**): **${cap}**%.`);
+    if (cap > 0) out.push(`Налог с капитала ИП (еженед.): **${cap}**%.`);
   }
   return out;
 }
@@ -1227,39 +1191,29 @@ function hasOwnedCourierCar(u: ReturnType<typeof getEconomyUser>): boolean {
 
 /** Транспорт доставки: личное авто или аренда электровела. Без привязки к jobId — только состояние игрока. */
 function courierTransportExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
-  const lines: string[] = [];
   const car = getCarDef(u.ownedCarId);
   if (car) {
     const plate = formatVehiclePlateFromUser(u);
-    const platePart = plate ? ` · ${plate}` : " · **госномер не оформлен** (−10% к заработку)";
-    lines.push(
-      `**Авто:** **${car.label}** (${car.speedKmh} км/ч) — КД **${(car.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч${platePart}.`,
-    );
-  } else if (hasActiveBikeRental(u, now)) {
-    const t = Math.floor((u.courierBikeUntilMs ?? 0) / 1000);
-    lines.push(`**Электровелосипед:** оплачен до <t:${t}:F> (<t:${t}:R>).`);
-  } else {
-    lines.push("**Электровелосипед:** аренда **не активна** (или купите **авто** в магазине).");
+    const platePart = plate ? ` · ${plate}` : " · **без номера** (−10%)";
+    return [`**Авто:** **${car.label}** · КД **${(car.courierShiftCdMs / 3600000).toFixed(1).replace(/\.0$/, "")}** ч${platePart}`];
   }
-  return lines;
+  if (hasActiveBikeRental(u, now)) {
+    const t = Math.floor((u.courierBikeUntilMs ?? 0) / 1000);
+    return [`**Вел:** до <t:${t}:R>`];
+  }
+  return ["**Вел:** не в аренде (или купите авто)."];
 }
 
-/** Тариф сим и баланс сим (для доставки и подсказки в других ролях). */
 function courierSimExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
   const fee = COURIER_SIM_MONTHLY_FEE_RUB;
   const lines: string[] = [];
   if (u.courierPhonePaidUntilMs && now < u.courierPhonePaidUntilMs) {
     const lt = Math.floor(u.courierPhonePaidUntilMs / 1000);
-    lines.push(`**Сим-карта:** **тариф 30 суток** оплачен до <t:${lt}:F> — смены в этот период **без** доп. списаний с баланса сим.`);
+    lines.push(`**Сим:** тариф до <t:${lt}:R>`);
   } else {
-    lines.push(
-      `**Сим-карта:** тариф **не оплачен** — при следующем выходе на смену **доставки** с баланса сим спишется **${fee.toLocaleString("ru-RU")}** ₽ и продлится **тариф** на **30** суток.`,
-    );
+    lines.push(`**Сим:** тариф не оплачен — при смене **${fee.toLocaleString("ru-RU")}** ₽/30 сут`);
   }
-  const bals = u.simBalanceRub ?? 0;
-  lines.push(
-    `**Баланс сим:** **${fmt(bals)}** ₽ — пополнение в магазине; **${fee.toLocaleString("ru-RU")}** ₽ с сим за **30 суток** (основной счёт **не** используется).`,
-  );
+  lines.push(`**Баланс сим:** **${fmt(u.simBalanceRub ?? 0)}** ₽`);
   return lines;
 }
 
@@ -1299,37 +1253,23 @@ function buildMyRentHomeEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(gid, member.id);
   const now = Date.now();
   const due = u.housingRentNextDueMs;
-  const dueLine =
-    due != null && now < due
-      ? `Оплачено **до** <t:${Math.floor(due / 1000)}:F> (ваше локальное время в Discord).`
-      : due != null
-        ? `Срок по данным: <t:${Math.floor(due / 1000)}:F> — **продлите** в магазине или здесь (**Изменить срок**).`
-        : "Срок окончания **не задан** — оформите аренду в **Магазин** → жильё.";
   const curPlan = u.housingRentPlan ?? "month";
   const curRub = inflatedHousingRentPrice(gid, curPlan);
   const renewLine =
     u.housingRentRenewalPlan != null
-      ? `После окончания текущего срока **первое** автосписание **в начале следующего календарного дня**: **${rentPlanLabelRu(u.housingRentRenewalPlan)}** (**${fmt(inflatedHousingRentPrice(gid, u.housingRentRenewalPlan))}** ₽).`
-      : `Пакет на **следующий** цикл после текущего срока **не выбран** — **в начале дня** спишется пакет **текущего** цикла: **${rentPlanLabelRu(curPlan)}** (**${fmt(curRub)}** ₽).`;
+      ? `После срока: **${rentPlanLabelRu(u.housingRentRenewalPlan)}** (**${fmt(inflatedHousingRentPrice(gid, u.housingRentRenewalPlan))}** ₽).`
+      : `После срока: **${rentPlanLabelRu(curPlan)}** (**${fmt(curRub)}** ₽).`;
   const refundLine =
     due != null && now < due
-      ? `Если купите квартиру в магазине, на счёт вернётся **≈ ${fmt(housingRentUnusedRefundRub(u, now, gid))}** ₽ за неиспользованное время.`
+      ? `При покупке квартиры — возврат **≈ ${fmt(housingRentUnusedRefundRub(u, now, gid))}** ₽.`
       : "";
   const lines = [
-    "**Статус:** снимаете жильё (**аренда**).",
-    "",
-    dueLine,
-    "",
-    `**При наступлении срока** (начало календарного дня) спишется **${rentPlanLabelRu(curPlan)}** (**${fmt(curRub)}** ₽), срок сдвинется на следующий период этого пакета.`,
-    "",
-    "**Следующий цикл (после оплаченного срока):**",
+    due != null && now < due
+      ? `Оплачено **до** <t:${Math.floor(due / 1000)}:R>.`
+      : "Срок **истёк** — продлите ниже или в магазине.",
     renewLine,
-    "",
-    refundLine,
-    "",
-    "Чтобы **добавить оплаченные дни** сейчас или **задать пакет** на первое автосписание после срока — нажмите **Изменить срок**.",
-    "Оформить **новую** аренду с нуля или **купить квартиру** — только **Магазин** → жильё.",
-  ].filter(Boolean);
+  ];
+  if (refundLine) lines.push(refundLine);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Моя аренда")
@@ -1355,15 +1295,13 @@ function buildMyRentEditEmbed(member: GuildMember): EmbedBuilder {
   const due = u.housingRentNextDueMs;
   const prepaid =
     due != null && now < due
-      ? `Сейчас оплачено **до** <t:${Math.floor(due / 1000)}:F>. Новый пакет **добавляет время от этой даты** (не от сегодня).`
-      : "Срок **истёк или на исходе** — всё равно можно оплатить пакет: отсчёт пойдёт от **сейчас**.";
+      ? `Оплачено **до** <t:${Math.floor(due / 1000)}:R> — новый пакет **добавляет** срок.`
+      : "Срок истёк — отсчёт с **сейчас**.";
   const lines = [
-    "**1. Продлить сейчас** — спишется выбранная сумма, конец оплаченного срока **сдвинется**.",
+    "**Продлить** — списание сейчас, срок сдвигается.",
     prepaid,
     "",
-    "**2. Пакет после срока** — что спишется **при первом наступлении начала дня** после окончания текущего оплаченного периода (текущий срок **не** сокращается и **не** продлевается этим действием).",
-    "",
-    "Нужны только **аренда** или **покупка квартиры** — раздел **Магазин** → жильё.",
+    "**Пакет после срока** — что спишется в начале дня после окончания текущего периода.",
   ];
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
@@ -1432,19 +1370,10 @@ function buildShopLotteryEmbed(member: GuildMember): EmbedBuilder {
   const st = getLotteryState(gid, period);
   const drawTs = lotteryDrawUnixTs();
   const lines = [
-    "**Лотерейный билет** — **1 000** ₽ (цена **фиксирована**, инфляция **не** действует).",
+    `Билет — **1 000** ₽. Джекпот: **${fmt(st.jackpotRub)}** ₽ · в продаже: **${st.ticketsSold}**`,
+    `Розыгрыш: <t:${drawTs}:R> (**21:00** МСК)`,
     "",
-    "**Шансы на каждый купленный билет** (розыгрыш **один раз** за период):",
-    "• **25%** — вернуть **полную** стоимость билета",
-    "• **50%** — вернуть **половину** стоимости билета",
-    "• **15%** — **10%** от джекпота (**только 1** билет за период среди всех игроков)",
-    "• **8%** — **50%** от джекпота (**только 1** билет)",
-    "• **2%** — **весь** джекпот (**только 1** билет)",
-    "",
-    `**Джекпот:** **${fmt(st.jackpotRub)}** ₽ (минимум **100 000** ₽)`,
-    `**Билетов в текущем периоде:** **${st.ticketsSold}**`,
-    "",
-    `**Розыгрыш:** <t:${drawTs}:F> (<t:${drawTs}:R>) · **21:00** МСК`,
+    "Шансы: возврат **25%** / **50%**, доли джекпота **10%** / **50%** / **100%** (крупные — по одному на период).",
   ];
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Лотерея").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
 }
@@ -1573,14 +1502,8 @@ function assemblerWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: num
 }
 
 const WORK_SECTION_INTRO = [
-  "Выберите профессию и жмите **«Смена»**, когда КД закончится.",
-  "Для **т2/т3** нужно жильё: аренда с запасом срока или своя квартира.",
-  "Лимит за сутки (КД < 6 ч): после **12 ч** суммарного КД выплата снижается.",
-  "",
-  "**Уровни:**",
-  "• **Начальные (т1)** — без порога навыков.",
-  "• **С навыком (т2)** — навыки по вакансии + жильё.",
-  "• **Продвинутые (т3)** — высокий уровень **всех трёх** навыков + жильё.",
+  "Выберите уровень и профессию. **Смена** — после КД.",
+  "**т2/т3** — навыки + жильё (аренда или своя квартира).",
 ].join("\n");
 
 function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
@@ -1610,7 +1533,7 @@ function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Работа")
-    .setDescription([WORK_SECTION_INTRO, "", ...lines].join("\n"))
+    .setDescription(lines.join("\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -1687,7 +1610,7 @@ function buildStarterJobsEmbed(member: GuildMember): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Начальные (т1)")
-    .setDescription(["Кратко по каждой роли; **Подробнее** — в карточке профессии.", "", ...lines].join("\n\n"))
+    .setDescription(lines.join("\n\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -1697,15 +1620,7 @@ function buildTier2JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("С навыком (т2)")
-    .setDescription(
-      [
-        "**Жильё обязательно:** аренда с запасом срока или своя квартира — **до** устройства на т2+.",
-        "",
-        "Кратко по каждой роли; **Подробнее** — в карточке профессии.",
-        "",
-        ...lines,
-      ].join("\n\n"),
-    )
+    .setDescription(lines.join("\n\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -1724,23 +1639,15 @@ function buildJobDetailBody(member: GuildMember, jobId: JobId): string {
   const def = getAnyJobDef(jobId);
   const gid = member.guild.id;
   let main = buildJobDetailMainBlock(gid, jobId, { promotionEveryDays: TIER3_PROMOTION_EVERY_DAYS });
-  if (jobId === "courier") {
-    main = [
-      main.replace(
-        "**Сим:** тариф фиксированный (не индексируется) — см. карточку профессии при устройстве.",
-        `**Сим:** тариф **${fmt(COURIER_SIM_MONTHLY_FEE_RUB)}** ₽ с **баланса сим** на **30** суток — списывается при **первой** смене после окончания оплаченного периода; основной счёт **не** используется.`,
-      ),
-    ].join("");
-  }
   if (main === jobId) main = def.title;
   const u = getEconomyUser(member.guild.id, member.id);
   const now = Date.now();
   const tail: string[] = [];
   if (jobId === "courier" && u.jobId === "courier") {
-    tail.push("", "**Сейчас у вас:**", ...courierWorkExtrasLines(u, now));
+    tail.push("", ...courierWorkExtrasLines(u, now));
   }
   if (jobId === "assembler" && u.jobId === "assembler") {
-    tail.push("", "**Сейчас у вас (склад / КД):**", ...assemblerWorkExtrasLines(u, now));
+    tail.push("", ...assemblerWorkExtrasLines(u, now));
   }
   return [main, ...tail].join("\n\n");
 }
@@ -1814,21 +1721,14 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
     if (hasTier2PlusHousing(u, now)) {
       const hk = u.housingKind ?? "none";
       if (hk === "rent" && u.housingRentNextDueMs != null && now < u.housingRentNextDueMs) {
-        const ht = Math.floor(u.housingRentNextDueMs / 1000);
-        body.push(
-          `Жильё: **аренда** оплачена до <t:${ht}:F> (<t:${ht}:R>) — требование для **тир 2+** выполнено.`,
-        );
+        body.push(`Жильё: **аренда** до <t:${Math.floor(u.housingRentNextDueMs / 1000)}:R>.`);
       } else if (hk === "owned" && u.ownedApartmentId) {
-        body.push(
-          `Жильё: **своя квартира** (${getApartmentDef(u.ownedApartmentId)?.label ?? "есть"}) — требование для **тир 2+** выполнено.`,
-        );
+        body.push(`Жильё: **своя** (${getApartmentDef(u.ownedApartmentId)?.label ?? "есть"}).`);
       } else {
-        body.push("Жильё: **есть** — требование для **тир 2+** выполнено.");
+        body.push("Жильё: **есть**.");
       }
     } else {
-      body.push(
-        "Жильё: **нет** — для устройства на **тир 2+** сначала **аренда** или **своя квартира** в магазине терминала.",
-      );
+      body.push("Жильё: **нет** — нужна аренда или покупка в магазине.");
     }
   }
 
@@ -1863,11 +1763,10 @@ function workCatalogBackButtonId(jobId: JobId): string {
 function solePropPassiveExampleLines(guildId: string, u: ReturnType<typeof getEconomyUser>): string[] {
   const sdef = getTier3JobDef("soleProp");
   const streak = u.jobMskDayStreak ?? 0;
-  const caps = [0, 100_000, 250_000, 500_000, 1_000_000, 2_000_000, 5_000_000];
   const out: string[] = [
-    "**Ориентир суточного оклада** при разном балансе бизнеса (ползунок риска **0** — без случайного джиттера):",
+    `**Ориентир суточного оклада** (риск **0**, ранг **${tier3PromotionRank(streak)}**):`,
   ];
-  for (const cap of caps) {
+  for (const cap of [0, 500_000, 2_000_000, 5_000_000]) {
     const night = computeTier3PassiveRub({
       guildId,
       jobId: "soleProp",
@@ -1879,11 +1778,8 @@ function solePropPassiveExampleLines(guildId: string, u: ReturnType<typeof getEc
       solePropPassiveEffMult: u.solePropPassiveEffMult ?? 1,
       solePropPassiveTempMult: u.solePropPassiveTempMult ?? 1,
     });
-    out.push(`• **${fmt(cap)}** ₽ → **~${fmt(night)}** ₽ **за сутки** · **~${fmt(night * 30)}** ₽ **за 30 сут**`);
+    out.push(`• **${fmt(cap)}** ₽ → **~${fmt(night)}** ₽/сут`);
   }
-  out.push(
-    `Считано с вашими **престижем**, множителями и **рангом ${tier3PromotionRank(streak)}**; строка «оценка суточного оклада» выше — с **вашим** текущим риском.`,
-  );
   return out;
 }
 
@@ -1949,13 +1845,7 @@ function buildTier3JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Продвинутые (т3)")
-    .setDescription(
-      [
-        "**Жильё обязательно** (как для т2). Кратко по роли — ниже; детали — **Подробнее** в карточке профессии.",
-        "",
-        ...lines,
-      ].join("\n\n"),
-    )
+    .setDescription(lines.join("\n\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -2277,7 +2167,7 @@ function buildSkillsEmbed(member: GuildMember): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Навыки")
-    .setDescription([cdLine, "", ...lines, "", "Выбери навык, чтобы тренироваться."].join("\n"))
+    .setDescription([cdLine, "", ...lines].join("\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 

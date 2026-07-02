@@ -29,13 +29,7 @@ export function buildAdminHubEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(HUB_COLOR)
     .setTitle("Админ-панель")
-    .setDescription(
-      [
-        "**Настройки** — каналы бота и налоги (казна страны).",
-        "**Экономика** — список ставок; выдача и изъятие ₽ — только у **владельца сервера**.",
-        "Создать новую ставку — внутри раздела **Экономика**.",
-      ].join("\n"),
-    );
+    .setDescription("**Настройки** — каналы и налоги. **Экономика** — ставки и лотерея.");
 }
 
 export function buildAdminHubRows(): ActionRowBuilder<ButtonBuilder>[] {
@@ -51,14 +45,7 @@ export function buildAdminEconEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(HUB_COLOR)
     .setTitle("Экономика (админ)")
-    .setDescription(
-      [
-        "Управление ставками для всех админов с правом **Manage Server**.",
-        "**Лотерея** — журнал розыгрышей и текущее состояние джекпота.",
-        "**Выдать ₽** и **Забрать ₽** видны и доступны только **владельцу сервера**.",
-        "**Назад** — в админ-хаб.",
-      ].join("\n"),
-    );
+    .setDescription("Ставки и лотерея. Выдача/изъятие ₽ — только **владельцу сервера**.");
 }
 
 /** Ставки; выдача/изъятие ₽ — только если `isGuildOwner`. */

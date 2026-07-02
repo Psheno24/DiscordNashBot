@@ -28,14 +28,12 @@ import {
   patchStatsFromShop,
   petOwnershipBlockReason,
   petPurchaseCostRub,
-  petRequirementsLine,
   phonesByOrigin,
   shopApartmentPurchaseCostRub,
   shopCarPurchaseCostRub,
   shopPhonePurchaseCostRub,
   statDeltasOnReplace,
   type CatalogOrigin,
-  type ApartmentDef,
   type HousingRentPlan,
 } from "./economyCatalog.js";
 import {
@@ -61,7 +59,6 @@ import {
 import {
   buildPlateUpgradeTips,
   computePlatePrestige,
-  formatPlatePrestigeBreakdownShort,
   formatPlateRollEmbedFooter,
   PLATE_SHOP_PRESTIGE_HINT_LINES,
   type PlateShopLastRoll,
@@ -86,7 +83,6 @@ import {
 } from "./economySimNumber.js";
 import {
   computeSimPrestige,
-  formatSimPrestigeBreakdownShort,
   formatSimRollEmbedFooter,
   SIM_SHOP_PRESTIGE_HINT_LINES,
   type SimShopLastRoll,
@@ -185,22 +181,17 @@ function tradeInPctLabel(rate: number): string {
 
 /** Пояснение зачёта при покупке лучшего в той же ветке (цены на кнопках уже с учётом зачёта). */
 function shopUpgradeTradeInLine(rate: number): string {
-  return `Апгрейд на **лучшее** в этой ветке: зачёт **${tradeInPctLabel(rate)}** каталожной цены текущего (на кнопках — итог к оплате).`;
+  return `Апгрейд: зачёт **${tradeInPctLabel(rate)}** цены текущего.`;
 }
 
 function shopPlainSellLine(rate: number): string {
-  return `**Продать** (без замены): возврат **${tradeInPctLabel(rate)}** каталожной цены.`;
+  return `Продажа: **${tradeInPctLabel(rate)}** каталога.`;
 }
 
 function shopApartmentTradeInLines(): string[] {
   return [
-    `Переезд на **лучшее** жильё той же ветки: зачёт **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE)}** каталожной цены; если владели **30+ суток** — **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE_AFTER_MONTH)}**.`,
+    `Переезд: зачёт **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE)}**–**${tradeInPctLabel(APARTMENT_TRADE_IN_RATE_AFTER_MONTH)}**.`,
   ];
-}
-
-function apartmentShopListLine(guildId: string, a: ApartmentDef): string {
-  const util = inflatedApartmentUtilityRub(guildId, a.id);
-  return `• **${a.label}** — **${fmt(inflatedCatalogApartmentPrice(guildId, a.id))}** ₽ (${statLabel(a)}) · ЖКХ **${fmt(util)}** ₽/мес.`;
 }
 
 const SHOP_BRANCH_NONE = "**нет**";
@@ -302,11 +293,7 @@ export function buildShopOriginPickEmbed(
   kind: "phone" | "car",
 ): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const lines = [
-    `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}** · быт **${fmt(u.domesticPoints ?? 0)}**`,
-    "",
-    ...shopBranchOwnershipBlock(u, kind),
-  ];
+  const lines = [`Баланс: **${fmt(u.rubles)}** ₽`, "", ...shopBranchOwnershipBlock(u, kind)];
   if (kind === "car") {
     lines.push("", ...SHOP_CAR_PLATE_HINT_LINES);
   }
@@ -351,18 +338,15 @@ export function buildShopPlateEmbed(member: GuildMember, lastRoll?: PlateShopLas
   const lines = [
     `Баланс: **${fmt(u.rubles)}** ₽`,
     "",
-    ...PLATE_SHOP_PRESTIGE_HINT_LINES,
-    "",
-    plate ? `Текущий номер: **${plate}**` : "Госномер: **не оформлен**",
+    plate ? `Номер: **${plate}**` : "Госномер: **не оформлен**",
   ];
+  if (!lastRoll) {
+    lines.push("", ...PLATE_SHOP_PRESTIGE_HINT_LINES);
+  }
   if (platePrestige && platePrestige.total > 0) {
-    lines.push(`Престиж с номера: **${fmt(platePrestige.total)}**`);
-    if (!lastRoll) {
-      lines.push(`(${formatPlatePrestigeBreakdownShort(platePrestige)})`);
-      if (platePrestige.regionHint) lines.push(platePrestige.regionHint);
-    }
+    lines.push(`Престиж: **${fmt(platePrestige.total)}**`);
   } else if (plate) {
-    lines.push("Престиж с номера: **0**");
+    lines.push("Престиж: **0**");
   }
   if (lastRoll) lines.push(...formatPlateRollEmbedFooter(lastRoll));
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Гос.номер").setDescription(lines.join("\n"));
@@ -639,15 +623,14 @@ export function buildShopHousePickEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const hk = u.housingKind ?? "none";
   const lines = [
-    `Баланс: **${fmt(u.rubles)}** ₽ · престиж **${fmt(u.prestigePoints ?? 0)}** · быт **${fmt(u.domesticPoints ?? 0)}**`,
+    `Баланс: **${fmt(u.rubles)}** ₽`,
     "",
     ...shopBranchOwnershipBlock(u, "house"),
     "",
-    "**Советское** — покупка (быт). **Заморское** — покупка (престиж). Можно владеть **обоими** сразу.",
-    "**Аренда** — только советское жильё, для работ 2+ уровня.",
+    "Можно владеть **советским** и **заморским** жильём. **Аренда** — только советская, для работ **т2+**.",
   ];
   if (hk === "owned" && u.ownedApartmentId) {
-    lines.push("", "Своя **советская** квартира — аренда **недоступна**.");
+    lines.push("Своя квартира — аренда **недоступна**.");
   }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Жильё").setDescription(lines.join("\n"));
 }
@@ -671,23 +654,16 @@ export function buildShopHousePickRows(backId: string): ActionRowBuilder<ButtonB
 
 export function buildShopHouseRentEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const gid = member.guild.id;
   const hk = u.housingKind ?? "none";
   const lines = [
     `Баланс: **${fmt(u.rubles)}** ₽`,
     "",
-    "Аренда **советского** жилья — для **работ 2+** и **тир-3** (пока действует срок).",
-    "",
-    `• **1 сутки** — **${fmt(inflatedHousingRentPrice(gid, "day"))}** ₽`,
-    `• **7 суток** — **${fmt(inflatedHousingRentPrice(gid, "week"))}** ₽`,
-    `• **30 суток** — **${fmt(inflatedHousingRentPrice(gid, "month"))}** ₽`,
-    "",
-    "Цены **растут с инфляцией** сервера (как в магазине у квартир и авто); автопродление — по **текущему** тарифу.",
+    "Аренда советского жилья — для работ **т2+**.",
   ];
   if (hk === "rent" && u.housingRentNextDueMs) {
-    lines.push("", `Оплачено **до** <t:${Math.floor(u.housingRentNextDueMs / 1000)}:F>. Продление **добавляет** срок.`);
+    lines.push(`Оплачено **до** <t:${Math.floor(u.housingRentNextDueMs / 1000)}:R>.`);
   } else if (hk === "owned") {
-    lines.push("", "У вас **своя** советская квартира — аренда **недоступна**.");
+    lines.push("Своя квартира — аренда **недоступна**.");
   }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Жильё · Аренда").setDescription(lines.join("\n"));
 }
@@ -736,21 +712,15 @@ export function parseOriginFromSuffix(suffix: string): CatalogOrigin | undefined
 export function buildShopPhoneListEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = getPhoneDef(u.phoneModelId);
-  const lines = phonesByOrigin(origin).map(
-    (p) => `• **${p.label}** — **${fmt(inflatedCatalogPhonePrice(member.guild.id, p.id))}** ₽ (${statLabel(p)})`,
-  );
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle(`Телефон · ${originTitle(origin)}`)
     .setDescription(
       [
         `Баланс: **${fmt(u.rubles)}** ₽`,
-        cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет**",
-        "",
+        cur && cur.origin === origin ? `Сейчас: **${cur.label}**` : "Сейчас: **нет**",
         shopUpgradeTradeInLine(PHONE_TRADE_IN_RATE),
         shopPlainSellLine(PHONE_SELL_REFUND_RATE),
-        "",
-        ...lines,
       ].join("\n"),
     );
 }
@@ -794,10 +764,6 @@ export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigi
 export function buildShopCarListEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = getCarDef(u.ownedCarId);
-  const lines = carsByOrigin(origin).map(
-    (c) =>
-      `• **${c.label}** — **${fmt(inflatedCatalogCarPrice(member.guild.id, c.id))}** ₽ (${statLabel(c)}) · КД доставки **${(c.courierShiftCdMs / 3600000).toFixed(2).replace(/\.?0+$/, "")}** ч`,
-  );
   const plateLine = formatVehiclePlateFromUser(u);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
@@ -805,15 +771,10 @@ export function buildShopCarListEmbed(member: GuildMember, origin: CatalogOrigin
     .setDescription(
       [
         `Баланс: **${fmt(u.rubles)}** ₽`,
-        cur ? `Сейчас: **${cur.label}**` : "Сейчас: **нет**",
+        cur && cur.origin === origin ? `Сейчас: **${cur.label}**` : "Сейчас: **нет**",
         plateLine ? `Госномер: **${plateLine}**` : "Госномер: **нет**",
-        "",
-        ...SHOP_CAR_PLATE_HINT_LINES,
-        "",
         shopUpgradeTradeInLine(CAR_TRADE_IN_RATE),
         shopPlainSellLine(CAR_SELL_REFUND_RATE),
-        "",
-        ...lines,
       ].join("\n"),
     );
 }
@@ -857,35 +818,19 @@ export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin)
 export function buildShopHouseListEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const gid = member.guild.id;
-  const lines: string[] = [`Баланс: **${fmt(u.rubles)}** ₽`, ""];
+  const lines: string[] = [`Баланс: **${fmt(u.rubles)}** ₽`];
   if (origin === "soviet") {
     if (u.housingKind === "owned" && u.ownedApartmentId) {
       const cur = getApartmentDef(u.ownedApartmentId);
-      lines.push(
-        `Своё: **${cur?.label ?? "—"}**`,
-        cur ? `ЖКХ: **${fmt(inflatedApartmentUtilityRub(gid, cur.id))}** ₽/мес.` : "",
-        "",
-      );
-    } else {
-      lines.push("Покупка **советского** жилья. Аренда — отдельная кнопка в меню жилья.", "");
+      lines.push(`Своё: **${cur?.label ?? "—"}**`);
+      if (cur) lines.push(`ЖКХ: **${fmt(inflatedApartmentUtilityRub(gid, cur.id))}** ₽/мес.`);
     }
   } else if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId) {
     const cur = getApartmentDef(u.ownedForeignApartmentId);
-    lines.push(
-      `Своё: **${cur?.label ?? "—"}**`,
-      cur ? `ЖКХ: **${fmt(inflatedApartmentUtilityRub(gid, cur.id))}** ₽/мес.` : "",
-      "",
-    );
+    lines.push(`Своё: **${cur?.label ?? "—"}**`);
+    if (cur) lines.push(`ЖКХ: **${fmt(inflatedApartmentUtilityRub(gid, cur.id))}** ₽/мес.`);
   }
-  lines.push("", ...shopApartmentTradeInLines());
-  lines.push(
-    shopPlainSellLine(APARTMENT_SELL_REFUND_RATE),
-    "**ЖКХ** — ежемесячно с **собственной** квартиры (тариф у каждого объекта ниже); списание **1-го числа** каждого месяца, **00:00 МСК**.",
-    "",
-  );
-  for (const a of apartmentsByOrigin(origin)) {
-    lines.push(apartmentShopListLine(gid, a));
-  }
+  lines.push(...shopApartmentTradeInLines(), shopPlainSellLine(APARTMENT_SELL_REFUND_RATE));
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle(`Жильё · ${originTitle(origin)}`).setDescription(lines.join("\n"));
 }
 
@@ -957,18 +902,6 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
 export function buildShopAnimalsEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = getPetDef(u.ownedPetId);
-  const gid = member.guild.id;
-  const lines: string[] = [];
-  for (const p of PET_MODELS) {
-    if (lines.length > 0) lines.push("");
-    const cost = scaledShopPrice(gid, petPurchaseCostRub(cur, p));
-    const upkeep = scaledEconomyExpense(gid, p.dailyUpkeepRub);
-    const psDay = scaledEconomyPsIncome(gid, p.dailyPsRub);
-    lines.push(
-      `• **${p.label}** — покупка **${fmt(cost)}** ₽, **${fmt(upkeep)}** ₽/сут, **+${fmt(psDay)}** СР/сут`,
-      `  Требования: ${petRequirementsLine(p)}`,
-    );
-  }
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Животные")
@@ -977,10 +910,7 @@ export function buildShopAnimalsEmbed(member: GuildMember): EmbedBuilder {
         `Баланс: **${fmt(u.rubles)}** ₽`,
         cur ? `Питомец: **${cur.label}**` : "Питомец: **нет**",
         shopUpgradeTradeInLine(PET_TRADE_IN_RATE),
-        "Уход в **00:00 МСК**: списание ₽ и начисление СР; без денег на содержание бонус СР **не начисляется**.",
-        "Жильё для питомцев — только **собственность** (аренда не подходит).",
-        "",
-        ...lines,
+        "Уход в **00:00 МСК** — ₽ и СР. Нужна **своя** квартира (не аренда).",
       ].join("\n"),
     );
 }
@@ -1431,32 +1361,22 @@ function inflatedSimShopPrice(guildId: string, baseRub: number): number {
   return scaledShopPrice(guildId, baseRub);
 }
 
-function shopSimCommonEmbedLines(member: GuildMember): string[] {
+type ShopSimEmbedOpts = { showHints?: boolean };
+
+function shopSimStatusLines(member: GuildMember, opts: ShopSimEmbedOpts = {}): string[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const sim = formatSimNumberFromUser(u);
   const simParts = parseSimNumberParts(u);
   const simPrestige = simParts ? computeSimPrestige(simParts) : undefined;
-  const lines = [
-    `Баланс счёта: **${fmt(u.rubles)}** ₽`,
-    "",
-    "Формат: **+7 9XX-XXX-XX-XX** — полный номер **уникален** на сервере.",
-    "",
-    ...SIM_SHOP_PRESTIGE_HINT_LINES,
-    "",
-    sim ? `Текущий номер: **${sim}**` : "Симка: **не оформлена**",
-  ];
+  const lines = [`Баланс: **${fmt(u.rubles)}** ₽`, sim ? `Номер: **${sim}**` : "Симка: **не оформлена**"];
   if (simPrestige && simPrestige.total > 0) {
-    lines.push(`Престиж с номера: **${fmt(simPrestige.total)}**`);
-    lines.push(`(${formatSimPrestigeBreakdownShort(simPrestige)})`);
+    lines.push(`Престиж: **${fmt(simPrestige.total)}**`);
   } else if (sim) {
-    lines.push("Престиж с номера: **0**");
+    lines.push("Престиж: **0**");
   }
-  if (sim) {
-    lines.push(`Баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**`);
-  }
-  if (!u.hasPhone) {
-    lines.push("", "Сначала купите **телефон** в магазине.");
-  }
+  if (sim) lines.push(`Баланс сим: **${fmt(u.simBalanceRub ?? 0)} ₽**`);
+  if (opts.showHints) lines.push("", ...SIM_SHOP_PRESTIGE_HINT_LINES);
+  if (!u.hasPhone) lines.push("", "Сначала купите **телефон**.");
   return lines;
 }
 
@@ -1464,35 +1384,24 @@ export function buildShopSimEmbed(member: GuildMember, lastRoll?: SimShopLastRol
   const u = getEconomyUser(member.guild.id, member.id);
   const hasSim = userHasSimNumber(u);
   const regCost = SHOP_SIM_REGISTER_BASE_RUB;
-  const lines = [...shopSimCommonEmbedLines(member)];
+  const lines = [...shopSimStatusLines(member, { showHints: !hasSim })];
   if (!hasSim) {
-    lines.push("", `**Первая симка** — **${regCost} ₽**, случайный свободный номер, на баланс сим **+${SHOP_SIM_START_BALANCE_RUB} ₽**.`);
-  } else {
-    lines.push("", "**Пополнение** — с основного счёта на баланс сим.", "**Изменить номер** — смена оператора, середины или конца.");
+    lines.push("", `Первая симка — **${regCost} ₽** (+**${SHOP_SIM_START_BALANCE_RUB} ₽** на баланс сим).`);
   }
   if (lastRoll) lines.push(...formatSimRollEmbedFooter(lastRoll));
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Симка").setDescription(lines.join("\n"));
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Симка").setDescription(lines.join("\n"));
 }
 
 export function buildShopSimChangeEmbed(member: GuildMember, lastRoll?: SimShopLastRoll): EmbedBuilder {
-  const gid = member.guild.id;
-  const opCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_OPERATOR_BASE_RUB);
-  const midCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_MID_BASE_RUB);
-  const lastCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_LAST_BASE_RUB);
   const lines = [
-    ...shopSimCommonEmbedLines(member),
+    ...shopSimStatusLines(member),
     "",
-    "**Смена номера**",
-    `**Оператор** (код **9XX**) — **${fmt(opCost)}** ₽`,
-    `**Середина** (**XXX**) — **${fmt(midCost)}** ₽`,
-    `**Конец** (**XX-XX**) — **${fmt(lastCost)}** ₽`,
-    "",
-    "При смене одного блока **два других** могут совпасть с чужим номером.",
+    "Выберите блок. Два других могут совпасть с чужим номером.",
   ];
   if (lastRoll) lines.push(...formatSimRollEmbedFooter(lastRoll));
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Магазин · Симка · изменить номер")
+    .setTitle("Симка · смена номера")
     .setDescription(lines.join("\n"));
 }
 

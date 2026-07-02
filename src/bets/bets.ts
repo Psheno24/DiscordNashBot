@@ -621,9 +621,9 @@ function formatUserStakesUnderRules(ev: BetEvent, stakes: PlacedBet[]): string {
     const label = ev.options.find((o) => o.id === bet.optionId)?.label ?? bet.optionId;
     const oddStr = bet.oddsAtPlacement.toLocaleString("ru-RU");
     const pot = Math.floor(bet.amount * bet.oddsAtPlacement);
-    return `• **${label}** · **${bet.amount.toLocaleString("ru-RU")} ₽** · кэф при приёме **x${oddStr}** (до **${pot.toLocaleString("ru-RU")} ₽**)`;
+    return `• **${label}** · **${bet.amount.toLocaleString("ru-RU")} ₽** · x${oddStr} (до **${pot.toLocaleString("ru-RU")} ₽**)`;
   });
-  return ["", "**Ваши ставки** (коэффициент зафиксирован при приёме):", ...lines, ""].join("\n");
+  return ["", "**Ваши ставки:**", ...lines].join("\n");
 }
 
 function buildBetRepeatWarningEmbed(ev: BetEvent, userId: string, pickedLabel: string): EmbedBuilder {
@@ -740,12 +740,11 @@ function betStatusDescriptionLine(ev: BetEvent): string {
 
 function buildBetEmbed(ev: BetEvent): EmbedBuilder {
   const statusLine = betStatusDescriptionLine(ev);
-
   const opts = ev.options.map((o) => `• **${o.label}** — x${o.odds.toLocaleString("ru-RU")}`).join("\n");
   return new EmbedBuilder()
     .setColor(BET_COLOR)
     .setTitle(`Ставка: ${ev.title}`)
-    .setDescription([statusLine, "", "Коэффициенты:", opts].join("\n"));
+    .setDescription([statusLine, "", opts].join("\n"));
 }
 
 function buildBetRows(ev: BetEvent): ActionRowBuilder<ButtonBuilder>[] {
@@ -776,10 +775,9 @@ function buildBetMenuEmbed(ev: BetEvent, balanceRub: number, userId: string): Em
         "",
         "Коротко: ставок можно несколько; принятую ставку отменить нельзя; кэф фиксируется в момент приёма.",
         stakesBlock,
-        "**Актуальные коэффициенты:**",
         opts,
         "",
-        "Выберите исход ниже.",
+        "Выберите исход.",
       ].join("\n"),
     );
 }

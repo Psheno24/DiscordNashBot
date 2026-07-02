@@ -303,12 +303,10 @@ export type SimShopLastRoll = {
 };
 
 export function formatSimRollEmbedFooter(roll: SimShopLastRoll): string[] {
-  const lines = ["", "---", `**${roll.action}:** ${roll.number}`];
+  const lines = ["", `**${roll.action}:** ${roll.number}`];
   const d = roll.prestigeDelta;
-  if (d > 0) lines.push(`**+${d.toLocaleString("ru-RU")}** к престижу профиля`);
-  else if (d < 0) lines.push(`**${d.toLocaleString("ru-RU")}** к престижу профиля`);
-  else lines.push("Престиж профиля без изменений");
-  lines.push(`(${formatSimPrestigeBreakdownShort(roll.breakdown)})`);
+  if (d > 0) lines.push(`Престиж: **+${d.toLocaleString("ru-RU")}**`);
+  else if (d < 0) lines.push(`Престиж: **${d.toLocaleString("ru-RU")}**`);
   return lines;
 }
 
@@ -320,6 +318,5 @@ export function formatSimPrestigeBreakdownEmbedLines(b: SimPrestigeBreakdown): s
 }
 
 export const SIM_SHOP_PRESTIGE_HINT_LINES = [
-  "Престиж за **красоту цифр**: повторы, зеркала, серии, ритмы — по **блокам** и за **весь номер** (ниже, чем у госномера).",
-  "Максимум — **все девятки**; сильны номера вроде **9292929292** (ритм и повторы). Полный номер **уникален** на сервере.",
+  "Красивые цифры дают престиж (повторы, зеркала, серии). Номер **уникален** на сервере.",
 ];
