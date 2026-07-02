@@ -20,7 +20,6 @@ export function buildNeuroMainPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_MAIN_ADMIN).setLabel("Админ").setStyle(ButtonStyle.Danger),
-      new ButtonBuilder().setCustomId(NEURO_ADMIN_CREATE_BET_ID).setLabel("Добавить ставку").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(NEURO_MAIN_INFO).setLabel("Инфо").setStyle(ButtonStyle.Secondary),
     ),
   ];
@@ -34,8 +33,7 @@ export function buildAdminHubEmbed(): EmbedBuilder {
       [
         "**Настройки** — каналы бота и налоги (казна страны).",
         "**Экономика** — список ставок; выдача и изъятие ₽ — только у **владельца сервера**.",
-        "",
-        "Создать новую ставку — кнопка **«Добавить ставку»** на главной панели нейроконтроля.",
+        "Создать новую ставку — внутри раздела **Экономика**.",
       ].join("\n"),
     );
 }
@@ -67,6 +65,7 @@ export function buildAdminEconEmbed(): EmbedBuilder {
 export function buildAdminEconRows(isGuildOwner: boolean): ActionRowBuilder<ButtonBuilder>[] {
   const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId("neuroAdmin:bets").setLabel("Ставки").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(NEURO_ADMIN_CREATE_BET_ID).setLabel("Добавить ставку").setStyle(ButtonStyle.Primary),
     new ButtonBuilder().setCustomId(NEURO_ADMIN_LOTTERY).setLabel("Лотерея").setStyle(ButtonStyle.Secondary),
   );
   if (isGuildOwner) {

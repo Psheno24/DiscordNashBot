@@ -396,29 +396,21 @@ function buildTerminalPanelEmbed(guildName: string): EmbedBuilder {
 function buildTerminalPanelRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const showHousing = (u.housingKind ?? "none") === "rent";
-  if (showHousing) {
-    return [
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_BUTTON_PROFILE).setLabel("Профиль").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(ECON_BUTTON_HOUSING).setLabel("Жильё").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Работа").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(ECON_BUTTON_SHOP).setLabel("Магазин").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(ECON_BUTTON_SKILLS).setLabel("Навыки").setStyle(ButtonStyle.Secondary),
-      ),
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_BUTTON_PLAYERS).setLabel("Игроки").setStyle(ButtonStyle.Secondary),
-      ),
-    ];
-  }
-  return [
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_PROFILE).setLabel("Профиль").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_WORK).setLabel("Работа").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_SHOP).setLabel("Магазин").setStyle(ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_BUTTON_SKILLS).setLabel("Навыки").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_BUTTON_PLAYERS).setLabel("Игроки").setStyle(ButtonStyle.Secondary),
     ),
   ];
+  if (showHousing) {
+    rows[1]?.addComponents(new ButtonBuilder().setCustomId(ECON_BUTTON_HOUSING).setLabel("Аренда").setStyle(ButtonStyle.Secondary));
+  }
+  return rows;
 }
 
 function buildTerminalPublicEmbed(guildId: string, guildName: string): EmbedBuilder {
@@ -430,7 +422,7 @@ function buildTerminalPublicEmbed(guildId: string, guildName: string): EmbedBuil
       [
         "**Нейроком** — да здравствует ИИ в общине советских граждан!",
         "",
-        "Управляй своей жизнью в государстве, нажав на кнопку **«Мой профиль»** (видно только тебе).",
+        "Управляй своей жизнью в государстве, нажав на кнопку **«Открыть меню»** (видно только тебе).",
         "",
         ...macro,
       ].join("\n"),
@@ -441,7 +433,7 @@ function buildTerminalPublicEmbed(guildId: string, guildName: string): EmbedBuil
 function buildTerminalPublicRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Мой профиль").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Открыть меню").setStyle(ButtonStyle.Primary),
     ),
   ];
 }
@@ -549,6 +541,8 @@ function buildProfileHubRows(member: GuildMember, active: "info" | "ladder" | "b
         .setCustomId(ECON_PROFILE_BUTTON_LADDER)
         .setLabel("Лестница")
         .setStyle(active === "ladder" ? ButtonStyle.Primary : ButtonStyle.Secondary),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(ECON_PROFILE_BUTTON_BETS_HISTORY)
         .setLabel("История ставок")
@@ -1630,6 +1624,9 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
         new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком (т2)").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER3).setLabel("Продвинутые (т3)").setStyle(ButtonStyle.Secondary),
       ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(ECON_BUTTON_SKILLS).setLabel("Навыки").setStyle(ButtonStyle.Secondary),
+      ),
       buildMenuRow(),
     ];
   }
@@ -1647,6 +1644,7 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
       .setLabel("Моя работа")
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(!u.jobId),
+    new ButtonBuilder().setCustomId(ECON_BUTTON_SKILLS).setLabel("Навыки").setStyle(ButtonStyle.Secondary),
   );
   rows.push(shiftRow);
   rows.push(
@@ -2288,18 +2286,22 @@ function buildSkillsRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[]
   const u = getEconomyUser(member.guild.id, member.id);
   const now = Date.now();
   const cooldownReady = !u.lastTrainAt || now >= u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS;
-  const row = new ActionRowBuilder<ButtonBuilder>();
-  for (const s of SKILLS) {
+  const trainRow1 = new ActionRowBuilder<ButtonBuilder>();
+  const trainRow2 = new ActionRowBuilder<ButtonBuilder>();
+  for (const [idx, s] of SKILLS.entries()) {
     const atMax = getSkillLevel(u, s.id) >= ECONOMY_SKILL_MAX;
-    row.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${ECON_SKILL_BUTTON_PREFIX}${s.id}`)
-        .setLabel(`Тренировать: ${s.title}`)
-        .setStyle(ButtonStyle.Primary)
-        .setDisabled(!cooldownReady || atMax),
-    );
+    const btn = new ButtonBuilder()
+      .setCustomId(`${ECON_SKILL_BUTTON_PREFIX}${s.id}`)
+      .setLabel(s.title)
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(!cooldownReady || atMax);
+    if (idx < 2) {
+      trainRow1.addComponents(btn);
+    } else {
+      trainRow2.addComponents(btn);
+    }
   }
-  return [row, buildMenuRow()];
+  return [trainRow1, trainRow2, shopNavBottomRow(ECON_BUTTON_WORK, "К работе")];
 }
 
 function buildFeedEmbed(guildId: string, guildName: string): EmbedBuilder {
