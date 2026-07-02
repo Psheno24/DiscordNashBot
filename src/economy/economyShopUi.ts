@@ -59,6 +59,7 @@ import {
 import {
   buildPlateUpgradeTips,
   computePlatePrestige,
+  platePrestigeRulesTableLines,
   formatPlateRollEmbedFooter,
   PLATE_SHOP_PRESTIGE_HINT_LINES,
   type PlateShopLastRoll,
@@ -83,6 +84,7 @@ import {
 } from "./economySimNumber.js";
 import {
   computeSimPrestige,
+  simPrestigeRulesTableLines,
   formatSimRollEmbedFooter,
   SIM_SHOP_PRESTIGE_HINT_LINES,
   type SimShopLastRoll,
@@ -139,6 +141,7 @@ export const ECON_SHOP_PLATE_REGISTER = "econ:shop:plate:reg";
 export const ECON_SHOP_PLATE_DIGITS = "econ:shop:plate:dig";
 export const ECON_SHOP_PLATE_LETTERS = "econ:shop:plate:let";
 export const ECON_SHOP_PLATE_REGION = "econ:shop:plate:regio";
+export const ECON_SHOP_PLATE_DETAILS = "econ:shop:plate:details";
 export const ECON_SHOP_CAR_SELL = "econ:shop:car:sell";
 export const ECON_SHOP_CAR_SELL_CONFIRM = "econ:shop:car:sell:ok";
 export const ECON_SHOP_CAR_SELL_CANCEL = "econ:shop:car:sell:cancel";
@@ -266,6 +269,7 @@ export const ECON_SHOP_SIM_OPERATOR = "econ:shop:sim:op";
 export const ECON_SHOP_SIM_MID = "econ:shop:sim:mid";
 export const ECON_SHOP_SIM_LAST = "econ:shop:sim:last";
 export const ECON_SHOP_SIM_TOPUP_OPEN = "econ:shop:sim:topupOpen";
+export const ECON_SHOP_SIM_DETAILS = "econ:shop:sim:details";
 export const ECON_SHOP_LOTTERY = "econ:shop:lottery";
 export const ECON_SHOP_APPEARANCE = "econ:shop:appearance";
 
@@ -339,6 +343,7 @@ export function buildShopPlateEmbed(member: GuildMember, lastRoll?: PlateShopLas
     `Баланс: **${fmt(u.rubles)}** ₽`,
     "",
     plate ? `Номер: **${plate}**` : "Госномер: **не оформлен**",
+    "Престиж = серия + цифры + регион + визуал + множители сочетаний.",
   ];
   if (!lastRoll) {
     lines.push("", ...PLATE_SHOP_PRESTIGE_HINT_LINES);
@@ -350,6 +355,17 @@ export function buildShopPlateEmbed(member: GuildMember, lastRoll?: PlateShopLas
   }
   if (lastRoll) lines.push(...formatPlateRollEmbedFooter(lastRoll));
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Гос.номер").setDescription(lines.join("\n"));
+}
+
+export function buildShopPlateDetailsEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const plateParts = parseVehiclePlateParts(u);
+  const lines = [...platePrestigeRulesTableLines()];
+  if (plateParts) {
+    const b = computePlatePrestige(plateParts);
+    lines.push("", `Ваш текущий номер даёт: **${fmt(b.total)}** престижа.`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Гос.номер · подробнее").setDescription(lines.join("\n"));
 }
 
 export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
@@ -394,7 +410,13 @@ export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<Button
     mainRow.addComponents(digitsBtn, lettersBtn, regionBtn);
   }
 
-  return [mainRow, shopNavBottomRow(ECON_SHOP_CAR)];
+  return [
+    mainRow,
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_PLATE_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+    ),
+    shopNavBottomRow(ECON_SHOP_CAR),
+  ];
 }
 
 export function buildShopCarSellConfirmEmbed(member: GuildMember): EmbedBuilder {
@@ -1396,6 +1418,7 @@ export function buildShopSimChangeEmbed(member: GuildMember, lastRoll?: SimShopL
   const lines = [
     ...shopSimStatusLines(member),
     "",
+    "Престиж = блоки (код/середина/конец) + весь номер + множители сочетаний.",
     "Выберите блок. Два других могут совпасть с чужим номером.",
   ];
   if (lastRoll) lines.push(...formatSimRollEmbedFooter(lastRoll));
@@ -1403,6 +1426,17 @@ export function buildShopSimChangeEmbed(member: GuildMember, lastRoll?: SimShopL
     .setColor(PANEL_COLOR)
     .setTitle("Симка · смена номера")
     .setDescription(lines.join("\n"));
+}
+
+export function buildShopSimDetailsEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const simParts = parseSimNumberParts(u);
+  const lines = [...simPrestigeRulesTableLines()];
+  if (simParts) {
+    const b = computeSimPrestige(simParts);
+    lines.push("", `Ваш текущий номер даёт: **${fmt(b.total)}** престижа.`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Симка · подробнее").setDescription(lines.join("\n"));
 }
 
 export function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
@@ -1466,6 +1500,9 @@ export function buildShopSimChangeRows(member: GuildMember): ActionRowBuilder<Bu
         .setLabel(`Конец · ${fmt(lastCost)}₽`)
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(!hasSim || !u.hasPhone || u.rubles < lastCost),
+    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_SIM_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
     ),
     shopNavBottomRow(ECON_SHOP_SIM),
   ];

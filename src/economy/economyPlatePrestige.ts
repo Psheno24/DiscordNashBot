@@ -306,6 +306,37 @@ export function formatPlatePrestigeBreakdownShort(b: PlatePrestigeBreakdown): st
   return parts.join(" · ") || "без бонусов";
 }
 
+export function platePrestigeRulesTableLines(): string[] {
+  const statusSeries = Object.entries(STATUS_SERIES_SCORES)
+    .sort((a, b) => b[1].score - a[1].score)
+    .map(([series, v]) => `${series}:${v.score.toLocaleString("ru-RU")}`)
+    .join(", ");
+  const regions = Object.entries(REGION_SCORES)
+    .sort((a, b) => b[1].score - a[1].score)
+    .map(([region, v]) => `${region}:${v.score.toLocaleString("ru-RU")}`)
+    .join(", ");
+  return [
+    "`Источник` | `Очки`",
+    "`Статусная серия` | `по таблице`",
+    "`Тройная серия ААА/ВВВ/МММ/ХХХ` | `+5 000`",
+    "`Цифры 001/007` | `+2 500`",
+    "`Цифры тройка` | `+3 000 (+доп бонус)`",
+    "`Цифры круглая сотня` | `+1 500`",
+    "`Цифры палиндром` | `+1 200`",
+    "`Цифры простой повтор` | `+500`",
+    "`Регион` | `по таблице`",
+    "`Визуал буква-цифра` | `+100 / +300 / +1 000`",
+    "`Множитель серия+регион` | `×1.35..×2.0`",
+    "`Множитель vanity` | `×1.5`",
+    "",
+    "**Статусные серии (все):**",
+    statusSeries,
+    "",
+    "**Регионы (все):**",
+    regions,
+  ];
+}
+
 const SUGGESTION_DIGITS = ["777", "999", "111", "888", "001", "007", "222", "333", "555", "666"] as const;
 
 type UpgradeSuggestion = {

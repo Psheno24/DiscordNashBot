@@ -142,6 +142,7 @@ import {
   sellOwnedCar,
   sellOwnedPhone,
   buildShopPlateEmbed,
+  buildShopPlateDetailsEmbed,
   buildShopPlateRows,
   buildShopCarSellConfirmEmbed,
   buildShopCarSellConfirmRows,
@@ -174,12 +175,14 @@ import {
   ECON_SHOP_PLATE_DIGITS,
   ECON_SHOP_PLATE_LETTERS,
   ECON_SHOP_PLATE_REGION,
+  ECON_SHOP_PLATE_DETAILS,
   ECON_SHOP_CAR_SELL,
   ECON_SHOP_CAR_SELL_CONFIRM,
   ECON_SHOP_CAR_SELL_CANCEL,
   ECON_SHOP_APPEARANCE,
   shopNavBottomRow,
   buildShopSimEmbed,
+  buildShopSimDetailsEmbed,
   buildShopSimChangeEmbed,
   buildShopSimChangeRows,
   buildShopSimRows,
@@ -195,6 +198,7 @@ import {
   ECON_SHOP_SIM_MID,
   ECON_SHOP_SIM_LAST,
   ECON_SHOP_SIM_TOPUP_OPEN,
+  ECON_SHOP_SIM_DETAILS,
 } from "./economyShopUi.js";
 import {
   applyUnregisteredVehiclePenalty,
@@ -3362,6 +3366,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_SHOP_PLATE_DETAILS) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPlateDetailsEmbed(member)],
+      components: buildShopPlateRows(member),
+    });
+    return true;
+  }
+
   if (id === ECON_SHOP_CAR_SELL) {
     const u = getEconomyUser(member.guild.id, member.id);
     if (!getCarDef(u.ownedCarId)) {
@@ -3847,6 +3859,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     await replyOrUpdate(interaction, {
       embeds: [buildShopSimChangeEmbed(member, r.lastRoll)],
+      components: buildShopSimChangeRows(member),
+    });
+    return true;
+  }
+
+  if (id === ECON_SHOP_SIM_DETAILS) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopSimDetailsEmbed(member)],
       components: buildShopSimChangeRows(member),
     });
     return true;
