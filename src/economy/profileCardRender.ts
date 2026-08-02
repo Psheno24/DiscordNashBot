@@ -21,6 +21,8 @@ const AVATAR_Y = 108;
 const TEXT_X = 188;
 const LINE_H = 24;
 const GAP_SECTION = 8;
+const TEXT_RIGHT_PAD = 28;
+const BODY_BOTTOM_PAD = 56;
 
 const FONT_FAMILY = "ProfileDejaVu";
 
@@ -83,6 +85,37 @@ function drawTopBadge(ctx: SKRSContext2D, text: string, x: number, y: number, fi
   ctx.stroke();
   ctx.fillStyle = "#0a0a0a";
   ctx.fillText(text, x + padX, y + 17);
+}
+
+function topBadgeXRange(content: ProfileCardContent): { minX: number; maxX: number } | undefined {
+  const ranges: Array<{ minX: number; maxX: number }> = [];
+  if (content.isTopRub) ranges.push({ minX: W - 158, maxX: W - 158 + 98 });
+  if (content.isTopPs) {
+    const bx = content.isTopRub ? W - 158 : W - 148;
+    ranges.push({ minX: bx, maxX: bx + 100 });
+  }
+  if (ranges.length === 0) return undefined;
+  return {
+    minX: Math.min(...ranges.map((r) => r.minX)),
+    maxX: Math.max(...ranges.map((r) => r.maxX)),
+  };
+}
+
+function fitTextToWidth(ctx: SKRSContext2D, input: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
+  if (ctx.measureText(input).width <= maxWidth) return input;
+  const ellipsis = "…";
+  const ellipsisWidth = ctx.measureText(ellipsis).width;
+  if (ellipsisWidth > maxWidth) return "";
+  let lo = 0;
+  let hi = input.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    const candidate = `${input.slice(0, mid)}${ellipsis}`;
+    if (ctx.measureText(candidate).width <= maxWidth) lo = mid;
+    else hi = mid - 1;
+  }
+  return `${input.slice(0, lo)}${ellipsis}`;
 }
 
 function drawFrameEffects(ctx: SKRSContext2D, content: ProfileCardContent, accent: string): void {
@@ -157,18 +190,28 @@ export async function renderProfileCardPng(
   let y = 50;
   ctx.fillStyle = "#f0f0f0";
   ctx.font = `bold ${FONT_NAME}px "${FONT_FAMILY}Bold"`;
-  ctx.fillText(content.displayName, TEXT_X, y);
+  const badgeRange = topBadgeXRange(content);
+  const nameRightEdge = badgeRange ? badgeRange.minX - 14 : W - 12;
+  const nameMaxWidth = Math.max(0, nameRightEdge - TEXT_X);
+  ctx.fillText(fitTextToWidth(ctx, content.displayName, nameMaxWidth), TEXT_X, y);
 
   y += 34;
   ctx.font = `${FONT_BODY}px "${FONT_FAMILY}"`;
-  for (const line of content.lines) {
+  const bodyMaxWidth = Math.max(0, W - TEXT_X - TEXT_RIGHT_PAD);
+  const bodyBottomY = H - BODY_BOTTOM_PAD;
+  for (let i = 0; i < content.lines.length; i += 1) {
+    const line = content.lines[i];
     if (line === "") {
       y += GAP_SECTION;
       continue;
     }
+    if (y > bodyBottomY) break;
     ctx.fillStyle = line.startsWith("СР:") || line.startsWith("₽:") ? content.accent : "#d0d0d8";
     if (line.startsWith("Престиж:") || line.startsWith("Быт:")) ctx.fillStyle = "#e8e8f0";
-    ctx.fillText(line, TEXT_X, y);
+    const hasMoreBodyLines = content.lines.slice(i + 1).some((v) => v !== "");
+    const text = hasMoreBodyLines && y + LINE_H > bodyBottomY ? "…" : fitTextToWidth(ctx, line, bodyMaxWidth);
+    ctx.fillText(text, TEXT_X, y);
+    if (text === "…") break;
     y += LINE_H;
   }
 
