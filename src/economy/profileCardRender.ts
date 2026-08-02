@@ -14,6 +14,8 @@ const FONT_BODY = 19;
 const FONT_SMALL = 13;
 const FONT_BADGE = 14;
 const FONT_WATERMARK = 52;
+const MIN_FONT_NAME = 22;
+const MIN_FONT_BODY = 13;
 
 const AVATAR_SIZE = 140;
 const AVATAR_X = 32;
@@ -118,6 +120,68 @@ function fitTextToWidth(ctx: SKRSContext2D, input: string, maxWidth: number): st
   return `${input.slice(0, lo)}${ellipsis}`;
 }
 
+function splitTokenToWidth(ctx: SKRSContext2D, token: string, maxWidth: number): string[] {
+  const chars = Array.from(token);
+  const out: string[] = [];
+  let chunk = "";
+  for (const ch of chars) {
+    const candidate = `${chunk}${ch}`;
+    if (chunk.length === 0 || ctx.measureText(candidate).width <= maxWidth) {
+      chunk = candidate;
+      continue;
+    }
+    out.push(chunk);
+    chunk = ch;
+  }
+  if (chunk.length > 0) out.push(chunk);
+  return out;
+}
+
+function wrapTextToWidth(ctx: SKRSContext2D, text: string, maxWidth: number): string[] {
+  if (maxWidth <= 0) return [""];
+  if (ctx.measureText(text).width <= maxWidth) return [text];
+  const words = text.trim().split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) return [""];
+  const lines: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      current = candidate;
+      continue;
+    }
+    if (current) lines.push(current);
+    if (ctx.measureText(word).width <= maxWidth) {
+      current = word;
+      continue;
+    }
+    const parts = splitTokenToWidth(ctx, word, maxWidth);
+    for (let i = 0; i < parts.length - 1; i += 1) lines.push(parts[i] ?? "");
+    current = parts[parts.length - 1] ?? "";
+  }
+  if (current) lines.push(current);
+  return lines.length > 0 ? lines : [fitTextToWidth(ctx, text, maxWidth)];
+}
+
+type BodyRow = { text: string; source: string; isGap: boolean };
+
+function buildBodyRows(ctx: SKRSContext2D, lines: string[], maxWidth: number): BodyRow[] {
+  const rows: BodyRow[] = [];
+  for (const source of lines) {
+    if (source === "") {
+      rows.push({ text: "", source, isGap: true });
+      continue;
+    }
+    const wrapped = wrapTextToWidth(ctx, source, maxWidth);
+    for (const piece of wrapped) rows.push({ text: piece, source, isGap: false });
+  }
+  return rows;
+}
+
+function bodyLayoutHeight(rows: BodyRow[], lineHeight: number, gapHeight: number): number {
+  return rows.reduce((sum, row) => sum + (row.isGap ? gapHeight : lineHeight), 0);
+}
+
 function drawFrameEffects(ctx: SKRSContext2D, content: ProfileCardContent, accent: string): void {
   const pad = 8;
   drawRoundedRect(ctx, pad, pad, W - pad * 2, H - pad * 2, 14);
@@ -189,30 +253,62 @@ export async function renderProfileCardPng(
 
   let y = 50;
   ctx.fillStyle = "#f0f0f0";
-  ctx.font = `bold ${FONT_NAME}px "${FONT_FAMILY}Bold"`;
   const badgeRange = topBadgeXRange(content);
   const nameRightEdge = badgeRange ? badgeRange.minX - 14 : W - 12;
   const nameMaxWidth = Math.max(0, nameRightEdge - TEXT_X);
-  ctx.fillText(fitTextToWidth(ctx, content.displayName, nameMaxWidth), TEXT_X, y);
+  let nameFontSize = FONT_NAME;
+  for (let size = FONT_NAME; size >= MIN_FONT_NAME; size -= 1) {
+    ctx.font = `bold ${size}px "${FONT_FAMILY}Bold"`;
+    if (ctx.measureText(content.displayName).width <= nameMaxWidth) {
+      nameFontSize = size;
+      break;
+    }
+    nameFontSize = size;
+  }
+  ctx.font = `bold ${nameFontSize}px "${FONT_FAMILY}Bold"`;
+  const nameText =
+    ctx.measureText(content.displayName).width <= nameMaxWidth
+      ? content.displayName
+      : fitTextToWidth(ctx, content.displayName, nameMaxWidth);
+  ctx.fillText(nameText, TEXT_X, y);
 
-  y += 34;
-  ctx.font = `${FONT_BODY}px "${FONT_FAMILY}"`;
+  y += Math.round(nameFontSize * 1.12);
   const bodyMaxWidth = Math.max(0, W - TEXT_X - TEXT_RIGHT_PAD);
-  const bodyBottomY = H - BODY_BOTTOM_PAD;
-  for (let i = 0; i < content.lines.length; i += 1) {
-    const line = content.lines[i];
-    if (line === "") {
-      y += GAP_SECTION;
+  const bodyMaxHeight = H - BODY_BOTTOM_PAD - y;
+  const bodyLineCandidates = [FONT_BODY, FONT_BODY - 1, FONT_BODY - 2, FONT_BODY - 3, FONT_BODY - 4, FONT_BODY - 5]
+    .filter((v, i, arr) => v >= MIN_FONT_BODY && arr.indexOf(v) === i);
+  let bodyFontSize = FONT_BODY;
+  let lineHeight = LINE_H;
+  let gapHeight = GAP_SECTION;
+  let bodyRows: BodyRow[] = [];
+  for (const size of bodyLineCandidates) {
+    ctx.font = `${size}px "${FONT_FAMILY}"`;
+    const candidateRows = buildBodyRows(ctx, content.lines, bodyMaxWidth);
+    const candidateLineHeight = Math.max(16, Math.round(size * 1.22));
+    const candidateGapHeight = Math.max(6, Math.round(candidateLineHeight * 0.33));
+    const h = bodyLayoutHeight(candidateRows, candidateLineHeight, candidateGapHeight);
+    bodyFontSize = size;
+    lineHeight = candidateLineHeight;
+    gapHeight = candidateGapHeight;
+    bodyRows = candidateRows;
+    if (h <= bodyMaxHeight) break;
+  }
+  ctx.font = `${bodyFontSize}px "${FONT_FAMILY}"`;
+  let consumed = 0;
+  for (let i = 0; i < bodyRows.length; i += 1) {
+    const row = bodyRows[i];
+    const step = row.isGap ? gapHeight : lineHeight;
+    if (consumed + step > bodyMaxHeight) break;
+    if (row.isGap) {
+      y += step;
+      consumed += step;
       continue;
     }
-    if (y > bodyBottomY) break;
-    ctx.fillStyle = line.startsWith("СР:") || line.startsWith("₽:") ? content.accent : "#d0d0d8";
-    if (line.startsWith("Престиж:") || line.startsWith("Быт:")) ctx.fillStyle = "#e8e8f0";
-    const hasMoreBodyLines = content.lines.slice(i + 1).some((v) => v !== "");
-    const text = hasMoreBodyLines && y + LINE_H > bodyBottomY ? "…" : fitTextToWidth(ctx, line, bodyMaxWidth);
-    ctx.fillText(text, TEXT_X, y);
-    if (text === "…") break;
-    y += LINE_H;
+    ctx.fillStyle = row.source.startsWith("СР:") || row.source.startsWith("₽:") ? content.accent : "#d0d0d8";
+    if (row.source.startsWith("Престиж:") || row.source.startsWith("Быт:")) ctx.fillStyle = "#e8e8f0";
+    ctx.fillText(row.text, TEXT_X, y);
+    y += step;
+    consumed += step;
   }
 
   ctx.fillStyle = "#ffffff55";

@@ -21,11 +21,6 @@ function fmt(n: number): string {
   return n.toLocaleString("ru-RU");
 }
 
-function truncateLine(s: string, max = 52): string {
-  if (s.length <= max) return s;
-  return `${s.slice(0, max - 1)}…`;
-}
-
 function apartmentLabel(aptId: string | undefined): string {
   return getApartmentDef(aptId)?.label ?? "—";
 }
@@ -80,18 +75,18 @@ export function buildProfileCardContent(
     `Престиж: ${fmt(u.prestigePoints ?? 0)}`,
     `Быт: ${fmt(u.domesticPoints ?? 0)}`,
     "",
-    truncateLine(phoneLine(u)),
-    truncateLine(economyCarDisplayLine(u, { markdown: false })),
-    truncateLine(housingLine(u)),
-    truncateLine(`Питомец: ${pet?.label ?? "нет"}`),
+    phoneLine(u),
+    economyCarDisplayLine(u, { markdown: false }),
+    housingLine(u),
+    `Питомец: ${pet?.label ?? "нет"}`,
     "",
-    truncateLine(`Работа: ${jobName}`),
+    `Работа: ${jobName}`,
     `СР: ${fmt(u.psTotal)} (${formatServerPlace(psPlace, r.totalPlayers)})`,
     `₽: ${fmt(u.rubles)} (${formatServerPlace(rubPlace, r.totalPlayers)})`,
   ];
 
   return {
-    displayName: truncateLine(member.displayName, 28),
+    displayName: member.displayName,
     frameColorId: style.frameColorId,
     accent: style.accent,
     background: style.background,
