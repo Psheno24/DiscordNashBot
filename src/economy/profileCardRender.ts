@@ -120,46 +120,38 @@ function fitTextToWidth(ctx: SKRSContext2D, input: string, maxWidth: number): st
   return `${input.slice(0, lo)}${ellipsis}`;
 }
 
-function splitTokenToWidth(ctx: SKRSContext2D, token: string, maxWidth: number): string[] {
-  const chars = Array.from(token);
-  const out: string[] = [];
-  let chunk = "";
-  for (const ch of chars) {
-    const candidate = `${chunk}${ch}`;
-    if (chunk.length === 0 || ctx.measureText(candidate).width <= maxWidth) {
-      chunk = candidate;
-      continue;
-    }
-    out.push(chunk);
-    chunk = ch;
+function splitSemanticChunks(text: string): { chunks: string[]; hasLabel: boolean } {
+  const raw = text.trim();
+  if (!raw) return { chunks: [""], hasLabel: false };
+  const colonIx = raw.indexOf(":");
+  if (colonIx <= 0) {
+    return { chunks: raw.split(" · ").map((v) => v.trim()).filter((v) => v.length > 0), hasLabel: false };
   }
-  if (chunk.length > 0) out.push(chunk);
-  return out;
+  const label = raw.slice(0, colonIx + 1).trim();
+  const restRaw = raw.slice(colonIx + 1).trim();
+  const rest = restRaw.length > 0 ? restRaw.split(" · ").map((v) => v.trim()).filter((v) => v.length > 0) : [];
+  return { chunks: [label, ...rest], hasLabel: true };
 }
 
-function wrapTextToWidth(ctx: SKRSContext2D, text: string, maxWidth: number): string[] {
+function wrapSemanticText(ctx: SKRSContext2D, text: string, maxWidth: number): string[] {
   if (maxWidth <= 0) return [""];
   if (ctx.measureText(text).width <= maxWidth) return [text];
-  const words = text.trim().split(/\s+/).filter((w) => w.length > 0);
-  if (words.length === 0) return [""];
+  const { chunks, hasLabel } = splitSemanticChunks(text);
+  if (chunks.length === 0) return [fitTextToWidth(ctx, text, maxWidth)];
   const lines: string[] = [];
-  let current = "";
-  for (const word of words) {
-    const candidate = current ? `${current} ${word}` : word;
+  let current = chunks[0] ?? "";
+  for (let i = 1; i < chunks.length; i += 1) {
+    const sep = hasLabel && i === 1 ? " " : " · ";
+    const part = chunks[i] ?? "";
+    const candidate = `${current}${sep}${part}`;
     if (ctx.measureText(candidate).width <= maxWidth) {
       current = candidate;
       continue;
     }
-    if (current) lines.push(current);
-    if (ctx.measureText(word).width <= maxWidth) {
-      current = word;
-      continue;
-    }
-    const parts = splitTokenToWidth(ctx, word, maxWidth);
-    for (let i = 0; i < parts.length - 1; i += 1) lines.push(parts[i] ?? "");
-    current = parts[parts.length - 1] ?? "";
+    lines.push(ctx.measureText(current).width <= maxWidth ? current : fitTextToWidth(ctx, current, maxWidth));
+    current = part;
   }
-  if (current) lines.push(current);
+  lines.push(ctx.measureText(current).width <= maxWidth ? current : fitTextToWidth(ctx, current, maxWidth));
   return lines.length > 0 ? lines : [fitTextToWidth(ctx, text, maxWidth)];
 }
 
@@ -172,7 +164,7 @@ function buildBodyRows(ctx: SKRSContext2D, lines: string[], maxWidth: number): B
       rows.push({ text: "", source, isGap: true });
       continue;
     }
-    const wrapped = wrapTextToWidth(ctx, source, maxWidth);
+    const wrapped = wrapSemanticText(ctx, source, maxWidth);
     for (const piece of wrapped) rows.push({ text: piece, source, isGap: false });
   }
   return rows;
