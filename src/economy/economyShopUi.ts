@@ -129,7 +129,7 @@ function shopDetailsNavBottomRow(
   backLabel = "Назад",
 ): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(detailsId).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(detailsId).setLabel("Условия").setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(backId).setLabel(backLabel).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
   );
@@ -272,7 +272,7 @@ function shopBranchOwnershipBlock(u: EconomyUser, kind: "phone" | "car" | "house
 
 export function shopItemButtonLabel(short: string, cost: number): string {
   const s = short.length > 18 ? `${short.slice(0, 16)}…` : short;
-  return `${s} · ${fmt(cost)}₽`;
+  return `${s} · ${fmt(cost)} ₽`;
 }
 
 export function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
@@ -344,14 +344,14 @@ export function buildShopOriginPickRows(kind: "phone" | "car", backId: string): 
   if (kind === "phone") {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_SHOP_SIM).setLabel("Симка").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_SHOP_SIM).setLabel("Сим-карта").setStyle(ButtonStyle.Secondary),
       ),
     );
   }
   if (kind === "car") {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_SHOP_PLATE).setLabel("Гос.номер").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_SHOP_PLATE).setLabel("Госномер").setStyle(ButtonStyle.Secondary),
       ),
     );
   }
@@ -371,7 +371,7 @@ export function buildShopPlateEmbed(member: GuildMember, lastRoll?: PlateShopLas
   const lines = [
     `Баланс: **${fmt(u.rubles)}** ₽`,
     "",
-    plate ? `Номер: **${plate}**` : "Госномер: **не оформлен**",
+    plate ? `Госномер: **${plate}**` : "Госномер: **не оформлен**",
     "Престиж = серия + цифры + регион + визуал + множители сочетаний.",
   ];
   if (!lastRoll) {
@@ -383,7 +383,7 @@ export function buildShopPlateEmbed(member: GuildMember, lastRoll?: PlateShopLas
     lines.push("Престиж: **0**");
   }
   if (lastRoll) lines.push(...formatPlateRollEmbedFooter(lastRoll));
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Гос.номер").setDescription(lines.join("\n"));
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Госномер").setDescription(lines.join("\n"));
 }
 
 export function buildShopPlateDetailsEmbed(member: GuildMember): EmbedBuilder {
@@ -394,7 +394,7 @@ export function buildShopPlateDetailsEmbed(member: GuildMember): EmbedBuilder {
     const b = computePlatePrestige(plateParts);
     lines.push("", `Ваш текущий номер даёт: **${fmt(b.total)}** престижа.`);
   }
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Гос.номер · подробнее").setDescription(lines.join("\n"));
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Госномер · условия").setDescription(lines.join("\n"));
 }
 
 export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
@@ -409,17 +409,17 @@ export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<Button
 
   const digitsBtn = new ButtonBuilder()
     .setCustomId(ECON_SHOP_PLATE_DIGITS)
-    .setLabel(`Цифры · ${fmt(digCost)}₽`)
+    .setLabel(`Цифры · ${fmt(digCost)} ₽`)
     .setStyle(ButtonStyle.Secondary)
     .setDisabled(!hasPlate || u.rubles < digCost);
   const lettersBtn = new ButtonBuilder()
     .setCustomId(ECON_SHOP_PLATE_LETTERS)
-    .setLabel(`Буквы · ${fmt(letCost)}₽`)
+    .setLabel(`Буквы · ${fmt(letCost)} ₽`)
     .setStyle(ButtonStyle.Secondary)
     .setDisabled(!hasPlate || u.rubles < letCost);
   const regionBtn = new ButtonBuilder()
     .setCustomId(ECON_SHOP_PLATE_REGION)
-    .setLabel(`Регион · ${fmt(regioCost)}₽`)
+    .setLabel(`Регион · ${fmt(regioCost)} ₽`)
     .setStyle(ButtonStyle.Secondary)
     .setDisabled(!hasPlate || u.rubles < regioCost);
 
@@ -428,7 +428,7 @@ export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<Button
     mainRow.addComponents(
       new ButtonBuilder()
         .setCustomId(ECON_SHOP_PLATE_REGISTER)
-        .setLabel(`Оформить · ${fmt(regCost)}₽`)
+        .setLabel(`Оформить · ${fmt(regCost)} ₽`)
         .setStyle(ButtonStyle.Success)
         .setDisabled(!hasCar || u.rubles < regCost),
       ButtonBuilder.from(digitsBtn).setDisabled(true),
@@ -442,7 +442,7 @@ export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<Button
   return [
     mainRow,
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_PLATE_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_SHOP_PLATE_DETAILS).setLabel("Условия").setStyle(ButtonStyle.Secondary),
     ),
     shopNavBottomRow(ECON_SHOP_CAR),
   ];
@@ -678,7 +678,7 @@ export function buildShopHousePickEmbed(member: GuildMember): EmbedBuilder {
     "",
     ...shopBranchOwnershipBlock(u, "house"),
     "",
-    "Можно владеть **советским** и **заморским** жильём. **Аренда** — только советская, для работ **т2+**.",
+    "Можно владеть **советским** и **заморским** жильём. **Аренда** — только советская, для профессий **ур. 2+**.",
   ];
   if (hk === "owned" && u.ownedApartmentId) {
     lines.push("Своя квартира — аренда **недоступна**.");
@@ -709,7 +709,7 @@ export function buildShopHouseRentEmbed(member: GuildMember): EmbedBuilder {
   const lines = [
     `Баланс: **${fmt(u.rubles)}** ₽`,
     "",
-    "Аренда советского жилья — для работ **т2+**.",
+    "Аренда советского жилья — для профессий **ур. 2+**.",
   ];
   if (hk === "rent" && u.housingRentNextDueMs) {
     lines.push(`Оплачено **до** <t:${Math.floor(u.housingRentNextDueMs / 1000)}:R>.`);
@@ -730,15 +730,15 @@ export function buildShopHouseRentRows(member: GuildMember): ActionRowBuilder<Bu
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_HOUSE_RENT_1D)
-          .setLabel(`1 сут · ${fmt(inflatedHousingRentPrice(gid, "day"))}₽`)
+          .setLabel(`1 сут · ${fmt(inflatedHousingRentPrice(gid, "day"))} ₽`)
           .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_HOUSE_RENT_7D)
-          .setLabel(`7 сут · ${fmt(inflatedHousingRentPrice(gid, "week"))}₽`)
+          .setLabel(`7 сут · ${fmt(inflatedHousingRentPrice(gid, "week"))} ₽`)
           .setStyle(ButtonStyle.Secondary),
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_HOUSE_RENT_30D)
-          .setLabel(`30 сут · ${fmt(inflatedHousingRentPrice(gid, "month"))}₽`)
+          .setLabel(`30 сут · ${fmt(inflatedHousingRentPrice(gid, "month"))} ₽`)
           .setStyle(ButtonStyle.Secondary),
       ),
     );
@@ -746,7 +746,7 @@ export function buildShopHouseRentRows(member: GuildMember): ActionRowBuilder<Bu
   if (hk === "rent") {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE_LEAVE).setLabel("Съехать").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE_LEAVE).setLabel("Съехать с аренды").setStyle(ButtonStyle.Danger),
       ),
     );
   }
@@ -1507,7 +1507,7 @@ function shopSimStatusLines(member: GuildMember, opts: ShopSimEmbedOpts = {}): s
   const sim = formatSimNumberFromUser(u);
   const simParts = parseSimNumberParts(u);
   const simPrestige = simParts ? computeSimPrestige(simParts) : undefined;
-  const lines = [`Баланс: **${fmt(u.rubles)}** ₽`, sim ? `Номер: **${sim}**` : "Симка: **не оформлена**"];
+  const lines = [`Баланс: **${fmt(u.rubles)}** ₽`, sim ? `Номер: **${sim}**` : "Сим-карта: **не оформлена**"];
   if (simPrestige && simPrestige.total > 0) {
     lines.push(`Престиж: **${fmt(simPrestige.total)}**`);
   } else if (sim) {
@@ -1525,10 +1525,10 @@ export function buildShopSimEmbed(member: GuildMember, lastRoll?: SimShopLastRol
   const regCost = SHOP_SIM_REGISTER_BASE_RUB;
   const lines = [...shopSimStatusLines(member, { showHints: !hasSim })];
   if (!hasSim) {
-    lines.push("", `Первая симка — **${regCost} ₽** (+**${SHOP_SIM_START_BALANCE_RUB} ₽** на баланс сим).`);
+    lines.push("", `Первая сим-карта — **${regCost} ₽** (+**${SHOP_SIM_START_BALANCE_RUB} ₽** на баланс сим).`);
   }
   if (lastRoll) lines.push(...formatSimRollEmbedFooter(lastRoll));
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Симка").setDescription(lines.join("\n"));
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Сим-карта").setDescription(lines.join("\n"));
 }
 
 export function buildShopSimChangeEmbed(member: GuildMember, lastRoll?: SimShopLastRoll): EmbedBuilder {
@@ -1541,7 +1541,7 @@ export function buildShopSimChangeEmbed(member: GuildMember, lastRoll?: SimShopL
   if (lastRoll) lines.push(...formatSimRollEmbedFooter(lastRoll));
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Симка · смена номера")
+    .setTitle("Сим-карта · смена номера")
     .setDescription(lines.join("\n"));
 }
 
@@ -1553,7 +1553,7 @@ export function buildShopSimDetailsEmbed(member: GuildMember): EmbedBuilder {
     const b = computeSimPrestige(simParts);
     lines.push("", `Ваш текущий номер даёт: **${fmt(b.total)}** престижа.`);
   }
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Симка · подробнее").setDescription(lines.join("\n"));
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Сим-карта · условия").setDescription(lines.join("\n"));
 }
 
 export function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
@@ -1567,7 +1567,7 @@ export function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBu
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_SIM_REGISTER)
-          .setLabel(`Купить симку · ${regCost}₽`)
+          .setLabel(`Купить сим-карту · ${regCost} ₽`)
           .setStyle(ButtonStyle.Success)
           .setDisabled(!u.hasPhone || u.rubles < regCost),
       ),
@@ -1590,7 +1590,7 @@ export function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBu
   }
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_SIM_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_SHOP_SIM_DETAILS).setLabel("Условия").setStyle(ButtonStyle.Secondary),
     ),
   );
   rows.push(shopNavBottomRow(ECON_SHOP_PHONE, "К телефону"));
@@ -1609,22 +1609,22 @@ export function buildShopSimChangeRows(member: GuildMember): ActionRowBuilder<Bu
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(ECON_SHOP_SIM_OPERATOR)
-        .setLabel(`Оператор · ${fmt(opCost)}₽`)
+        .setLabel(`Оператор · ${fmt(opCost)} ₽`)
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(!hasSim || !u.hasPhone || u.rubles < opCost),
       new ButtonBuilder()
         .setCustomId(ECON_SHOP_SIM_MID)
-        .setLabel(`Середина · ${fmt(midCost)}₽`)
+        .setLabel(`Середина · ${fmt(midCost)} ₽`)
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(!hasSim || !u.hasPhone || u.rubles < midCost),
       new ButtonBuilder()
         .setCustomId(ECON_SHOP_SIM_LAST)
-        .setLabel(`Конец · ${fmt(lastCost)}₽`)
+        .setLabel(`Конец · ${fmt(lastCost)} ₽`)
         .setStyle(ButtonStyle.Secondary)
         .setDisabled(!hasSim || !u.hasPhone || u.rubles < lastCost),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_SIM_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_SHOP_SIM_DETAILS).setLabel("Условия").setStyle(ButtonStyle.Secondary),
     ),
     shopNavBottomRow(ECON_SHOP_SIM),
   ];
@@ -1694,7 +1694,7 @@ export function registerSimNumber(
 ): { ok: true; number: string; lastRoll: SimShopLastRoll } | { ok: false; reply: string } {
   const u = getEconomyUser(member.guild.id, member.id);
   if (!u.hasPhone) return { ok: false, reply: "Сначала купите **телефон**." };
-  if (userHasSimNumber(u)) return { ok: false, reply: "Симка **уже оформлена**." };
+  if (userHasSimNumber(u)) return { ok: false, reply: "Сим-карта **уже оформлена**." };
   const cost = SHOP_SIM_REGISTER_BASE_RUB;
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${cost} ₽**.` };
   const taken = guildTakenSimNumberKeys(member.guild.id, member.id);

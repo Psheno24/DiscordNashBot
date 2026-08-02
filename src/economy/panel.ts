@@ -447,7 +447,7 @@ function buildTerminalPublicEmbed(guildId: string, guildName: string): EmbedBuil
       [
         "**Нейроком** — да здравствует ИИ в общине советских граждан!",
         "",
-        "Управляй своей жизнью в государстве, нажав на кнопку **«Открыть меню»** (видно только тебе).",
+        "Управляй своей жизнью в государстве через кнопку **«Главное меню»** (видно только тебе).",
         "",
         ...macro,
       ].join("\n"),
@@ -458,7 +458,7 @@ function buildTerminalPublicEmbed(guildId: string, guildName: string): EmbedBuil
 function buildTerminalPublicRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Открыть меню").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Primary),
     ),
   ];
 }
@@ -570,7 +570,7 @@ function buildProfileHubRows(member: GuildMember, active: "info" | "ladder" | "b
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(ECON_PROFILE_BUTTON_DETAILS)
-        .setLabel("Подробнее")
+        .setLabel("Детали")
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId(ECON_PROFILE_BUTTON_BETS_HISTORY)
@@ -1111,7 +1111,7 @@ function tier3CareerEmbedLines(guildId: string, u: ReturnType<typeof getEconomyU
   if (jobId === "officeAnalyst") {
     lines.push(tier3OfficeShiftBonusLine(guildId));
   } else {
-    lines.push("**Положительные исходы смены** усиливаются **рангом** и **стриком** (в **Подробнее**).");
+    lines.push("**Положительные исходы смены** усиливаются **рангом** и **стриком** (в разделе **Условия**).");
   }
   return lines;
 }
@@ -1362,7 +1362,7 @@ function buildMyRentHomeRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_HOUSING_EDIT).setLabel("Изменить срок").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(ECON_HOUSING_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_HOUSING_DETAILS).setLabel("Условия").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_HOUSING_LEAVE).setLabel("Съехать с аренды").setStyle(ButtonStyle.Danger),
@@ -1480,7 +1480,7 @@ function buildShopLotteryRows(member: GuildMember): ActionRowBuilder<ButtonBuild
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY_BUY_OPEN).setLabel("Купить").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY_DETAILS).setLabel("Условия").setStyle(ButtonStyle.Secondary),
     ),
     shopNavBottomRow(ECON_SHOP_HUB),
   ];
@@ -1616,7 +1616,7 @@ function assemblerWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: num
 
 const WORK_SECTION_INTRO = [
   "Выберите уровень и профессию. **Смена** — после КД.",
-  "**т2/т3** — навыки + жильё (аренда или своя квартира).",
+  "**ур. 2/ур. 3** — навыки + жильё (аренда или своя квартира).",
 ].join("\n");
 
 function buildWorkMenuEmbed(member: GuildMember): EmbedBuilder {
@@ -1655,9 +1655,9 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
   if (!u.jobId) {
     return [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Начальные (т1)").setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком (т2)").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER3).setLabel("Продвинутые (т3)").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Начальные · ур. 1").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком · ур. 2").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER3).setLabel("Продвинутые · ур. 3").setStyle(ButtonStyle.Secondary),
       ),
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(ECON_BUTTON_SKILLS).setLabel("Навыки").setStyle(ButtonStyle.Secondary),
@@ -1684,9 +1684,9 @@ function buildWorkMenuRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>
   rows.push(shiftRow);
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Начальные (т1)").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком (т2)").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER3).setLabel("Продвинутые (т3)").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_STARTERS).setLabel("Начальные · ур. 1").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER2).setLabel("С навыком · ур. 2").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(ECON_WORK_BUTTON_TIER3).setLabel("Продвинутые · ур. 3").setStyle(ButtonStyle.Secondary),
     ),
   );
   rows.push(
@@ -1722,7 +1722,7 @@ function buildStarterJobsEmbed(member: GuildMember): EmbedBuilder {
   const lines = JOBS_STARTER.map((d) => jobOpeningLine(gid, d.id));
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Начальные (т1)")
+    .setTitle("Начальные · уровень 1")
     .setDescription(lines.join("\n\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
@@ -1732,7 +1732,7 @@ function buildTier2JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
   const lines = JOBS_TIER2.map((d) => `${jobOpeningLine(gid, d.id)} · ${formatJobTierReqLine(d)}`);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("С навыком (т2)")
+    .setTitle("С навыком · уровень 2")
     .setDescription(lines.join("\n\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
@@ -2003,7 +2003,7 @@ function buildTier3JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
   });
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Продвинутые (т3)")
+    .setTitle("Продвинутые · уровень 3")
     .setDescription(lines.join("\n\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
@@ -2100,7 +2100,7 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
 
   const jobDetailBtn = new ButtonBuilder()
     .setCustomId(`${ECON_WORK_BUTTON_JOB_DETAIL_PREFIX}${jobId}`)
-    .setLabel("Подробнее")
+    .setLabel("Условия")
     .setStyle(ButtonStyle.Secondary);
 
   if (u.jobId === jobId) {
@@ -2158,7 +2158,7 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
         .setDisabled(selectDisabled),
       new ButtonBuilder()
         .setCustomId(`${ECON_WORK_BUTTON_JOB_DETAIL_PREFIX}${jobId}`)
-        .setLabel("Подробнее")
+        .setLabel("Условия")
         .setStyle(ButtonStyle.Secondary),
     ),
   );
@@ -2175,7 +2175,7 @@ function buildCurrentJobEmbed(
     return new EmbedBuilder()
       .setColor(PANEL_COLOR)
       .setTitle("Работа")
-      .setDescription("Работа не выбрана. Откройте **Начальные (т1)** или другой уровень и выберите профессию.")
+      .setDescription("Работа не выбрана. Откройте раздел **Начальные · ур. 1** или другой уровень и выберите профессию.")
       .setFooter({ text: `Запросил: ${member.user.tag}` });
   }
   const def = getAnyJobDef(u.jobId);
@@ -2252,7 +2252,7 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   const curJobId = u.jobId;
   const myJobDetailBtn = new ButtonBuilder()
     .setCustomId(`${ECON_WORK_BUTTON_JOB_DETAIL_PREFIX}${curJobId}`)
-    .setLabel("Подробнее")
+    .setLabel("Условия")
     .setStyle(ButtonStyle.Secondary);
   if (u.jobId === "soleProp") {
     rows.push(
@@ -2362,7 +2362,7 @@ function buildSkillsRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[]
     }
   }
   trainRow2.addComponents(
-    new ButtonBuilder().setCustomId(ECON_SKILLS_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(ECON_SKILLS_DETAILS).setLabel("Детали навыков").setStyle(ButtonStyle.Secondary),
   );
   return [trainRow1, trainRow2, shopNavBottomRow(ECON_BUTTON_WORK, "К работе")];
 }
@@ -2950,7 +2950,7 @@ export function economyFormatTelegramWorkScreen(member: GuildMember): string {
 }
 
 export function economyFormatTelegramJobListScreen(tier: "t1" | "t2" | "t3"): string {
-  const title = tier === "t1" ? "Начальные (т1)" : tier === "t2" ? "С навыком (т2)" : "Продвинутые (т3)";
+  const title = tier === "t1" ? "Начальные · ур. 1" : tier === "t2" ? "С навыком · ур. 2" : "Продвинутые · ур. 3";
   return `<b>${title}</b>\n\nВыберите профессию:`;
 }
 
@@ -3018,7 +3018,7 @@ export function economyFormatJobCardScreen(member: GuildMember, jobId: JobId): s
 }
 
 export function economyFormatJobListScreen(guildId: string, tier: "t1" | "t2" | "t3"): string {
-  const title = tier === "t1" ? "Начальные (т1)" : tier === "t2" ? "С навыком (т2)" : "Продвинутые (т3)";
+  const title = tier === "t1" ? "Начальные · ур. 1" : tier === "t2" ? "С навыком · ур. 2" : "Продвинутые · ур. 3";
   const jobs = listWorkJobsByTier(tier);
   const lines = jobs.map((id) => `· ${jobOpeningLine(guildId, id)}`);
   return economyMarkdownToTelegramHtml(`<b>${title}</b>\n\n${lines.join("\n")}\n\nВыбери профессию ниже.`);
@@ -4465,7 +4465,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const nowTake = Date.now();
     if ((isTier2JobId(jobId) || isTier3PanelJob(jobId)) && !hasTier2PlusHousing(cur, nowTake)) {
       await interaction.reply({
-        content: "Сначала оформите **жильё** (аренда или своя квартира) в магазине терминала — **обязательное** условие для работ **тир 2+**.",
+        content: "Сначала оформите **жильё** (аренда или своя квартира) в магазине терминала — **обязательное** условие для профессий **ур. 2+**.",
         flags: MessageFlags.Ephemeral,
       });
       return true;
@@ -4515,7 +4515,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const nowSw = Date.now();
     if ((isTier2JobId(jobId) || isTier3PanelJob(jobId)) && !hasTier2PlusHousing(cur, nowSw)) {
       await interaction.reply({
-        content: "Сначала оформите **жильё** (аренда или своя квартира) в магазине терминала — **обязательное** условие для работ **тир 2+**.",
+        content: "Сначала оформите **жильё** (аренда или своя квартира) в магазине терминала — **обязательное** условие для профессий **ур. 2+**.",
         flags: MessageFlags.Ephemeral,
       });
       return true;

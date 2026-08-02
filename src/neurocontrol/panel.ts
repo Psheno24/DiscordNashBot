@@ -16,7 +16,7 @@ import { getPanelMessageId, setPanelMessageId } from "./panelStore.js";
 import { buildNeuroMainPanelRows, NEURO_MAIN_INFO } from "./adminHub.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 
-const PANEL_COLOR = 0x263238;
+const PANEL_COLOR = 0x2b2d31;
 const ROLES_COLOR = 0xb71c1c;
 const NEURO_ROLES_DETAILS = "neuro:roles:details";
 const NEURO_ROLES_LADDER = "neuro:roles:ladder";
@@ -32,7 +32,12 @@ function isNeuroControlChannelForGuild(ch: Channel, guildId: string): boolean {
 
 function buildPanelEmbed(cfg: NeurocontrolFile, guildId: string): EmbedBuilder {
   const treasury = getGuildConfig(guildId).treasuryRubles ?? 0;
-  const desc = `Диспетчерский пункт ИИ Управления.\n\n**Казна:** **${fmtTreasuryRub(treasury)}** ₽`;
+  const desc = [
+    "Центральная панель нейроконтроля сервера.",
+    "",
+    `**Казна:** **${fmtTreasuryRub(treasury)}** ₽`,
+    "Откройте разделы через кнопки ниже.",
+  ].join("\n");
   const e = new EmbedBuilder().setColor(PANEL_COLOR).setTitle(cfg.panel.title).setDescription(desc);
   if (cfg.panel.footer) e.setFooter({ text: cfg.panel.footer });
   return e;
@@ -77,7 +82,7 @@ function buildRoleRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_MAIN_INFO).setLabel("Список").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(NEURO_ROLES_DETAILS).setLabel("Полномочия").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(NEURO_ROLES_DETAILS).setLabel("Детали ролей").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(NEURO_ROLES_LADDER).setLabel("Пороги лестницы").setStyle(ButtonStyle.Secondary),
     ),
   ];

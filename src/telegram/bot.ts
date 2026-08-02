@@ -98,10 +98,10 @@ function workMenuKeyboard(member: GuildMember): InlineKb {
   const u = getEconomyUser(member.guild.id, member.id);
   const rows: InlineBtn[][] = [
     row(
-      { text: "Начальные (т1)", callback_data: "wt1" },
-      { text: "С навыком (т2)", callback_data: "wt2" },
+      { text: "Начальные · ур. 1", callback_data: "wt1" },
+      { text: "С навыком · ур. 2", callback_data: "wt2" },
     ),
-    row({ text: "Продвинутые (т3)", callback_data: "wt3" }),
+    row({ text: "Продвинутые · ур. 3", callback_data: "wt3" }),
   ];
   if (u.jobId) {
     const now = Date.now();
@@ -126,7 +126,7 @@ function tierListKeyboard(tier: "t1" | "t2" | "t3"): InlineKb {
     const title = economyJobTitle(id);
     rows.push(row({ text: title.slice(0, 28), callback_data: `j:${id}` }));
   }
-  rows.push(row({ text: "← Работа", callback_data: "w" }, { text: "Меню", callback_data: "m" }));
+  rows.push(row({ text: "← Работа", callback_data: "w" }, { text: "Главное меню", callback_data: "m" }));
   return kb(...rows);
 }
 
@@ -184,7 +184,7 @@ function skillsKeyboard(member: GuildMember): InlineKb {
     { text: ready ? "Логистика" : "КД…", callback_data: "tr:logistics" },
   );
   const trainRow2 = row({ text: ready ? "Дисциплина" : "КД…", callback_data: "tr:discipline" });
-  return kb(trainRow, trainRow2, row({ text: "Работа", callback_data: "w" }, { text: "Меню", callback_data: "m" }));
+  return kb(trainRow, trainRow2, row({ text: "Работа", callback_data: "w" }, { text: "Главное меню", callback_data: "m" }));
 }
 
 function shiftNotifyKeyboard(): InlineKb {
@@ -434,7 +434,7 @@ async function handleTake(
       if (ack) await answerCallback(token, ack.id, "Нужно жильё");
       await presentPanel(tgUserId, token, chatId, {
         text:
-          "Сначала оформите <b>жильё</b> (аренда или квартира) в магазине терминала Discord — для работ тир 2+.\n\n" +
+          "Сначала оформите <b>жильё</b> (аренда или квартира) в магазине терминала Discord — для профессий ур. 2+.\n\n" +
           economyFormatTelegramWorkScreen(ctx.member),
         markup: workMenuKeyboard(ctx.member),
       }, { messageId });
@@ -618,7 +618,7 @@ function skillsKeyboardForUser(u: ReturnType<typeof getEconomyUser>): InlineKb {
       { text: ready ? "Логистика" : "КД…", callback_data: "tr:logistics" },
     ),
     row({ text: ready ? "Дисциплина" : "КД…", callback_data: "tr:discipline" }),
-    row({ text: "Работа", callback_data: "w" }, { text: "Меню", callback_data: "m" }),
+    row({ text: "Работа", callback_data: "w" }, { text: "Главное меню", callback_data: "m" }),
   );
 }
 

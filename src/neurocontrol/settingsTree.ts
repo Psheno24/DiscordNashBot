@@ -54,7 +54,7 @@ const NEURO_SELECT_NEUROCONTROL = "neuro:cfg:neurocontrol";
 const NEURO_SELECT_ECONOMY_TERMINAL = "neuro:cfg:economyTerminal";
 const NEURO_SELECT_ECONOMY_FEED = "neuro:cfg:economyFeed";
 
-const SETTINGS_COLOR = 0x0d47a1;
+const SETTINGS_COLOR = 0x2b2d31;
 
 function canManage(interaction: ButtonInteraction | ChannelSelectMenuInteraction | ModalSubmitInteraction): boolean {
   return (
@@ -92,8 +92,8 @@ function buildSettingsRootEmbed(guildId: string): EmbedBuilder {
     .setDescription(
       [
         "**Каналы** — приветствия, панель, терминал, лента.",
-        "**Налоги** — подоходный, комиссия ИП, казна.",
-        "**Макро** — индексация зарплат и инфляция.",
+        "**Налоги** — подоходный, НДС, комиссия ИП и казна.",
+        "**Макро** — индексация доходов и инфляция цен.",
         "",
         `Казна: **${fmtTreasury(guildId)}** ₽`,
       ].join("\n"),
@@ -211,7 +211,7 @@ function buildGeneralTaxRows(): ActionRowBuilder<ButtonBuilder>[] {
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_TAX_OPEN_LEGAL).setLabel("Подоходный, %").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(NEURO_TAX_OPEN_VAT).setLabel("НДС, %").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(NEURO_TAX_GENERAL_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(NEURO_TAX_GENERAL_DETAILS).setLabel("Правила").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_SETTINGS_TAXES).setLabel("Назад").setStyle(ButtonStyle.Secondary),
@@ -244,8 +244,8 @@ function buildMacroEmbed(guildId: string): EmbedBuilder {
     .setDescription(
       [
         `**Индексация (настройка):** **${indexing}** % за цикл`,
-        `**Текущий множитель доходов:** **×${salaryMult.toFixed(4)}**`,
-        `**Текущий множитель цен магазина:** **×${priceMult.toFixed(4)}** (сим-карта и лотерея **без** инфляции)`,
+        `**Текущий множитель доходов:** **×${salaryMult.toFixed(2)}**`,
+        `**Текущий множитель цен магазина:** **×${priceMult.toFixed(2)}** (сим-карта и лотерея **без** инфляции)`,
       ].join("\n"),
     );
 }
@@ -254,7 +254,7 @@ function buildMacroRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_MACRO_OPEN_INDEXING).setLabel("Индексация, %").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(NEURO_MACRO_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(NEURO_MACRO_DETAILS).setLabel("Правила").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_BUTTON_ADMIN_SETTINGS_ROOT).setLabel("Назад").setStyle(ButtonStyle.Secondary),
@@ -267,7 +267,7 @@ function buildIpTaxRows(): ActionRowBuilder<ButtonBuilder>[] {
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_TAX_OPEN_IP_WD).setLabel("Комиссия").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(NEURO_TAX_OPEN_IP_CAP).setLabel("Налог").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(NEURO_TAX_IP_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(NEURO_TAX_IP_DETAILS).setLabel("Правила").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_SETTINGS_TAXES).setLabel("Назад").setStyle(ButtonStyle.Secondary),
