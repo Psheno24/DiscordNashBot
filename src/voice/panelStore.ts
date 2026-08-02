@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeJsonAtomicSync } from "../storage/atomicJson.js";
 
 interface Store {
   /** channelId → messageId последней панели */
@@ -29,6 +30,6 @@ export function getVoiceLadderPanelMessageId(channelId: string): string | undefi
 export function setVoiceLadderPanelMessageId(channelId: string, messageId: string) {
   const s = readStore();
   s.messages[channelId] = messageId;
-  writeFileSync(storePath(), JSON.stringify(s, null, 2), "utf-8");
+  writeJsonAtomicSync(storePath(), s);
 }
 

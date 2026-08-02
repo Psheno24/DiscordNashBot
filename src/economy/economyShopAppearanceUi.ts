@@ -18,7 +18,7 @@ import {
   type ProfileFrameColorId,
 } from "./profileThemes.js";
 import { shopNavBottomRow } from "./economyShopUi.js";
-import { getEconomyUser, patchEconomyUser } from "./userStore.js";
+import { getEconomyUser, trySpendEconomyUserRubles, updateEconomyUser } from "./userStore.js";
 
 const ECON_SHOP_HUB_BACK = "econ:shop:hub";
 
@@ -193,17 +193,18 @@ export async function handleAppearanceShopButton(interaction: ButtonInteraction,
       });
       return true;
     }
-    if (u.rubles < PROFILE_COLOR_CHANGE_PRICE_RUB) {
+    const spend = trySpendEconomyUserRubles(member.guild.id, member.id, PROFILE_COLOR_CHANGE_PRICE_RUB);
+    if (!spend.ok) {
       await interaction.reply({
         content: `Нужно **${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)}** ₽.`,
         flags: MessageFlags.Ephemeral,
       });
       return true;
     }
-    patchEconomyUser(member.guild.id, member.id, {
-      rubles: u.rubles - PROFILE_COLOR_CHANGE_PRICE_RUB,
+    updateEconomyUser(member.guild.id, member.id, (cur) => ({
+      ...cur,
       profileCardColor: colorId,
-    });
+    }));
     appendFeedEvent({
       ts: Date.now(),
       guildId: member.guild.id,

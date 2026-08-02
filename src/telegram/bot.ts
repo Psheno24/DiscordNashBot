@@ -43,6 +43,10 @@ type InlineKb = { inline_keyboard: InlineBtn[][] };
 
 type TgApiResult = { ok?: boolean; result?: { message_id?: number } };
 
+function runBackground(taskName: string, work: () => Promise<unknown>) {
+  void work().catch((e) => console.error(`Telegram ${taskName}:`, e));
+}
+
 function tgApi(token: string, method: string, body?: object): Promise<TgApiResult> {
   return fetch(`https://api.telegram.org/bot${token}/${method}`, {
     method: "POST",
@@ -639,13 +643,13 @@ export function startTelegramSidecar(client: Client): void {
   const restrict = telegramAllowedUserIds().size > 0;
   console.log(`Telegram: long poll + панели${restrict ? " (whitelist)" : ""}.`);
 
-  void tgApi(token, "deleteWebhook", { drop_pending_updates: true });
-  void registerBotCommands(token);
+  runBackground("deleteWebhook", () => tgApi(token, "deleteWebhook", { drop_pending_updates: true }));
+  runBackground("registerBotCommands", () => registerBotCommands(token));
 
   setInterval(() => {
-    void tickNotifications(client, token);
+    runBackground("tickNotifications", () => tickNotifications(client, token));
   }, 45_000);
-  void tickNotifications(client, token);
+  runBackground("tickNotifications startup", () => tickNotifications(client, token));
 
   let offset = 0;
   const poll = async () => {

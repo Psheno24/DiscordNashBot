@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   APARTMENT_MODELS,
@@ -18,6 +18,7 @@ import { migrateLegacySim5ToParts, parseSimNumberParts } from "./economySimNumbe
 import { computeSimPrestige } from "./economySimPrestige.js";
 import { nextHousingUtilityDueMs } from "./economyMacro.js";
 import { SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS } from "./shiftPayCoeff.js";
+import { writeJsonAtomicSync } from "../storage/atomicJson.js";
 
 export type JobId =
   | "courier"
@@ -227,7 +228,7 @@ function readStore(): StoreShape {
 }
 
 function writeStore(s: StoreShape) {
-  writeFileSync(storePath(), JSON.stringify(s, null, 2), "utf-8");
+  writeJsonAtomicSync(storePath(), s);
 }
 
 function stableLegacySimDigits(userId: string): string {
@@ -745,6 +746,42 @@ export function setEconomyUser(guildId: string, userId: string, next: EconomyUse
 }
 
 export function patchEconomyUser(guildId: string, userId: string, patch: Partial<EconomyUser>): EconomyUser {
-  const cur = getEconomyUser(guildId, userId);
-  return setEconomyUser(guildId, userId, { ...cur, ...patch });
+  return updateEconomyUser(guildId, userId, (cur) => ({ ...cur, ...patch }));
+}
+
+export function updateEconomyUser(
+  guildId: string,
+  userId: string,
+  updater: (current: EconomyUser) => EconomyUser,
+): EconomyUser {
+  const s = readStore();
+  if (!s.guilds[guildId]) s.guilds[guildId] = {};
+  const current = normalizeUser(s.guilds[guildId]![userId], userId);
+  const next = normalizeUser(updater(current), userId);
+  s.guilds[guildId]![userId] = next;
+  writeStore(s);
+  return next;
+}
+
+export function addEconomyUserRubles(guildId: string, userId: string, deltaRub: number): EconomyUser {
+  return updateEconomyUser(guildId, userId, (cur) => ({ ...cur, rubles: cur.rubles + deltaRub }));
+}
+
+export type SpendEconomyUserRublesResult = { ok: true; next: EconomyUser } | { ok: false; balance: number };
+
+export function trySpendEconomyUserRubles(guildId: string, userId: string, amountRub: number): SpendEconomyUserRublesResult {
+  const spend = Math.floor(amountRub);
+  if (!Number.isFinite(spend) || spend <= 0) {
+    return { ok: false, balance: getEconomyUser(guildId, userId).rubles };
+  }
+  const s = readStore();
+  if (!s.guilds[guildId]) s.guilds[guildId] = {};
+  const current = normalizeUser(s.guilds[guildId]![userId], userId);
+  if (current.rubles < spend) {
+    return { ok: false, balance: current.rubles };
+  }
+  const next = normalizeUser({ ...current, rubles: current.rubles - spend }, userId);
+  s.guilds[guildId]![userId] = next;
+  writeStore(s);
+  return { ok: true, next };
 }

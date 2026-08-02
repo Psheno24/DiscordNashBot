@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeJsonAtomicSync } from "../storage/atomicJson.js";
 
 interface StoreShape {
   guilds: Record<string, Record<string, number>>;
@@ -28,7 +29,7 @@ export function addVoiceSeconds(guildId: string, userId: string, deltaSeconds: n
   const prev = s.guilds[guildId][userId] ?? 0;
   const next = prev + deltaSeconds;
   s.guilds[guildId][userId] = next;
-  writeFileSync(filePath(), JSON.stringify(s, null, 2), "utf-8");
+  writeJsonAtomicSync(filePath(), s);
   return next;
 }
 

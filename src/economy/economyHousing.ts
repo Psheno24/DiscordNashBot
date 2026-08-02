@@ -6,7 +6,7 @@ import {
   type HousingRentPlan,
 } from "./economyCatalog.js";
 import { isMskFirstCalendarDay } from "./mskCalendar.js";
-import { getEconomyUser, patchEconomyUser, type EconomyUser } from "./userStore.js";
+import { getEconomyUser, patchEconomyUser, updateEconomyUser, type EconomyUser } from "./userStore.js";
 import { remitShopPurchaseVatToTreasury } from "./taxTreasury.js";
 import { isTier3JobId, tier3PatchWhenJobChanges } from "./tier3Jobs.js";
 
@@ -86,11 +86,12 @@ function processForeignUtility(
   ) {
     const util = inflatedApartmentUtilityRub(guildId, u.ownedForeignApartmentId);
     if (util > 0 && u.rubles >= util) {
-      patchEconomyUser(guildId, userId, {
-        rubles: u.rubles - util,
+      updateEconomyUser(guildId, userId, (cur) => ({
+        ...cur,
+        rubles: cur.rubles - util,
         housingForeignUtilityNextDueMs: nextHousingUtilityDueMs(nowMs),
         ...mark,
-      });
+      }));
       remitShopPurchaseVatToTreasury(guildId, util);
     } else if (util > 0) {
       patchEconomyUser(guildId, userId, { ...mark });
@@ -119,16 +120,17 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
     const renewRub = inflatedHousingRentPrice(guildId, plan);
     const renewMs = housingRentPlanPeriodMs(plan);
     if (u.rubles >= renewRub) {
-      patchEconomyUser(guildId, userId, {
-        rubles: u.rubles - renewRub,
-        housingRentNextDueMs: u.housingRentNextDueMs + renewMs,
+      updateEconomyUser(guildId, userId, (cur) => ({
+        ...cur,
+        rubles: cur.rubles - renewRub,
+        housingRentNextDueMs: (cur.housingRentNextDueMs ?? nowMs) + renewMs,
         housingRentPlan: plan,
         housingRentRenewalPlan: undefined,
         housingRentLastPaidRub: renewRub,
         housingRentLastPeriodMs: renewMs,
-        housingRentTotalPaidRub: (u.housingRentTotalPaidRub ?? 0) + renewRub,
+        housingRentTotalPaidRub: (cur.housingRentTotalPaidRub ?? 0) + renewRub,
         ...mark,
-      });
+      }));
       remitShopPurchaseVatToTreasury(guildId, renewRub);
       appendFeedEvent({
         ts: nowMs,
@@ -173,11 +175,12 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
   ) {
     const util = inflatedApartmentUtilityRub(guildId, u.ownedApartmentId);
     if (util > 0 && u.rubles >= util) {
-      patchEconomyUser(guildId, userId, {
-        rubles: u.rubles - util,
+      updateEconomyUser(guildId, userId, (cur) => ({
+        ...cur,
+        rubles: cur.rubles - util,
         housingUtilityNextDueMs: nextHousingUtilityDueMs(nowMs),
         ...mark,
-      });
+      }));
       remitShopPurchaseVatToTreasury(guildId, util);
     } else if (util > 0) {
       patchEconomyUser(guildId, userId, { ...mark });

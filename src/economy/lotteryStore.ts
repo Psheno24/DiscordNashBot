@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeJsonAtomicSync } from "../storage/atomicJson.js";
 
 export const LOTTERY_TICKET_PRICE_RUB = 1_000;
 export const LOTTERY_MIN_JACKPOT_RUB = 100_000;
@@ -39,7 +40,7 @@ function readStore(): StoreShape {
 }
 
 function writeStore(s: StoreShape) {
-  writeFileSync(storePath(), JSON.stringify(s, null, 2), "utf-8");
+  writeJsonAtomicSync(storePath(), s);
 }
 
 function defaultState(periodMskYmd: string): GuildLotteryState {

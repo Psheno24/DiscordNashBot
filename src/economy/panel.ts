@@ -35,6 +35,8 @@ import {
   lastWorkAtForJob,
   listEconomyUsers,
   patchEconomyUser,
+  trySpendEconomyUserRubles,
+  updateEconomyUser,
   type EconomyUser,
   type JobId,
   type SkillId,
@@ -509,11 +511,20 @@ function buildVoiceLadderProgressLines(psTotal: number): string[] {
   return lines;
 }
 
-function ownedApartmentProfileBlockLine(guildId: string, aptId: string | undefined): string {
+function ownedApartmentProfileBlockLine(
+  guildId: string,
+  aptId: string | undefined,
+  purchasedAtMs?: number,
+): string {
   const apt = getApartmentDef(aptId);
   if (!apt) return "—";
   const util = inflatedApartmentUtilityRub(guildId, apt.id);
-  return `**${apt.label}** · ЖКХ **${fmt(util)}** ₽/мес.`;
+  const ownedDays =
+    purchasedAtMs != null && Number.isFinite(purchasedAtMs) && purchasedAtMs > 0
+      ? Math.max(0, Math.floor((Date.now() - purchasedAtMs) / 86_400_000))
+      : undefined;
+  const ownedPart = ownedDays != null ? ` · владеете **${ownedDays}** сут` : "";
+  return `**${apt.label}** · ЖКХ **${fmt(util)}** ₽/мес.${ownedPart}`;
 }
 
 function buildProfilePurchasesBlock(guildId: string, u: ReturnType<typeof getEconomyUser>): string[] {
@@ -535,11 +546,11 @@ function buildProfilePurchasesBlock(guildId: string, u: ReturnType<typeof getEco
     hk === "rent"
       ? "**аренда** (советское жильё)"
       : hk === "owned"
-        ? ownedApartmentProfileBlockLine(guildId, u.ownedApartmentId)
+        ? ownedApartmentProfileBlockLine(guildId, u.ownedApartmentId, u.ownedApartmentPurchasedAtMs)
         : "**нет** (сов.)";
   const homeFor =
     u.housingForeignKind === "owned"
-      ? ownedApartmentProfileBlockLine(guildId, u.ownedForeignApartmentId)
+      ? ownedApartmentProfileBlockLine(guildId, u.ownedForeignApartmentId, u.ownedForeignApartmentPurchasedAtMs)
       : "**нет** (зам.)";
   lines.push(`Жильё: ${homeSov} · ${homeFor}`);
   lines.push(`Престиж: **${fmt(u.prestigePoints ?? 0)}** · Быт: **${fmt(u.domesticPoints ?? 0)}**`);
@@ -4030,12 +4041,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       return true;
     }
     const total = qty * LOTTERY_TICKET_PRICE_RUB;
-    const u = getEconomyUser(member.guild.id, member.id);
-    if (u.rubles < total) {
+    const spend = trySpendEconomyUserRubles(member.guild.id, member.id, total);
+    if (!spend.ok) {
       await interaction.reply({ content: `Нужно **${fmt(total)}** ₽.`, flags: MessageFlags.Ephemeral });
       return true;
     }
-    patchEconomyUser(member.guild.id, member.id, { rubles: u.rubles - total });
     remitShopPurchaseVatToTreasury(member.guild.id, total);
     ensureDueLotteryDraws(member.guild);
     const period = lotteryPeriodMskYmd();
@@ -4189,12 +4199,17 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const ms = id === ECON_COURIER_BIKE_1D ? BIKE_1D_MS : id === ECON_COURIER_BIKE_3D ? BIKE_3D_MS : BIKE_7D_MS;
     const bikeDays: 1 | 3 | 7 = id === ECON_COURIER_BIKE_1D ? 1 : id === ECON_COURIER_BIKE_3D ? 3 : 7;
     const price = scaledShopPrice(member.guild.id, courierBikeRentPriceRub(bikeDays));
-    if (u.rubles < price) {
+    let bikeRentApplied = false;
+    updateEconomyUser(member.guild.id, member.id, (cur) => {
+      if (cur.rubles < price) return cur;
+      bikeRentApplied = true;
+      const nextUntil = extendBikeRentalMs(cur.courierBikeUntilMs, now, ms);
+      return { ...cur, rubles: cur.rubles - price, courierBikeUntilMs: nextUntil };
+    });
+    if (!bikeRentApplied) {
       await interaction.reply({ content: `Нужно **${price} ₽**.`, flags: MessageFlags.Ephemeral });
       return true;
     }
-    const nextUntil = extendBikeRentalMs(u.courierBikeUntilMs, now, ms);
-    patchEconomyUser(member.guild.id, member.id, { rubles: u.rubles - price, courierBikeUntilMs: nextUntil });
     remitShopPurchaseVatToTreasury(member.guild.id, price);
     const refreshed = courierWorkRefreshPayload(member, interaction);
     await updateButtonParentMessage(interaction, refreshed);
@@ -4388,10 +4403,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       const streak = u.jobMskDayStreak ?? 0;
       let bonus = rubFromTier3MetaPercent(member.guild.id, streak);
       bonus = applyUnregisteredVehiclePenalty(u, bonus);
-      patchEconomyUser(member.guild.id, member.id, {
-        rubles: u.rubles + bonus,
+      updateEconomyUser(member.guild.id, member.id, (cur) => ({
+        ...cur,
+        rubles: cur.rubles + bonus,
         tier3SideGigReadyAt: now + TIER3_SIDE_GIG_CD_MS,
-      });
+      }));
       await replyOrUpdate(interaction, {
         embeds: [
           buildCurrentJobEmbed(member, {
@@ -4795,14 +4811,22 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
       await interaction.reply({ content: "Нужны телефон и активная симка.", flags: MessageFlags.Ephemeral });
       return true;
     }
-    if (u.rubles < amount) {
-      await interaction.reply({ content: `На счёте только **${fmt(u.rubles)} ₽**.`, flags: MessageFlags.Ephemeral });
+    let toppedUp = false;
+    let rubBalance = 0;
+    updateEconomyUser(mem.guild.id, mem.id, (cur) => {
+      rubBalance = cur.rubles;
+      if (cur.rubles < amount) return cur;
+      toppedUp = true;
+      return {
+        ...cur,
+        rubles: cur.rubles - amount,
+        simBalanceRub: (cur.simBalanceRub ?? 0) + amount,
+      };
+    });
+    if (!toppedUp) {
+      await interaction.reply({ content: `На счёте только **${fmt(rubBalance)} ₽**.`, flags: MessageFlags.Ephemeral });
       return true;
     }
-    patchEconomyUser(mem.guild.id, mem.id, {
-      rubles: u.rubles - amount,
-      simBalanceRub: (u.simBalanceRub ?? 0) + amount,
-    });
     remitShopPurchaseVatToTreasury(mem.guild.id, amount);
     await interaction.reply({
       embeds: [buildShopSimEmbed(mem)],
@@ -4890,14 +4914,22 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
       return true;
     }
     if (modalId === ECON_MODAL_IP_DEP) {
-      if (u.rubles < amount) {
-        await interaction.reply({ content: `На счёте только **${fmt(u.rubles)}** ₽.`, flags: MessageFlags.Ephemeral });
+      let deposited = false;
+      let rubBalance = 0;
+      updateEconomyUser(mem.guild.id, mem.id, (cur) => {
+        rubBalance = cur.rubles;
+        if (cur.rubles < amount) return cur;
+        deposited = true;
+        return {
+          ...cur,
+          rubles: cur.rubles - amount,
+          solePropCapitalRub: (cur.solePropCapitalRub ?? 0) + amount,
+        };
+      });
+      if (!deposited) {
+        await interaction.reply({ content: `На счёте только **${fmt(rubBalance)}** ₽.`, flags: MessageFlags.Ephemeral });
         return true;
       }
-      patchEconomyUser(mem.guild.id, mem.id, {
-        rubles: u.rubles - amount,
-        solePropCapitalRub: (u.solePropCapitalRub ?? 0) + amount,
-      });
       await interaction.reply({
         embeds: [buildCurrentJobEmbed(mem, { tier3ActionNotes: [`На баланс бизнеса переведено **${fmt(amount)}** ₽.`] })],
         components: buildCurrentJobRows(mem),
@@ -4912,11 +4944,22 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
     }
     const gid = mem.guild.id;
     const { toPersonalRub, feeToTreasuryRub } = solePropWithdrawWithFee(gid, amount);
-    if (feeToTreasuryRub > 0) addToTreasury(gid, feeToTreasuryRub);
-    patchEconomyUser(mem.guild.id, mem.id, {
-      rubles: u.rubles + toPersonalRub,
-      solePropCapitalRub: bizW - amount,
+    let withdrawn = false;
+    updateEconomyUser(mem.guild.id, mem.id, (cur) => {
+      const bizNow = cur.solePropCapitalRub ?? 0;
+      if (bizNow < amount) return cur;
+      withdrawn = true;
+      return {
+        ...cur,
+        rubles: cur.rubles + toPersonalRub,
+        solePropCapitalRub: bizNow - amount,
+      };
     });
+    if (!withdrawn) {
+      await interaction.reply({ content: "Баланс бизнеса изменился, проверьте сумму и повторите.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (feeToTreasuryRub > 0) addToTreasury(gid, feeToTreasuryRub);
     const feeLine =
       feeToTreasuryRub > 0
         ? ` Комиссия учтена; на счёт **${fmt(toPersonalRub)}** ₽.`

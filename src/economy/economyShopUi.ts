@@ -13,11 +13,13 @@ import {
   CAR_SELL_REFUND_RATE,
   CAR_TRADE_IN_RATE,
   HOUSING_CALENDAR_MONTH_MS,
+  MS_PER_DAY,
   PET_MODELS,
   PET_TRADE_IN_RATE,
   PHONE_SELL_REFUND_RATE,
   PHONE_TRADE_IN_RATE,
   apartmentShopShortLabel,
+  apartmentTradeInRate,
   apartmentsByOrigin,
   carsByOrigin,
   getApartmentDef,
@@ -108,7 +110,7 @@ import {
 } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { remitShopPurchaseVatToTreasury } from "./taxTreasury.js";
-import { getEconomyUser, listEconomyUsers, patchEconomyUser, type EconomyUser } from "./userStore.js";
+import { getEconomyUser, listEconomyUsers, patchEconomyUser, updateEconomyUser, type EconomyUser } from "./userStore.js";
 
 const PANEL_COLOR = 0x2b2d31;
 
@@ -226,6 +228,18 @@ function shopApartmentTradeInLines(): string[] {
   ];
 }
 
+function housingOwnedDays(purchasedAtMs: number | undefined, nowMs: number = Date.now()): number | undefined {
+  if (purchasedAtMs == null || !Number.isFinite(purchasedAtMs) || purchasedAtMs <= 0) return undefined;
+  return Math.max(0, Math.floor((nowMs - purchasedAtMs) / MS_PER_DAY));
+}
+
+/** Сколько суток уже владеете квартирой (для зачёта после 30 сут). */
+function housingOwnedDaysLabel(purchasedAtMs: number | undefined, nowMs: number = Date.now()): string | undefined {
+  const days = housingOwnedDays(purchasedAtMs, nowMs);
+  if (days == null) return undefined;
+  return `${days} сут`;
+}
+
 const SHOP_BRANCH_NONE = "**нет**";
 
 function shopBranchOwnershipBlock(u: EconomyUser, kind: "phone" | "car" | "house"): string[] {
@@ -257,13 +271,18 @@ function shopBranchOwnershipBlock(u: EconomyUser, kind: "phone" | "car" | "house
     ];
   } else {
     const hk = u.housingKind ?? "none";
+    const now = Date.now();
     if (hk === "owned" && u.ownedApartmentId) {
-      soviet = `**${getApartmentDef(u.ownedApartmentId)?.label ?? "—"}**`;
+      const label = getApartmentDef(u.ownedApartmentId)?.label ?? "—";
+      const owned = housingOwnedDaysLabel(u.ownedApartmentPurchasedAtMs, now);
+      soviet = owned ? `**${label}** (${owned})` : `**${label}**`;
     } else if (hk === "rent" && u.housingRentNextDueMs) {
       soviet = `аренда до <t:${Math.floor(u.housingRentNextDueMs / 1000)}:R>`;
     }
     if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId) {
-      foreign = `**${getApartmentDef(u.ownedForeignApartmentId)?.label ?? "—"}**`;
+      const label = getApartmentDef(u.ownedForeignApartmentId)?.label ?? "—";
+      const owned = housingOwnedDaysLabel(u.ownedForeignApartmentPurchasedAtMs, now);
+      foreign = owned ? `**${label}** (${owned})` : `**${label}**`;
     }
   }
 
@@ -908,17 +927,30 @@ export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin)
 export function buildShopHouseListEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const gid = member.guild.id;
+  const now = Date.now();
   const lines: string[] = [`Баланс: **${fmt(u.rubles)}** ₽`];
-  if (origin === "soviet") {
-    if (u.housingKind === "owned" && u.ownedApartmentId) {
-      const cur = getApartmentDef(u.ownedApartmentId);
-      lines.push(`Своё: **${cur?.label ?? "—"}**`);
-      if (cur) lines.push(`ЖКХ: **${fmt(inflatedApartmentUtilityRub(gid, cur.id))}** ₽/мес.`);
-    }
-  } else if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId) {
-    const cur = getApartmentDef(u.ownedForeignApartmentId);
-    lines.push(`Своё: **${cur?.label ?? "—"}**`);
-    if (cur) lines.push(`ЖКХ: **${fmt(inflatedApartmentUtilityRub(gid, cur.id))}** ₽/мес.`);
+  const cur =
+    origin === "soviet" && u.housingKind === "owned"
+      ? getApartmentDef(u.ownedApartmentId)
+      : origin === "foreign" && u.housingForeignKind === "owned"
+        ? getApartmentDef(u.ownedForeignApartmentId)
+        : undefined;
+  const purchasedAt =
+    origin === "soviet" ? u.ownedApartmentPurchasedAtMs : u.ownedForeignApartmentPurchasedAtMs;
+
+  if (cur) {
+    const owned = housingOwnedDaysLabel(purchasedAt, now);
+    lines.push(owned ? `Сейчас: **${cur.label}** · владеете **${owned}**` : `Сейчас: **${cur.label}**`);
+    lines.push(`ЖКХ: **${fmt(inflatedApartmentUtilityRub(gid, cur.id))}** ₽/мес.`);
+    const rate = apartmentTradeInRate(purchasedAt, now);
+    lines.push(`Зачёт переезда сейчас: **${tradeInPctLabel(rate)}**`);
+  } else if (origin === "soviet" && (u.housingKind ?? "none") === "rent") {
+    const due = u.housingRentNextDueMs;
+    lines.push(
+      due != null ? `Сейчас: **аренда** до <t:${Math.floor(due / 1000)}:R>` : "Сейчас: **аренда**",
+    );
+  } else {
+    lines.push("Сейчас: **нет**");
   }
   lines.push(...shopApartmentTradeInLines(), shopPlainSellLine(APARTMENT_SELL_REFUND_RATE));
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle(`Жильё · ${originTitle(origin)}`).setDescription(lines.join("\n"));
@@ -1090,17 +1122,24 @@ export function applyRentPlanPurchase(member: GuildMember, plan: HousingRentPlan
   const nextDue = baseEnd + periodMs;
   const chainStart = hk === "rent" ? (u.housingRentChainStartedAtMs ?? now) : now;
   const totalPaid = (hk === "rent" ? (u.housingRentTotalPaidRub ?? 0) : 0) + price;
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles - price,
-    housingKind: "rent",
-    housingRentNextDueMs: nextDue,
-    housingRentPlan: plan,
-    housingRentLastPaidRub: price,
-    housingRentLastPeriodMs: periodMs,
-    housingRentChainStartedAtMs: chainStart,
-    housingRentTotalPaidRub: totalPaid,
-    courierBikeUntilMs: undefined,
+  let applied = false;
+  updateEconomyUser(member.guild.id, member.id, (cur) => {
+    if (cur.rubles < price) return cur;
+    applied = true;
+    return {
+      ...cur,
+      rubles: cur.rubles - price,
+      housingKind: "rent",
+      housingRentNextDueMs: nextDue,
+      housingRentPlan: plan,
+      housingRentLastPaidRub: price,
+      housingRentLastPeriodMs: periodMs,
+      housingRentChainStartedAtMs: chainStart,
+      housingRentTotalPaidRub: totalPaid,
+      courierBikeUntilMs: undefined,
+    };
   });
+  if (!applied) return { ok: false, reply: `Нужно **${fmt(price)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, price);
   return { ok: true };
 }
@@ -1117,12 +1156,19 @@ export function purchasePhone(member: GuildMember, pid: string): { ok: true } | 
   if (u.rubles < cost) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
   if (cur?.id === defP.id && u.hasPhone) return { ok: false, reply: "У вас уже эта модель." };
   const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, statDeltasOnReplace(cur, defP));
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles - cost,
-    hasPhone: true,
-    phoneModelId: defP.id,
-    ...stats,
+  let applied = false;
+  updateEconomyUser(member.guild.id, member.id, (curU) => {
+    if (curU.rubles < cost) return curU;
+    applied = true;
+    return {
+      ...curU,
+      rubles: curU.rubles - cost,
+      hasPhone: true,
+      phoneModelId: defP.id,
+      ...stats,
+    };
   });
+  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   return { ok: true };
 }
@@ -1139,12 +1185,19 @@ export function purchaseCar(member: GuildMember, cid: string): { ok: true } | { 
   if (u.rubles < cost) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
   if (cur?.id === defC.id) return { ok: false, reply: "У вас уже это авто." };
   const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, statDeltasOnReplace(cur, defC));
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles - cost,
-    ownedCarId: defC.id,
-    ...stats,
-    ...cancelRentAndBikeOnAssetPurchase(u),
+  let applied = false;
+  updateEconomyUser(member.guild.id, member.id, (curU) => {
+    if (curU.rubles < cost) return curU;
+    applied = true;
+    return {
+      ...curU,
+      rubles: curU.rubles - cost,
+      ownedCarId: defC.id,
+      ...stats,
+      ...cancelRentAndBikeOnAssetPurchase(curU),
+    };
   });
+  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   return { ok: true };
 }
@@ -1152,24 +1205,31 @@ export function purchaseCar(member: GuildMember, cid: string): { ok: true } | { 
 function patchUserPlateWithPrestige(
   guildId: string,
   userId: string,
-  u: EconomyUser,
   parts: VehiclePlateParts,
-  rublesAfter: number,
-): { breakdown: ReturnType<typeof computePlatePrestige>; prestigeDelta: number; prestigeAccrued: number } {
+  rublesSpend: number,
+): { ok: true; breakdown: ReturnType<typeof computePlatePrestige>; prestigeDelta: number; prestigeAccrued: number } | { ok: false } {
   const breakdown = computePlatePrestige(parts);
-  const oldAccrued = u.vehiclePlatePrestige ?? 0;
-  const prestigeDelta = breakdown.total - oldAccrued;
-  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
-    prestigeDelta,
-    domesticDelta: 0,
+  let applied = false;
+  let prestigeDelta = 0;
+  updateEconomyUser(guildId, userId, (cur) => {
+    if (cur.rubles < rublesSpend) return cur;
+    applied = true;
+    const oldAccrued = cur.vehiclePlatePrestige ?? 0;
+    prestigeDelta = breakdown.total - oldAccrued;
+    const stats = patchStatsFromShop(cur.prestigePoints ?? 0, cur.domesticPoints ?? 0, {
+      prestigeDelta,
+      domesticDelta: 0,
+    });
+    return {
+      ...cur,
+      rubles: cur.rubles - rublesSpend,
+      ...vehiclePlatePartsToPatch(parts),
+      vehiclePlatePrestige: breakdown.total,
+      ...stats,
+    };
   });
-  patchEconomyUser(guildId, userId, {
-    rubles: rublesAfter,
-    ...vehiclePlatePartsToPatch(parts),
-    vehiclePlatePrestige: breakdown.total,
-    ...stats,
-  });
-  return { breakdown, prestigeDelta, prestigeAccrued: breakdown.total };
+  if (!applied) return { ok: false };
+  return { ok: true, breakdown, prestigeDelta, prestigeAccrued: breakdown.total };
 }
 
 /** Однократная синхронизация престижа номера (миграция старых сохранений). */
@@ -1219,20 +1279,20 @@ export function registerVehiclePlate(
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   const taken = guildTakenVehiclePlateKeys(member.guild.id, member.id);
   const parts = rollUniqueVehiclePlateParts(taken);
-  const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
+  const platePatch = patchUserPlateWithPrestige(
     member.guild.id,
     member.id,
-    u,
     parts,
-    u.rubles - cost,
+    cost,
   );
+  if (!platePatch.ok) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const plate = formatVehiclePlate(parts);
   const tips = buildPlateUpgradeTips(parts, taken);
   return {
     ok: true,
     plate,
-    lastRoll: plateLastRoll("Оформлен госномер", plate, breakdown, prestigeDelta, tips),
+    lastRoll: plateLastRoll("Оформлен госномер", plate, platePatch.breakdown, platePatch.prestigeDelta, tips),
   };
 }
 
@@ -1249,20 +1309,20 @@ export function changeVehiclePlateDigits(
     ...cur,
     digits: rollUniqueVehiclePlateDigits(taken, { l1: cur.l1, l2: cur.l2, region: cur.region }),
   };
-  const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
+  const platePatch = patchUserPlateWithPrestige(
     member.guild.id,
     member.id,
-    u,
     next,
-    u.rubles - cost,
+    cost,
   );
+  if (!platePatch.ok) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const plate = formatVehiclePlate(next);
   const tips = buildPlateUpgradeTips(next, taken);
   return {
     ok: true,
     plate,
-    lastRoll: plateLastRoll("Новые цифры", plate, breakdown, prestigeDelta, tips),
+    lastRoll: plateLastRoll("Новые цифры", plate, platePatch.breakdown, platePatch.prestigeDelta, tips),
   };
 }
 
@@ -1279,20 +1339,20 @@ export function changeVehiclePlateLetters(
     ...cur,
     ...rollUniqueVehiclePlateLetters(taken, { digits: cur.digits, region: cur.region }),
   };
-  const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
+  const platePatch = patchUserPlateWithPrestige(
     member.guild.id,
     member.id,
-    u,
     next,
-    u.rubles - cost,
+    cost,
   );
+  if (!platePatch.ok) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const plate = formatVehiclePlate(next);
   const tips = buildPlateUpgradeTips(next, taken);
   return {
     ok: true,
     plate,
-    lastRoll: plateLastRoll("Новые буквы", plate, breakdown, prestigeDelta, tips),
+    lastRoll: plateLastRoll("Новые буквы", plate, platePatch.breakdown, platePatch.prestigeDelta, tips),
   };
 }
 
@@ -1309,20 +1369,20 @@ export function changeVehiclePlateRegion(
     ...cur,
     region: rollUniqueVehiclePlateRegion(taken, { l1: cur.l1, digits: cur.digits, l2: cur.l2 }),
   };
-  const { breakdown, prestigeDelta, prestigeAccrued } = patchUserPlateWithPrestige(
+  const platePatch = patchUserPlateWithPrestige(
     member.guild.id,
     member.id,
-    u,
     next,
-    u.rubles - cost,
+    cost,
   );
+  if (!platePatch.ok) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const plate = formatVehiclePlate(next);
   const tips = buildPlateUpgradeTips(next, taken);
   return {
     ok: true,
     plate,
-    lastRoll: plateLastRoll("Новый регион", plate, breakdown, prestigeDelta, tips),
+    lastRoll: plateLastRoll("Новый регион", plate, platePatch.breakdown, platePatch.prestigeDelta, tips),
   };
 }
 
@@ -1335,12 +1395,13 @@ export function sellOwnedPhone(member: GuildMember): { ok: true; refund: number 
     prestigeDelta: -cur.prestigeDelta,
     domesticDelta: -cur.domesticDelta,
   });
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles + refund,
+  updateEconomyUser(member.guild.id, member.id, (curU) => ({
+    ...curU,
+    rubles: curU.rubles + refund,
     hasPhone: false,
     phoneModelId: undefined,
     ...stats,
-  });
+  }));
   return { ok: true, refund };
 }
 
@@ -1354,13 +1415,14 @@ export function sellOwnedCar(member: GuildMember): { ok: true; refund: number } 
     prestigeDelta: -cur.prestigeDelta - platePrestige,
     domesticDelta: -cur.domesticDelta,
   });
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles + refund,
+  updateEconomyUser(member.guild.id, member.id, (curU) => ({
+    ...curU,
+    rubles: curU.rubles + refund,
     ownedCarId: undefined,
     ...clearVehiclePlatePatch(),
     vehiclePlatePrestige: undefined,
     ...stats,
-  });
+  }));
   return { ok: true, refund };
 }
 
@@ -1387,15 +1449,22 @@ export function purchaseApartment(member: GuildMember, aid: string): { ok: true;
     }
     if (hk === "owned" && curA?.id === defA.id) return { ok: false, reply: "У вас уже эта квартира." };
     const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, statDeltasOnReplace(curA, defA));
-    patchEconomyUser(member.guild.id, member.id, {
-      rubles: u.rubles + rentRefund - cost,
-      ownedApartmentId: defA.id,
-      ownedApartmentPurchasedAtMs: now,
-      housingUtilityNextDueMs: nextHousingUtilityDueMs(now),
-      ...cancelRentAndBikeOnAssetPurchase(u),
-      ...stats,
-      housingKind: "owned",
+    let applied = false;
+    updateEconomyUser(member.guild.id, member.id, (curU) => {
+      if (curU.rubles + rentRefund < cost) return curU;
+      applied = true;
+      return {
+        ...curU,
+        rubles: curU.rubles + rentRefund - cost,
+        ownedApartmentId: defA.id,
+        ownedApartmentPurchasedAtMs: now,
+        housingUtilityNextDueMs: nextHousingUtilityDueMs(now),
+        ...cancelRentAndBikeOnAssetPurchase(curU),
+        ...stats,
+        housingKind: "owned",
+      };
     });
+    if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(Math.max(0, cost - rentRefund))}** ₽.` };
     remitShopPurchaseVatToTreasury(gid, cost);
     return { ok: true, refund: rentRefund };
   }
@@ -1415,15 +1484,22 @@ export function purchaseApartment(member: GuildMember, aid: string): { ok: true;
   if (u.rubles < cost) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
   if (u.housingForeignKind === "owned" && curF?.id === defA.id) return { ok: false, reply: "У вас уже это жильё." };
   const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, statDeltasOnReplace(curF, defA));
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles - cost,
-    housingForeignKind: "owned",
-    ownedForeignApartmentId: defA.id,
-    ownedForeignApartmentPurchasedAtMs: now,
-    housingForeignUtilityNextDueMs: nextHousingUtilityDueMs(now),
-    ...stats,
-    ...cancelRentAndBikeOnAssetPurchase(u),
+  let applied = false;
+  updateEconomyUser(member.guild.id, member.id, (curU) => {
+    if (curU.rubles < cost) return curU;
+    applied = true;
+    return {
+      ...curU,
+      rubles: curU.rubles - cost,
+      housingForeignKind: "owned",
+      ownedForeignApartmentId: defA.id,
+      ownedForeignApartmentPurchasedAtMs: now,
+      housingForeignUtilityNextDueMs: nextHousingUtilityDueMs(now),
+      ...stats,
+      ...cancelRentAndBikeOnAssetPurchase(curU),
+    };
   });
+  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(gid, cost);
   return { ok: true, refund: 0 };
 }
@@ -1437,11 +1513,18 @@ export function purchasePet(member: GuildMember, petId: string): { ok: true } | 
   const cur = getPetDef(u.ownedPetId);
   const cost = scaledShopPrice(member.guild.id, petPurchaseCostRub(cur, def));
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles - cost,
-    ownedPetId: def.id,
-    petPausedNoFunds: false,
+  let applied = false;
+  updateEconomyUser(member.guild.id, member.id, (curU) => {
+    if (curU.rubles < cost) return curU;
+    applied = true;
+    return {
+      ...curU,
+      rubles: curU.rubles - cost,
+      ownedPetId: def.id,
+      petPausedNoFunds: false,
+    };
   });
+  if (!applied) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   return { ok: true };
 }
@@ -1459,15 +1542,16 @@ export function sellSovietApartment(member: GuildMember): { ok: true; refund: nu
   const quitJob = !userHasActiveHousing({ ...u, housingKind: "none", ownedApartmentId: undefined })
     ? economyUserClearTier2PlusJobPatch(u)
     : {};
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles + refund,
+  updateEconomyUser(member.guild.id, member.id, (curU) => ({
+    ...curU,
+    rubles: curU.rubles + refund,
     housingKind: "none",
     ownedApartmentId: undefined,
     ownedApartmentPurchasedAtMs: undefined,
     housingUtilityNextDueMs: undefined,
     ...stats,
     ...quitJob,
-  });
+  }));
   return { ok: true, refund };
 }
 
@@ -1484,15 +1568,16 @@ export function sellForeignApartment(member: GuildMember): { ok: true; refund: n
   const quitJob = !userHasActiveHousing({ ...u, housingForeignKind: undefined, ownedForeignApartmentId: undefined })
     ? economyUserClearTier2PlusJobPatch(u)
     : {};
-  patchEconomyUser(member.guild.id, member.id, {
-    rubles: u.rubles + refund,
+  updateEconomyUser(member.guild.id, member.id, (curU) => ({
+    ...curU,
+    rubles: curU.rubles + refund,
     housingForeignKind: undefined,
     ownedForeignApartmentId: undefined,
     ownedForeignApartmentPurchasedAtMs: undefined,
     housingForeignUtilityNextDueMs: undefined,
     ...stats,
     ...quitJob,
-  });
+  }));
   return { ok: true, refund };
 }
 
@@ -1633,27 +1718,34 @@ export function buildShopSimChangeRows(member: GuildMember): ActionRowBuilder<Bu
 function patchUserSimWithPrestige(
   guildId: string,
   userId: string,
-  u: EconomyUser,
   parts: SimNumberParts,
-  rublesAfter: number,
+  rublesSpend: number,
   extra?: Partial<EconomyUser>,
-): { breakdown: ReturnType<typeof computeSimPrestige>; prestigeDelta: number } {
+): { ok: true; breakdown: ReturnType<typeof computeSimPrestige>; prestigeDelta: number } | { ok: false } {
   const breakdown = computeSimPrestige(parts);
-  const oldAccrued = u.courierSimPrestige ?? 0;
-  const prestigeDelta = breakdown.total - oldAccrued;
-  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
-    prestigeDelta,
-    domesticDelta: 0,
+  let applied = false;
+  let prestigeDelta = 0;
+  updateEconomyUser(guildId, userId, (cur) => {
+    if (cur.rubles < rublesSpend) return cur;
+    applied = true;
+    const oldAccrued = cur.courierSimPrestige ?? 0;
+    prestigeDelta = breakdown.total - oldAccrued;
+    const stats = patchStatsFromShop(cur.prestigePoints ?? 0, cur.domesticPoints ?? 0, {
+      prestigeDelta,
+      domesticDelta: 0,
+    });
+    return {
+      ...cur,
+      rubles: cur.rubles - rublesSpend,
+      courierSimNumber: undefined,
+      ...simNumberPartsToPatch(parts),
+      courierSimPrestige: breakdown.total,
+      ...stats,
+      ...extra,
+    };
   });
-  patchEconomyUser(guildId, userId, {
-    rubles: rublesAfter,
-    courierSimNumber: undefined,
-    ...simNumberPartsToPatch(parts),
-    courierSimPrestige: breakdown.total,
-    ...stats,
-    ...extra,
-  });
-  return { breakdown, prestigeDelta };
+  if (!applied) return { ok: false };
+  return { ok: true, breakdown, prestigeDelta };
 }
 
 export function syncSimPrestige(member: GuildMember): void {
@@ -1699,15 +1791,16 @@ export function registerSimNumber(
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${cost} ₽**.` };
   const taken = guildTakenSimNumberKeys(member.guild.id, member.id);
   const parts = rollUniqueSimNumberParts(taken);
-  const { breakdown, prestigeDelta } = patchUserSimWithPrestige(member.guild.id, member.id, u, parts, u.rubles - cost, {
+  const simPatch = patchUserSimWithPrestige(member.guild.id, member.id, parts, cost, {
     simBalanceRub: SHOP_SIM_START_BALANCE_RUB,
   });
+  if (!simPatch.ok) return { ok: false, reply: `Нужно **${cost} ₽**.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const number = formatSimNumber(parts);
   return {
     ok: true,
     number,
-    lastRoll: simLastRoll("Оформлена симка", number, breakdown, prestigeDelta),
+    lastRoll: simLastRoll("Оформлена симка", number, simPatch.breakdown, simPatch.prestigeDelta),
   };
 }
 
@@ -1724,10 +1817,11 @@ export function changeSimOperator(
     ...cur,
     operator: rollUniqueSimOperator(taken, { mid: cur.mid, last: cur.last }),
   };
-  const { breakdown, prestigeDelta } = patchUserSimWithPrestige(member.guild.id, member.id, u, next, u.rubles - cost);
+  const simPatch = patchUserSimWithPrestige(member.guild.id, member.id, next, cost);
+  if (!simPatch.ok) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const number = formatSimNumber(next);
-  return { ok: true, number, lastRoll: simLastRoll("Новый оператор", number, breakdown, prestigeDelta) };
+  return { ok: true, number, lastRoll: simLastRoll("Новый оператор", number, simPatch.breakdown, simPatch.prestigeDelta) };
 }
 
 export function changeSimMid(
@@ -1743,10 +1837,11 @@ export function changeSimMid(
     ...cur,
     mid: rollUniqueSimMid(taken, { operator: cur.operator, last: cur.last }),
   };
-  const { breakdown, prestigeDelta } = patchUserSimWithPrestige(member.guild.id, member.id, u, next, u.rubles - cost);
+  const simPatch = patchUserSimWithPrestige(member.guild.id, member.id, next, cost);
+  if (!simPatch.ok) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const number = formatSimNumber(next);
-  return { ok: true, number, lastRoll: simLastRoll("Новая середина", number, breakdown, prestigeDelta) };
+  return { ok: true, number, lastRoll: simLastRoll("Новая середина", number, simPatch.breakdown, simPatch.prestigeDelta) };
 }
 
 export function changeSimLast(
@@ -1762,8 +1857,9 @@ export function changeSimLast(
     ...cur,
     last: rollUniqueSimLast(taken, { operator: cur.operator, mid: cur.mid }),
   };
-  const { breakdown, prestigeDelta } = patchUserSimWithPrestige(member.guild.id, member.id, u, next, u.rubles - cost);
+  const simPatch = patchUserSimWithPrestige(member.guild.id, member.id, next, cost);
+  if (!simPatch.ok) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const number = formatSimNumber(next);
-  return { ok: true, number, lastRoll: simLastRoll("Новый конец", number, breakdown, prestigeDelta) };
+  return { ok: true, number, lastRoll: simLastRoll("Новый конец", number, simPatch.breakdown, simPatch.prestigeDelta) };
 }

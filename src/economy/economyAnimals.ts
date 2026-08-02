@@ -2,7 +2,7 @@ import { getPetDef } from "./economyCatalog.js";
 import { applyUnregisteredVehiclePenalty } from "./economyLicensePlate.js";
 import { scaledEconomyExpense, scaledEconomyPsIncome } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
-import { getEconomyUser, patchEconomyUser } from "./userStore.js";
+import { getEconomyUser, patchEconomyUser, updateEconomyUser } from "./userStore.js";
 
 /** Суточный уход за питомцем (полночь МСК). */
 export function processPetMskMidnightForUser(
@@ -41,12 +41,13 @@ export function processPetMskMidnightForUser(
   }
 
   const psAdd = applyUnregisteredVehiclePenalty(u, scaledEconomyPsIncome(guildId, pet.dailyPsRub));
-  patchEconomyUser(guildId, userId, {
+  updateEconomyUser(guildId, userId, (cur) => ({
+    ...cur,
     ...mark,
-    rubles: u.rubles - upkeep,
-    psTotal: u.psTotal + psAdd,
+    rubles: cur.rubles - upkeep,
+    psTotal: cur.psTotal + psAdd,
     petPausedNoFunds: false,
-  });
+  }));
   appendFeedEvent({
     ts: nowMs,
     guildId,

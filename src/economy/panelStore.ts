@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeJsonAtomicSync } from "../storage/atomicJson.js";
 
 interface Store {
   /** channelId → messageId панели терминала */
@@ -25,7 +26,7 @@ function readStore(): Store {
 }
 
 function writeStore(s: Store) {
-  writeFileSync(storePath(), JSON.stringify(s, null, 2), "utf-8");
+  writeJsonAtomicSync(storePath(), s);
 }
 
 export function getEconomyTerminalPanelMessageId(channelId: string): string | undefined {

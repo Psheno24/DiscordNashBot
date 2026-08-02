@@ -10,7 +10,7 @@ import {
   type LotteryTicketEntry,
 } from "./lotteryStore.js";
 import { applyUnregisteredVehiclePenalty } from "./economyLicensePlate.js";
-import { getEconomyUser, patchEconomyUser } from "./userStore.js";
+import { getEconomyUser, addEconomyUserRubles } from "./userStore.js";
 import { mskTodayYmd } from "./mskCalendar.js";
 
 /** Период лотереи: сутки до розыгрыша в 21:00 МСК (дата «сегодня» до 21:00, после — уже завтрашний период). */
@@ -161,7 +161,7 @@ export function runLotteryDrawForGuild(
   for (const [userId, total] of byUser) {
     const u = getEconomyUser(guild.id, userId);
     const credit = applyUnregisteredVehiclePenalty(u, total);
-    patchEconomyUser(guild.id, userId, { rubles: u.rubles + credit });
+    addEconomyUserRubles(guild.id, userId, credit);
     feedWinners.push({ userId, credit });
   }
   feedWinners.sort((a, b) => b.credit - a.credit);

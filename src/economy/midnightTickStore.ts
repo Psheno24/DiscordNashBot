@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { mskTodayYmd } from "./mskCalendar.js";
+import { writeJsonAtomicSync } from "../storage/atomicJson.js";
 
 interface MidnightTickState {
   /** YYYY-MM-DD — последний успешно завершённый суточный тик (МСК). */
@@ -24,7 +25,7 @@ function readState(): MidnightTickState {
 }
 
 function writeState(state: MidnightTickState): void {
-  writeFileSync(storePath(), JSON.stringify(state, null, 2), "utf-8");
+  writeJsonAtomicSync(storePath(), state);
 }
 
 export function getLastCompletedMidnightTickYmd(): string | undefined {

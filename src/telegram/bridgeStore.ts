@@ -1,6 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
+import { writeJsonAtomicSync } from "../storage/atomicJson.js";
 
 export interface PendingTelegramCode {
   guildId: string;
@@ -125,7 +126,15 @@ function readStore(): StoreShape {
 }
 
 function writeStore(s: StoreShape) {
-  writeFileSync(storePath(), JSON.stringify(s, null, 2), "utf-8");
+  writeJsonAtomicSync(storePath(), s);
+}
+
+function rebuildLinksByDiscordKey(linksByTelegramId: Record<string, TelegramLink>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [tid, link] of Object.entries(linksByTelegramId)) {
+    out[discordPairKey(link.guildId, link.discordUserId)] = tid;
+  }
+  return out;
 }
 
 function randomCode(): string {
@@ -187,12 +196,20 @@ export function removeTelegramLinkCode(code: string): void {
 export function setTelegramLink(telegramUserId: string, link: TelegramLink): void {
   const s = readStore();
   const tid = String(telegramUserId);
+
+  const oldByTid = s.linksByTelegramId[tid];
+  if (oldByTid) {
+    delete s.linksByDiscordKey[discordPairKey(oldByTid.guildId, oldByTid.discordUserId)];
+  }
+
   for (const [t, l] of Object.entries(s.linksByTelegramId)) {
-    if (l.guildId === link.guildId && l.discordUserId === link.discordUserId) delete s.linksByTelegramId[t];
+    if (l.guildId === link.guildId && l.discordUserId === link.discordUserId) {
+      delete s.linksByTelegramId[t];
+    }
   }
   s.linksByTelegramId[tid] = link;
-  if (!s.linksByDiscordKey) s.linksByDiscordKey = {};
-  s.linksByDiscordKey[discordPairKey(link.guildId, link.discordUserId)] = tid;
+  // Всегда пересобираем индекс из актуальных ссылок, чтобы не оставались stale-ключи.
+  s.linksByDiscordKey = rebuildLinksByDiscordKey(s.linksByTelegramId);
   writeStore(s);
 }
 

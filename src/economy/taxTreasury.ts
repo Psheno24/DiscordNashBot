@@ -1,4 +1,4 @@
-import { getGuildConfig, patchGuildConfig } from "../guildConfig/store.js";
+import { addTreasuryRubles, getGuildConfig, trySpendTreasuryRubles } from "../guildConfig/store.js";
 import type { JobId } from "./userStore.js";
 
 let onTreasuryMutated: ((guildId: string) => void) | undefined;
@@ -39,8 +39,7 @@ export function getSolePropWeeklyCapitalTaxPercent(guildId: string): number {
 export function addToTreasury(guildId: string, amountRub: number): void {
   const a = Math.floor(amountRub);
   if (a <= 0) return;
-  const cur = getGuildConfig(guildId).treasuryRubles ?? 0;
-  patchGuildConfig(guildId, { treasuryRubles: Math.round((cur + a) * 100) / 100 });
+  addTreasuryRubles(guildId, a);
   onTreasuryMutated?.(guildId);
 }
 
@@ -49,11 +48,8 @@ export type SpendTreasuryResult = { ok: true } | { ok: false; balance: number };
 /** Списать целые ₽ из казны (для выдачи админом и т.п.). */
 export function trySpendTreasuryRub(guildId: string, amountRub: number): SpendTreasuryResult {
   const a = Math.floor(amountRub);
-  const curRaw = getGuildConfig(guildId).treasuryRubles ?? 0;
-  const cur = Number.isFinite(curRaw) ? curRaw : 0;
-  if (a <= 0) return { ok: false, balance: Math.round(cur * 100) / 100 };
-  if (cur < a) return { ok: false, balance: Math.round(cur * 100) / 100 };
-  patchGuildConfig(guildId, { treasuryRubles: Math.round((cur - a) * 100) / 100 });
+  const spend = trySpendTreasuryRubles(guildId, a);
+  if (!spend.ok) return { ok: false, balance: spend.balance };
   onTreasuryMutated?.(guildId);
   return { ok: true };
 }

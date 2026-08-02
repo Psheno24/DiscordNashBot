@@ -30,12 +30,24 @@ function apartmentLabel(aptId: string | undefined): string {
   return getApartmentDef(aptId)?.label ?? "—";
 }
 
+function housingOwnedDaysSuffix(purchasedAtMs: number | undefined): string {
+  if (purchasedAtMs == null || !Number.isFinite(purchasedAtMs) || purchasedAtMs <= 0) return "";
+  const days = Math.max(0, Math.floor((Date.now() - purchasedAtMs) / 86_400_000));
+  return ` (${days} сут)`;
+}
+
 function housingLine(u: EconomyUser): string {
   const hk = u.housingKind ?? "none";
   const parts: string[] = [];
   if (hk === "rent") parts.push("Аренда");
-  else if (hk === "owned") parts.push(apartmentLabel(u.ownedApartmentId));
-  if (u.housingForeignKind === "owned") parts.push(apartmentLabel(u.ownedForeignApartmentId));
+  else if (hk === "owned") {
+    parts.push(`${apartmentLabel(u.ownedApartmentId)}${housingOwnedDaysSuffix(u.ownedApartmentPurchasedAtMs)}`);
+  }
+  if (u.housingForeignKind === "owned") {
+    parts.push(
+      `${apartmentLabel(u.ownedForeignApartmentId)}${housingOwnedDaysSuffix(u.ownedForeignApartmentPurchasedAtMs)}`,
+    );
+  }
   return `Жильё: ${parts.length > 0 ? parts.join(" · ") : "нет"}`;
 }
 

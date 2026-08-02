@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeJsonAtomicSync } from "../storage/atomicJson.js";
 
 export interface GuildConfig {
   welcomeChannelId?: string;
@@ -59,7 +60,7 @@ function readStore(): StoreShape {
 }
 
 function writeStore(s: StoreShape) {
-  writeFileSync(storePath(), JSON.stringify(s, null, 2), "utf-8");
+  writeJsonAtomicSync(storePath(), s);
 }
 
 export function getGuildConfig(guildId: string): GuildConfig {
@@ -73,9 +74,43 @@ export function setGuildConfig(guildId: string, next: GuildConfig) {
 }
 
 export function patchGuildConfig(guildId: string, patch: Partial<GuildConfig>): GuildConfig {
-  const cur = getGuildConfig(guildId);
-  const next: GuildConfig = { ...cur, ...patch };
-  setGuildConfig(guildId, next);
+  return updateGuildConfig(guildId, (cur) => ({ ...cur, ...patch }));
+}
+
+export function updateGuildConfig(guildId: string, updater: (current: GuildConfig) => GuildConfig): GuildConfig {
+  const s = readStore();
+  const current = s.guilds[guildId] ?? {};
+  const next = updater(current);
+  s.guilds[guildId] = next;
+  writeStore(s);
   return next;
+}
+
+export function addTreasuryRubles(guildId: string, amountRub: number): number {
+  const delta = Math.floor(amountRub);
+  if (!Number.isFinite(delta) || delta <= 0) return getGuildConfig(guildId).treasuryRubles ?? 0;
+  const next = updateGuildConfig(guildId, (cur) => {
+    const prev = Number.isFinite(cur.treasuryRubles) ? (cur.treasuryRubles as number) : 0;
+    return { ...cur, treasuryRubles: Math.round((prev + delta) * 100) / 100 };
+  });
+  return next.treasuryRubles ?? 0;
+}
+
+export type SpendTreasuryRublesResult = { ok: true; balance: number } | { ok: false; balance: number };
+
+export function trySpendTreasuryRubles(guildId: string, amountRub: number): SpendTreasuryRublesResult {
+  const spend = Math.floor(amountRub);
+  if (!Number.isFinite(spend) || spend <= 0) {
+    const balance = getGuildConfig(guildId).treasuryRubles ?? 0;
+    return { ok: false, balance: Math.round(balance * 100) / 100 };
+  }
+  const s = readStore();
+  const current = s.guilds[guildId] ?? {};
+  const prev = Number.isFinite(current.treasuryRubles) ? (current.treasuryRubles as number) : 0;
+  if (prev < spend) return { ok: false, balance: Math.round(prev * 100) / 100 };
+  const nextBalance = Math.round((prev - spend) * 100) / 100;
+  s.guilds[guildId] = { ...current, treasuryRubles: nextBalance };
+  writeStore(s);
+  return { ok: true, balance: nextBalance };
 }
 

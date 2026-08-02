@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeJsonAtomicSync } from "../storage/atomicJson.js";
 
 export type BetStatus = "open" | "closed" | "resolved" | "cancelled";
 
@@ -58,7 +59,7 @@ function readStore(): StoreShape {
 }
 
 function writeStore(s: StoreShape) {
-  writeFileSync(storePath(), JSON.stringify(s, null, 2), "utf-8");
+  writeJsonAtomicSync(storePath(), s);
 }
 
 /** Миграция: один объект → массив; дополняем oddsAtPlacement из текущих опций. */

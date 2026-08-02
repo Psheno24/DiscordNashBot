@@ -21,7 +21,7 @@ import { ensureEconomyFeedPanel } from "../economy/panel.js";
 import { addToTreasury, trySpendTreasuryRub } from "../economy/taxTreasury.js";
 import { applyUnregisteredVehiclePenalty } from "../economy/economyLicensePlate.js";
 import { scalePositiveIncome } from "../economy/economyMacro.js";
-import { getEconomyUser, patchEconomyUser } from "../economy/userStore.js";
+import { addEconomyUserRubles, getEconomyUser, trySpendEconomyUserRubles } from "../economy/userStore.js";
 import { getGuildConfig } from "../guildConfig/store.js";
 import {
   buildAdminEconEmbed,
@@ -128,8 +128,7 @@ async function grantRublesFromTreasury(
     const bal = spend.balance.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
     return { ok: false, message: `В казне недостаточно средств. Сейчас: **${bal}** ₽.` };
   }
-  const u = getEconomyUser(guildId, targetUserId);
-  patchEconomyUser(guildId, targetUserId, { rubles: u.rubles + amount });
+  addEconomyUserRubles(guildId, targetUserId, amount);
   appendFeedEvent({
     ts: Date.now(),
     guildId,
@@ -150,15 +149,13 @@ async function takeRublesFromUser(
   amount: number,
   creditTreasury: boolean,
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const u = getEconomyUser(guildId, targetUserId);
-  const wallet = Math.floor(Number.isFinite(u.rubles) ? u.rubles : 0);
-  if (wallet < amount) {
+  const spend = trySpendEconomyUserRubles(guildId, targetUserId, amount);
+  if (!spend.ok) {
     return {
       ok: false,
-      message: `У пользователя недостаточно ₽. Сейчас на счёте: **${wallet.toLocaleString("ru-RU")}** ₽.`,
+      message: `У пользователя недостаточно ₽. Сейчас на счёте: **${Math.floor(spend.balance).toLocaleString("ru-RU")}** ₽.`,
     };
   }
-  patchEconomyUser(guildId, targetUserId, { rubles: u.rubles - amount });
   if (creditTreasury) {
     addToTreasury(guildId, amount);
     appendFeedEvent({
@@ -1044,11 +1041,6 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
 
     const userId = interaction.user.id;
     const u = getEconomyUser(guildId, userId);
-    if (u.rubles < amount) {
-      await interaction.reply({ content: `Недостаточно ₽. Баланс: ${u.rubles.toLocaleString("ru-RU")} ₽.`, flags: MessageFlags.Ephemeral });
-      return true;
-    }
-
     const maxBet = maxAllowedBetAmount(guildId, ev, userId, optionId, opt.odds, u.rubles);
     if (maxBet < 1) {
       await interaction.reply({ content: "На этот исход сейчас нельзя поставить.", flags: MessageFlags.Ephemeral });
@@ -1061,8 +1053,15 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
       });
       return true;
     }
+    const spend = trySpendEconomyUserRubles(guildId, userId, amount);
+    if (!spend.ok) {
+      await interaction.reply({
+        content: `Недостаточно ₽. Баланс: ${spend.balance.toLocaleString("ru-RU")} ₽.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
 
-    patchEconomyUser(guildId, userId, { rubles: u.rubles - amount });
     const prev = getUserStakes(ev, userId);
     ev.bets[userId] = [...prev, { optionId, amount, ts: Date.now(), oddsAtPlacement: opt.odds }];
     upsertBetEvent(ev);
@@ -1633,8 +1632,7 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
     }
     for (const [userId, stakes] of Object.entries(ev.bets)) {
       for (const bet of stakes) {
-        const u = getEconomyUser(guildId, userId);
-        patchEconomyUser(guildId, userId, { rubles: u.rubles + bet.amount });
+        addEconomyUserRubles(guildId, userId, bet.amount);
       }
     }
     ev.status = "cancelled";
@@ -1670,7 +1668,7 @@ export async function handleNeuroAdminBetFlow(interaction: ButtonInteraction): P
         const payout = Math.floor(bet.amount * bet.oddsAtPlacement);
         const u = getEconomyUser(guildId, userId);
         const credit = applyUnregisteredVehiclePenalty(u, payout);
-        patchEconomyUser(guildId, userId, { rubles: u.rubles + credit });
+        addEconomyUserRubles(guildId, userId, credit);
       }
     }
     ev.status = "resolved";

@@ -45,6 +45,10 @@ import {
   profileCardPublicCommandName,
 } from "./economy/profileCardCommands.js";
 
+function runBackground(taskName: string, work: () => Promise<unknown>) {
+  void work().catch((e) => console.error(`${taskName}:`, e));
+}
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -77,8 +81,8 @@ client.once(Events.ClientReady, async (c) => {
   ensureDueLotteryDrawsAllGuilds(c, Date.now(), "startup");
   setInterval(
     () => {
-      void ensureEconomyTerminalPanel(c);
-      void ensureNeuroPanel(c);
+      runBackground("ensureEconomyTerminalPanel", () => ensureEconomyTerminalPanel(c));
+      runBackground("ensureNeuroPanel", () => ensureNeuroPanel(c));
     },
     60 * 60 * 1000,
   );
