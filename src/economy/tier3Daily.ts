@@ -4,7 +4,12 @@ import { applyUnregisteredVehiclePenalty } from "./economyLicensePlate.js";
 import { feedNetPrestigeRubBonus, feedPrestigeDomesticBonusSuffix } from "./economyFeedBonus.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { processHousingMskMidnightForUser } from "./economyHousing.js";
-import { isMskMonday, msUntilNextMskMidnight } from "./mskCalendar.js";
+import {
+  getLastCompletedMidnightTickYmd,
+  isEconomyMskMidnightTickDue,
+  setLastCompletedMidnightTickYmd,
+} from "./midnightTickStore.js";
+import { isMskMonday, msUntilNextMskMidnight, mskTodayYmd } from "./mskCalendar.js";
 import { addToTreasury, getSolePropWeeklyCapitalTaxPercent, withholdLegalIncomeTax } from "./taxTreasury.js";
 import { getEconomyUser, listEconomyUsers, patchEconomyUser } from "./userStore.js";
 import { solePropMidnightPatch } from "./tier3SolePropMsk.js";
@@ -134,37 +139,85 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
   }
 }
 
-const MIDNIGHT_TICK_RETRY_MS = 60_000;
-const MIDNIGHT_TICK_MAX_RETRIES = 5;
+const MIDNIGHT_TICK_POLL_MS = 30_000;
+const MIDNIGHT_TICK_NEAR_MS = 120_000;
 
 async function executeEconomyMskMidnightTick(client: Client, onTick?: () => Promise<void>): Promise<void> {
   await processEconomyMskMidnightTick(client);
   if (onTick) await onTick();
 }
 
+/** Если state-файла ещё нет, но все пользователи уже обработаны за сегодня — не гонять тяжёлый тик заново. */
+export function seedMidnightTickStateIfAlreadyCurrent(client: Client, nowMs: number = Date.now()): void {
+  if (getLastCompletedMidnightTickYmd()) return;
+  const today = mskTodayYmd(nowMs);
+  const todayStart = Date.parse(`${today}T00:00:00+03:00`);
+  if (nowMs < todayStart + 1000) return;
+
+  for (const guild of client.guilds.cache.values()) {
+    if (isMskMonday(nowMs)) {
+      const cfg = getGuildConfig(guild.id);
+      if (cfg.solePropWeeklyTaxLastMskYmd !== today) {
+        for (const { userId } of listEconomyUsers(guild.id)) {
+          if (getEconomyUser(guild.id, userId).jobId === "soleProp") return;
+        }
+      }
+    }
+    for (const { userId } of listEconomyUsers(guild.id)) {
+      const u = getEconomyUser(guild.id, userId);
+      if ((u.housingKind === "rent" || u.housingKind === "owned") && u.housingLastMskYmd !== today) return;
+      if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId && u.housingForeignLastMskYmd !== today) {
+        return;
+      }
+      if (u.ownedPetId && u.petLastMskYmd !== today) return;
+      if (u.jobId && isTier3JobId(u.jobId) && u.economyLastMskYmd !== today) return;
+    }
+  }
+  setLastCompletedMidnightTickYmd(today);
+  console.log(`economy daily tick: state seeded for ${today} (already current)`);
+}
+
+function midnightTickPollDelayMs(nowMs: number = Date.now()): number {
+  if (isEconomyMskMidnightTickDue(nowMs)) return MIDNIGHT_TICK_POLL_MS;
+  const until = msUntilNextMskMidnight(nowMs);
+  if (until <= MIDNIGHT_TICK_NEAR_MS) return MIDNIGHT_TICK_POLL_MS;
+  return Math.min(until, 60_000);
+}
+
 /** Догоняющий тик при старте бота, если полночь МСК уже прошла, а суточные начисления не отработали. */
 export async function ensureEconomyMskMidnightCatchUp(client: Client, onTick?: () => Promise<void>): Promise<void> {
+  if (!isEconomyMskMidnightTickDue()) {
+    const today = mskTodayYmd();
+    const last = getLastCompletedMidnightTickYmd();
+    console.log(`economy daily catch-up: skip (${last ?? "never"} → ${today})`);
+    return;
+  }
   try {
+    const today = mskTodayYmd();
+    console.log(`economy daily catch-up: running for ${today}`);
     await executeEconomyMskMidnightTick(client, onTick);
+    setLastCompletedMidnightTickYmd(today);
+    console.log(`economy daily catch-up: completed for ${today}`);
   } catch (e) {
     console.error("economy daily catch-up:", e);
   }
 }
 
+/** Планировщик с опросом (как лотерея): не полагается на один setTimeout на ~24 ч. */
 export function scheduleEconomyMskMidnightTick(client: Client, onTick?: () => Promise<void>): void {
-  const run = async (retry: number) => {
-    try {
-      await executeEconomyMskMidnightTick(client, onTick);
-      scheduleEconomyMskMidnightTick(client, onTick);
-    } catch (e) {
-      console.error("economy daily tick:", e);
-      if (retry < MIDNIGHT_TICK_MAX_RETRIES) {
-        setTimeout(() => void run(retry + 1), MIDNIGHT_TICK_RETRY_MS);
-      } else {
-        scheduleEconomyMskMidnightTick(client, onTick);
+  const run = async () => {
+    if (isEconomyMskMidnightTickDue()) {
+      const today = mskTodayYmd();
+      try {
+        console.log(`economy daily tick: running for ${today}`);
+        await executeEconomyMskMidnightTick(client, onTick);
+        setLastCompletedMidnightTickYmd(today);
+        console.log(`economy daily tick: completed for ${today}`);
+      } catch (e) {
+        console.error("economy daily tick:", e);
       }
     }
+    setTimeout(() => void run(), midnightTickPollDelayMs());
   };
-  const delay = msUntilNextMskMidnight();
-  setTimeout(() => void run(0), delay);
+  setTimeout(() => void run(), midnightTickPollDelayMs());
 }
