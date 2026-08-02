@@ -1785,7 +1785,8 @@ function buildJobDetailBody(member: GuildMember, jobId: JobId): string {
   if (isTier12JobId(jobId)) {
     tail.push("", "**Карьера:**", ...tier12CareerEmbedLines(jobId, exp, def.baseCooldownMs));
   } else if (isTier3JobId(jobId)) {
-    tail.push("", "**Карьера:**", ...tier3CareerEmbedLines(gid, u, jobId));
+    const careerUser = u.jobId === jobId ? u : { ...u, jobMskDayStreak: 0 };
+    tail.push("", "**Карьера:**", ...tier3CareerEmbedLines(gid, careerUser, jobId));
   }
   const cdAcc = workShiftCdAccStatusLines(u, jobId, now);
   if (cdAcc.length) tail.push("", ...cdAcc);
@@ -2620,6 +2621,7 @@ function isEconomyButton(id: string): boolean {
       ECON_IP_CONTROL,
       ECON_IP_DEP_OPEN,
       ECON_IP_WD_OPEN,
+      ECON_IP_CALC_OPEN,
       ECON_WORK_BUTTON_SHIFT,
       ECON_WORK_BUTTON_MY_JOB,
       ECON_WORK_BUTTON_QUIT,
@@ -2796,7 +2798,7 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     jobTotal = applyPrestigeToShiftRub(jobTotal, prestige);
     if (jobTotal > beforePrestige) {
       prestigeRubBonus = jobTotal - beforePrestige;
-      notes.push(`престиж к выплате: **+${fmt(prestigeRubBonus)}** ₽`);
+      notes.push(`в том числе за престиж: **+${fmt(prestigeRubBonus)}** ₽`);
     }
   }
 
@@ -2842,7 +2844,6 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     const { netRub, taxRub } = withholdLegalIncomeTax(guildId, shiftTaxableGrossRub);
     payToWallet = netRub;
     treasuryRub = taxRub;
-    if (taxRub > 0) notes.push(`налог **${fmt(taxRub)}** ₽ → казна`);
   }
   rublesNext += payToWallet;
   rublesNext = Math.max(0, rublesNext);
@@ -2933,11 +2934,12 @@ export function economyFormatTelegramWorkScreen(member: GuildMember): string {
 
   const ls = u.lastShiftSummary;
   if (ls) {
-    const parts = [tgFmtDelta(ls.walletRub)];
-    if (ls.prestigeRub > 0) parts.push(`+${tgFmtRub(ls.prestigeRub)} ₽ за престиж`);
-    if (ls.ps > 0) parts.push(`+${tgFmtRub(ls.ps)} СР`);
-    if (ls.treasuryRub > 0) parts.push(`казна ${tgFmtRub(ls.treasuryRub)} ₽`);
-    lines.push(`Последняя смена: ${parts.join(" · ")}`);
+    lines.push(`Последняя смена: <b>${tgFmtDelta(ls.walletRub)}</b>`);
+    if (ls.walletRub > 0 && ls.prestigeRub > 0) {
+      const baseRub = Math.max(0, ls.walletRub - ls.prestigeRub);
+      lines.push(`В том числе: смена ${tgFmtDelta(baseRub)} · престиж +${tgFmtRub(ls.prestigeRub)} ₽`);
+    }
+    if (ls.ps > 0) lines.push(`СР: +${tgFmtRub(ls.ps)}`);
   } else {
     lines.push("Последняя смена: —");
   }
@@ -2946,7 +2948,7 @@ export function economyFormatTelegramWorkScreen(member: GuildMember): string {
   const st = canWorkNow(u, u.jobId, now);
   const cdH = cdHoursLabel(cdMs);
   lines.push(
-    st.ok ? `КД смены: ${cdH} ч · <b>можно</b>` : `КД смены: ${cdH} ч · осталось <b>${tgFmtCooldown(st.msLeft)}</b>`,
+    st.ok ? `КД: ${cdH} ч · <b>можно</b>` : `КД: ${cdH} ч · <b>${tgFmtCooldown(st.msLeft)}</b>`,
   );
 
   if (shiftPayCoeffApplies(cdMs)) {
@@ -2955,11 +2957,7 @@ export function economyFormatTelegramWorkScreen(member: GuildMember): string {
     const usedH = formatAccCdHours(acc);
     const limitH = formatAccCdHours(SHIFT_PAY_FREE_CD_MS);
     const coeff = shiftPayCoeffFromAccMs(acc);
-    lines.push(
-      coeff < 1 - 1e-9
-        ? `Лимит КД за сутки: <b>${usedH}</b> / ${limitH} ч (×${coeff})`
-        : `Лимит КД за сутки: <b>${usedH}</b> / ${limitH} ч`,
-    );
+    lines.push(coeff < 1 - 1e-9 ? `Лимит за сутки: ${usedH}/${limitH} ч · ×${coeff}` : `Лимит за сутки: ${usedH}/${limitH} ч`);
   }
 
   return lines.join("\n");
@@ -4885,7 +4883,7 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
     });
     const feeLine =
       feeToTreasuryRub > 0
-        ? ` Комиссия **${fmt(feeToTreasuryRub)}** ₽ → казна; на счёт **${fmt(toPersonalRub)}** ₽.`
+        ? ` Комиссия учтена; на счёт **${fmt(toPersonalRub)}** ₽.`
         : ` На счёт **${fmt(toPersonalRub)}** ₽.`;
     await interaction.reply({
       embeds: [buildCurrentJobEmbed(mem, { tier3ActionNotes: [`Вывод с бизнеса **${fmt(amount)}** ₽.${feeLine}`] })],
