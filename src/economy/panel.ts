@@ -358,6 +358,7 @@ const ECON_IP_CONTROL = "econ:work:ip:control";
 const ECON_IP_DEP_OPEN = "econ:work:ip:depOpen";
 const ECON_IP_WD_OPEN = "econ:work:ip:wdOpen";
 const ECON_IP_CALC_OPEN = "econ:work:ip:calcOpen";
+const ECON_IP_CALC_CLOSE = "econ:work:ip:calcClose";
 const ECON_PLAYERS_BUTTON_TOP_PS = "econ:players:topPs";
 const ECON_PLAYERS_BUTTON_TOP_RUB = "econ:players:topRub";
 
@@ -2004,6 +2005,14 @@ function buildSolePropCalculatorEmbed(member: GuildMember, capitalRub: number): 
     .setDescription(lines.join("\n"));
 }
 
+function buildSolePropCalculatorRows(): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_IP_CALC_CLOSE).setLabel("ОК").setStyle(ButtonStyle.Primary),
+    ),
+  ];
+}
+
 function buildTier3JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
   const gid = member.guild.id;
   const lines = JOBS_TIER3.map((d) => {
@@ -2622,6 +2631,7 @@ function isEconomyButton(id: string): boolean {
       ECON_IP_DEP_OPEN,
       ECON_IP_WD_OPEN,
       ECON_IP_CALC_OPEN,
+      ECON_IP_CALC_CLOSE,
       ECON_WORK_BUTTON_SHIFT,
       ECON_WORK_BUTTON_MY_JOB,
       ECON_WORK_BUTTON_QUIT,
@@ -4215,6 +4225,24 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_IP_CALC_CLOSE) {
+    const u = getEconomyUser(member.guild.id, member.id);
+    if (u.jobId === "soleProp") {
+      await replyOrUpdate(interaction, {
+        embeds: [buildCurrentJobEmbed(member)],
+        components: buildCurrentJobRows(member),
+      });
+    } else {
+      const def = getAnyJobDef("soleProp");
+      const req = meetsJobReq(u, def);
+      await replyOrUpdate(interaction, {
+        embeds: [buildJobInfoEmbed(member, "soleProp")],
+        components: buildJobInfoRows(member, "soleProp", req.ok),
+      });
+    }
+    return true;
+  }
+
   if (
     id === ECON_IP_AD_OPEN ||
     id === ECON_IP_DEP_OPEN ||
@@ -4799,11 +4827,19 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
       });
       return true;
     }
-    await interaction.reply({
+    const payload = {
       embeds: [buildSolePropCalculatorEmbed(mem, capital)],
-      components: [shopNavBottomRow(`${ECON_WORK_BUTTON_JOB_PREFIX}soleProp`, "К карточке ИП")],
-      flags: MessageFlags.Ephemeral,
-    });
+      components: buildSolePropCalculatorRows(),
+    };
+    try {
+      await interaction.deferUpdate();
+      await interaction.editReply(payload);
+    } catch (error) {
+      console.error("sole prop calculator: update source message failed:", error);
+      if (!interaction.deferred && !interaction.replied) {
+        await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+      }
+    }
     return true;
   }
 
