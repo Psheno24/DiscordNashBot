@@ -1,4 +1,7 @@
 import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
   EmbedBuilder,
   MessageFlags,
   type Channel,
@@ -11,9 +14,12 @@ import { loadNeurocontrol } from "./loadConfig.js";
 import type { NeuroRoleEntry, NeurocontrolFile } from "./types.js";
 import { getPanelMessageId, setPanelMessageId } from "./panelStore.js";
 import { buildNeuroMainPanelRows, NEURO_MAIN_INFO } from "./adminHub.js";
+import { loadVoiceLadder } from "../voice/loadLadder.js";
 
 const PANEL_COLOR = 0x263238;
 const ROLES_COLOR = 0xb71c1c;
+const NEURO_ROLES_DETAILS = "neuro:roles:details";
+const NEURO_ROLES_LADDER = "neuro:roles:ladder";
 
 function fmtTreasuryRub(n: number): string {
   return Math.floor(Math.max(0, n)).toLocaleString("ru-RU");
@@ -57,6 +63,35 @@ function buildRoleEmbeds(roles: NeuroRoleEntry[]): EmbedBuilder[] {
     }
     return e;
   });
+}
+
+function buildRoleSummaryEmbed(roles: NeuroRoleEntry[]): EmbedBuilder {
+  const lines = roles.map((r) => `• **${r.designation}** · ${r.roleName}`);
+  return new EmbedBuilder()
+    .setColor(ROLES_COLOR)
+    .setTitle("Роли")
+    .setDescription(lines.join("\n") || "Роли не настроены.");
+}
+
+function buildRoleRows(): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(NEURO_MAIN_INFO).setLabel("Список").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(NEURO_ROLES_DETAILS).setLabel("Полномочия").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(NEURO_ROLES_LADDER).setLabel("Пороги лестницы").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+function buildRoleLadderEmbed(): EmbedBuilder {
+  try {
+    const lines = loadVoiceLadder().ladder.map(
+      (step) => `• **${step.roleName}** — **${step.voiceMinutesTotal.toLocaleString("ru-RU")} СР**`,
+    );
+    return new EmbedBuilder().setColor(ROLES_COLOR).setTitle("Пороги лестницы").setDescription(lines.join("\n"));
+  } catch {
+    return new EmbedBuilder().setColor(ROLES_COLOR).setTitle("Пороги лестницы").setDescription("Лестница недоступна.");
+  }
 }
 
 export async function ensureNeuroPanel(client: Client) {
@@ -138,7 +173,7 @@ export async function refreshNeuroPanelGuild(client: Client, guildId: string): P
 
 /** Кнопка «Инфо» — справочник ролей из neurocontrol.json. */
 export async function handleNeuroButton(interaction: ButtonInteraction): Promise<boolean> {
-  if (interaction.customId !== NEURO_MAIN_INFO) return false;
+  if (![NEURO_MAIN_INFO, NEURO_ROLES_DETAILS, NEURO_ROLES_LADDER].includes(interaction.customId)) return false;
 
   let cfg: ReturnType<typeof loadNeurocontrol>;
   try {
@@ -151,7 +186,17 @@ export async function handleNeuroButton(interaction: ButtonInteraction): Promise
     return true;
   }
 
-  const embeds = buildRoleEmbeds(cfg.roles);
-  await interaction.reply({ embeds, flags: MessageFlags.Ephemeral });
+  const embeds =
+    interaction.customId === NEURO_ROLES_DETAILS
+      ? buildRoleEmbeds(cfg.roles)
+      : interaction.customId === NEURO_ROLES_LADDER
+        ? [buildRoleLadderEmbed()]
+        : [buildRoleSummaryEmbed(cfg.roles)];
+  const payload = { embeds, components: buildRoleRows() };
+  if (interaction.message?.flags.has(MessageFlags.Ephemeral)) {
+    await interaction.update(payload);
+  } else {
+    await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+  }
   return true;
 }

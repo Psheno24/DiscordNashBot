@@ -41,6 +41,7 @@ import {
 } from "./userStore.js";
 import {
   computeTier3PassiveRub,
+  computeTier3PassiveRubDetailed,
   getTier3JobDef,
   isTier3JobId,
   JOBS_TIER3,
@@ -89,15 +90,22 @@ import {
 import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub, userHasActiveHousing } from "./economyHousing.js";
 import { clearSovietHousingRentPatch } from "./economyHousingUtil.js";
 import { feedNetPrestigeRubBonus, feedPrestigeDomesticBonusSuffix } from "./economyFeedBonus.js";
-import { applyPrestigeToShiftRub, shiftPsApplies, shiftPsFromDomestic } from "./economyModifiers.js";
+import {
+  applyPrestigeToShiftRub,
+  prestigePassiveIncomeMult,
+  shiftPsApplies,
+  shiftPsFromDomestic,
+} from "./economyModifiers.js";
 import {
   applyRentPlanPurchase,
   buildShopAnimalsEmbed,
   buildShopAnimalsRows,
   buildShopCarListEmbed,
   buildShopCarListRows,
+  buildShopCarDetailsEmbed,
   buildShopHouseListEmbed,
   buildShopHouseListRows,
+  buildShopHouseDetailsEmbed,
   buildShopHousePickEmbed,
   buildShopHousePickRows,
   buildShopHouseRentEmbed,
@@ -108,16 +116,20 @@ import {
   buildShopOriginPickRows,
   buildShopPhoneListEmbed,
   buildShopPhoneListRows,
+  buildShopPhoneDetailsEmbed,
   ECON_SHOP_ANIMALS,
+  ECON_SHOP_ANIMALS_DETAILS,
   ECON_SHOP_APT_BUY_PREFIX,
   ECON_SHOP_APT_SELL_FOREIGN,
   ECON_SHOP_APT_SELL_SOVIET,
   ECON_SHOP_CAR,
   ECON_SHOP_CAR_BUY_PREFIX,
   ECON_SHOP_CAR_ORIGIN_PREFIX,
+  ECON_SHOP_CAR_DETAILS_PREFIX,
   ECON_SHOP_HOUSE,
   ECON_SHOP_HOUSE_LEAVE,
   ECON_SHOP_HOUSE_ORIGIN_PREFIX,
+  ECON_SHOP_HOUSE_DETAILS_PREFIX,
   ECON_SHOP_HOUSE_RENT_MENU,
   ECON_SHOP_HOUSE_RENT_1D,
   ECON_SHOP_HOUSE_RENT_30D,
@@ -132,6 +144,7 @@ import {
   ECON_SHOP_PHONE_SELL_CONFIRM,
   ECON_SHOP_PHONE_SELL_CANCEL,
   ECON_SHOP_PHONE_ORIGIN_PREFIX,
+  ECON_SHOP_PHONE_DETAILS_PREFIX,
   parseOriginFromSuffix,
   purchaseApartment,
   purchaseCar,
@@ -186,6 +199,7 @@ import {
   buildShopSimChangeEmbed,
   buildShopSimChangeRows,
   buildShopSimRows,
+  buildShopAnimalsDetailsEmbed,
   changeSimLast,
   changeSimMid,
   changeSimOperator,
@@ -247,7 +261,13 @@ import {
   scaledShopPrice,
 } from "./economyMacro.js";
 import { formatSimNumberFromUser, userHasSimNumber } from "./economySimNumber.js";
-import { ensureDueLotteryDraws, lotteryPeriodMskYmd, msUntilNextLotteryDrawMsk } from "./lotteryDraw.js";
+import {
+  ensureDueLotteryDraws,
+  lotteryPeriodMskYmd,
+  LOTTERY_JACKPOT_CHANCES,
+  LOTTERY_REFUND_CHANCES,
+  msUntilNextLotteryDrawMsk,
+} from "./lotteryDraw.js";
 import {
   addLotteryTickets,
   getLotteryState,
@@ -281,11 +301,13 @@ const ECON_SHOP_LOTTERY = "econ:shop:lottery";
 const ECON_HOUSING_EDIT = "econ:housing:edit";
 const ECON_HOUSING_BACK = "econ:housing:back";
 const ECON_HOUSING_LEAVE = "econ:housing:leave";
+const ECON_HOUSING_DETAILS = "econ:housing:details";
 const ECON_HOUSING_EXT_PREFIX = "econ:housing:ext:";
 const ECON_SHOP_HOUSE_RENEW_AFTER_REQ_PREFIX = "econ:shop:house:renewReq:";
 const ECON_SHOP_HOUSE_RENEW_AFTER_CNF_PREFIX = "econ:shop:house:renewCnf:";
 const ECON_SHOP_HOUSE_RENEW_AFTER_CAN = "econ:shop:house:renewCan";
 const ECON_SHOP_LOTTERY_BUY_OPEN = "econ:shop:lottery:buyOpen";
+const ECON_SHOP_LOTTERY_DETAILS = "econ:shop:lottery:details";
 const ECON_LOTTERY_CONFIRM_PREFIX = "econ:lottery:confirm:";
 const ECON_LOTTERY_CANCEL = "econ:lottery:cancel";
 const ECON_MODAL_LOTTERY_QTY = "modal:econ:lotteryQty";
@@ -299,6 +321,8 @@ const ASSEMBLER_BASE_CD_MS = 3 * 60 * 60 * 1000;
 const ECON_PROFILE_BUTTON_INFO = "econ:profile:info";
 const ECON_PROFILE_BUTTON_CARD = "econ:profile:card";
 const ECON_PROFILE_BUTTON_LADDER = "econ:profile:ladder";
+const ECON_PROFILE_BUTTON_DETAILS = "econ:profile:details";
+const ECON_PROFILE_BUTTON_LADDER_ALL = "econ:profile:ladderAll";
 const ECON_PROFILE_BUTTON_BETS_HISTORY = "econ:profile:betsHistory";
 /** Экран привязки Telegram (если задан TELEGRAM_BOT_TOKEN). */
 const ECON_PROFILE_BUTTON_TG = "econ:profile:tgCode";
@@ -333,6 +357,7 @@ const ECON_IP_STAFF = "econ:work:ip:staff";
 const ECON_IP_CONTROL = "econ:work:ip:control";
 const ECON_IP_DEP_OPEN = "econ:work:ip:depOpen";
 const ECON_IP_WD_OPEN = "econ:work:ip:wdOpen";
+const ECON_IP_CALC_OPEN = "econ:work:ip:calcOpen";
 const ECON_PLAYERS_BUTTON_TOP_PS = "econ:players:topPs";
 const ECON_PLAYERS_BUTTON_TOP_RUB = "econ:players:topRub";
 
@@ -340,6 +365,7 @@ const ECON_MODAL_SIM_TOPUP = "modal:econ:simTopup";
 const ECON_MODAL_IP_AD = "modal:econ:ipAd";
 const ECON_MODAL_IP_DEP = "modal:econ:ipDep";
 const ECON_MODAL_IP_WD = "modal:econ:ipWd";
+const ECON_MODAL_IP_CALC = "modal:econ:ipCalc";
 
 export const ECON_FEED_BUTTON_ARCHIVE = "econFeed:archive";
 const ECON_FEED_BUTTON_PAGE_PREFIX = "econFeed:page:";
@@ -543,11 +569,23 @@ function buildProfileHubRows(member: GuildMember, active: "info" | "ladder" | "b
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
+        .setCustomId(ECON_PROFILE_BUTTON_DETAILS)
+        .setLabel("Подробнее")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
         .setCustomId(ECON_PROFILE_BUTTON_BETS_HISTORY)
         .setLabel("История ставок")
         .setStyle(active === "bets" ? ButtonStyle.Primary : ButtonStyle.Secondary),
     ),
   ];
+  if (active === "ladder") {
+    rows[1]?.addComponents(
+      new ButtonBuilder()
+        .setCustomId(ECON_PROFILE_BUTTON_LADDER_ALL)
+        .setLabel("Все пороги")
+        .setStyle(ButtonStyle.Secondary),
+    );
+  }
   if (showTelegramBridgeInProfile(member)) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -750,16 +788,27 @@ function buildProfileEmbed(member: GuildMember): EmbedBuilder {
     .setTitle(`Профиль (${member.displayName})`)
     .setDescription(
       [
-        `Баланс ₽: **${fmt(u.rubles)}**`,
+        `Баланс: **${fmt(u.rubles)}** ₽ · СР: **${fmt(u.psTotal)}**`,
+        `Престиж: **${fmt(u.prestigePoints ?? 0)}** · Быт: **${fmt(u.domesticPoints ?? 0)}**`,
         ...buildVoiceLadderProgressLines(u.psTotal),
-        "",
-        "**Покупки:**",
-        ...buildProfilePurchasesBlock(member.guild.id, u),
-        "",
-        "Голос даёт **100%** в **СР** (без ₽). **Быт** усиливает СР с голоса и за смены.",
         `Работа: **${jobName}**`,
       ].join("\n"),
     )
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildProfileDetailsEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const lines = [
+    "**Активы:**",
+    ...buildProfilePurchasesBlock(member.guild.id, u),
+    "",
+    "Голос начисляет **СР**, но не ₽. Быт усиливает СР с голоса и легальных смен.",
+  ];
+  return new EmbedBuilder()
+    .setColor(PROFILE_COLOR)
+    .setTitle(`Профиль · подробно (${member.displayName})`)
+    .setDescription(lines.join("\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -794,23 +843,28 @@ function buildLadderEmbed(member: GuildMember): EmbedBuilder {
   } else {
     lines.push("Ты уже на **последней ступени**.");
   }
-  lines.push("");
-  lines.push(
-    "Дополнительно **СР** дают **смены** (кроме нелегала и ИП) и **быт**; с **полным** советским сетом и активными сменами прогресс может быть **в 3–4 раза** быстрее, чем только голос **~2 ч/день**.",
-  );
-  lines.push("");
-  lines.push("Пороги:");
-  for (const t of ladder) {
-    // "Стажёр" (порог 0) есть у всех — не показываем.
-    if (t.voiceMinutesTotal <= 0) continue;
-    lines.push(`- **${t.roleName}**: ${fmt(t.voiceMinutesTotal)} СР`);
-  }
-
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Голосовая лестница")
     .setDescription(lines.join("\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildLadderAllEmbed(member: GuildMember): EmbedBuilder {
+  let ladder: ReturnType<typeof loadVoiceLadder>["ladder"] | undefined;
+  try {
+    ladder = loadVoiceLadder().ladder;
+  } catch {
+    ladder = undefined;
+  }
+  const lines = ladder?.length
+    ? ladder.map((t) => `• **${t.roleName}** — **${fmt(t.voiceMinutesTotal)} СР**`)
+    : ["Лестница недоступна."];
+  lines.push("", "СР дают голос и легальные смены; быт усиливает начисление.");
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Голосовая лестница · все пороги")
+    .setDescription(lines.join("\n"));
 }
 
 function buildPlayersMenuEmbed(): EmbedBuilder {
@@ -1063,40 +1117,68 @@ function tier3CareerEmbedLines(guildId: string, u: ReturnType<typeof getEconomyU
 }
 
 /** Уличный брокер: штраф и джекпот зависят от ранга (−1% штраф / +1% джекпот за ступень). */
+function streetBrokerChances(rank: number): {
+  fine: number;
+  bad: number;
+  normal: number;
+  good: number;
+  jackpot: number;
+} {
+  const fine = Math.max(3, 8 - rank);
+  const jackpot = Math.min(10, 5 + rank);
+  const midTotal = 100 - fine - jackpot;
+  return {
+    fine,
+    bad: midTotal * (32 / 87),
+    normal: midTotal * (40 / 87),
+    good: midTotal * (15 / 87),
+    jackpot,
+  };
+}
+
 function rollStreetBrokerRub(guildId: string, rank: number): number {
-  const fineP = Math.max(3, 8 - rank);
-  const jackpotP = Math.min(10, 5 + rank);
-  const midTotal = 100 - fineP - jackpotP;
-  const pBad = midTotal * (32 / 87);
-  const pNorm = midTotal * (40 / 87);
-  const pGood = midTotal * (15 / 87);
+  const p = streetBrokerChances(rank);
   const r = Math.random() * 100;
-  if (r < fineP) return scaleSignedIncome(guildId, -10_000);
-  let x = r - fineP;
-  if (x < pBad) return scaleSignedIncome(guildId, randInt(2800, 3200));
-  x -= pBad;
-  if (x < pNorm) return scaleSignedIncome(guildId, randInt(10400, 11600));
-  x -= pNorm;
-  if (x < pGood) return scaleSignedIncome(guildId, randInt(23800, 26200));
+  if (r < p.fine) return scaleSignedIncome(guildId, -10_000);
+  let x = r - p.fine;
+  if (x < p.bad) return scaleSignedIncome(guildId, randInt(2800, 3200));
+  x -= p.bad;
+  if (x < p.normal) return scaleSignedIncome(guildId, randInt(10400, 11600));
+  x -= p.normal;
+  if (x < p.good) return scaleSignedIncome(guildId, randInt(23800, 26200));
   return scaleSignedIncome(guildId, randInt(52000, 58000));
 }
 
 /** Корпоративный брокер (рандом тир-2): ветки как в балансе v2. */
+function corporateBrokerChances(rank: number): {
+  fine: number;
+  weak: number;
+  normal: number;
+  big: number;
+  contract: number;
+} {
+  const fine = Math.max(3, 8 - rank);
+  const contract = Math.min(10, 4 + rank);
+  const midTotal = 100 - fine - contract;
+  return {
+    fine,
+    weak: midTotal * (32 / 88),
+    normal: midTotal * (42 / 88),
+    big: midTotal * (14 / 88),
+    contract,
+  };
+}
+
 function rollCorporateBrokerRub(guildId: string, rank: number): number {
-  const pFine = Math.max(3, 8 - rank);
-  const pContract = Math.min(10, 4 + rank);
-  const midTotal = 100 - pFine - pContract;
-  const pWeak = midTotal * (32 / 88);
-  const pNorm = midTotal * (42 / 88);
-  const pBig = midTotal * (14 / 88);
+  const p = corporateBrokerChances(rank);
   const r = Math.random() * 100;
-  if (r < pFine) return scaleSignedIncome(guildId, randInt(-38000, -32000));
-  let x = r - pFine;
-  if (x < pWeak) return scaleSignedIncome(guildId, randInt(7200, 8800));
-  x -= pWeak;
-  if (x < pNorm) return scaleSignedIncome(guildId, randInt(20500, 23500));
-  x -= pNorm;
-  if (x < pBig) return scaleSignedIncome(guildId, randInt(51000, 59000));
+  if (r < p.fine) return scaleSignedIncome(guildId, randInt(-38000, -32000));
+  let x = r - p.fine;
+  if (x < p.weak) return scaleSignedIncome(guildId, randInt(7200, 8800));
+  x -= p.weak;
+  if (x < p.normal) return scaleSignedIncome(guildId, randInt(20500, 23500));
+  x -= p.normal;
+  if (x < p.big) return scaleSignedIncome(guildId, randInt(51000, 59000));
   return scaleSignedIncome(guildId, randInt(135000, 155000));
 }
 
@@ -1263,17 +1345,12 @@ function buildMyRentHomeEmbed(member: GuildMember): EmbedBuilder {
     u.housingRentRenewalPlan != null
       ? `После срока: **${rentPlanLabelRu(u.housingRentRenewalPlan)}** (**${fmt(inflatedHousingRentPrice(gid, u.housingRentRenewalPlan))}** ₽).`
       : `После срока: **${rentPlanLabelRu(curPlan)}** (**${fmt(curRub)}** ₽).`;
-  const refundLine =
-    due != null && now < due
-      ? `При покупке квартиры — возврат **≈ ${fmt(housingRentUnusedRefundRub(u, now, gid))}** ₽.`
-      : "";
   const lines = [
     due != null && now < due
       ? `Оплачено **до** <t:${Math.floor(due / 1000)}:R>.`
       : "Срок **истёк** — продлите ниже или в магазине.",
     renewLine,
   ];
-  if (refundLine) lines.push(refundLine);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Моя аренда")
@@ -1285,12 +1362,31 @@ function buildMyRentHomeRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_HOUSING_EDIT).setLabel("Изменить срок").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(ECON_HOUSING_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_HOUSING_LEAVE).setLabel("Съехать с аренды").setStyle(ButtonStyle.Danger),
     ),
     buildMenuRow(),
   ];
+}
+
+function buildMyRentDetailsEmbed(member: GuildMember): EmbedBuilder {
+  const gid = member.guild.id;
+  const u = getEconomyUser(gid, member.id);
+  const now = Date.now();
+  const refund = housingRentUnusedRefundRub(u, now, gid);
+  const renewal = u.housingRentRenewalPlan ?? u.housingRentPlan ?? "month";
+  const lines = [
+    `Автопродление: **${rentPlanLabelRu(renewal)}** за **${fmt(inflatedHousingRentPrice(gid, renewal))}** ₽ после окончания срока.`,
+    `Покупка своей квартиры сейчас вернёт **≈ ${fmt(refund)}** ₽ неиспользованной аренды.`,
+    "",
+    "Возврат считается пропорционально неиспользованному времени оплаченной цепочки. Если денег на автопродление не хватит, аренда завершится.",
+  ];
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Моя аренда · подробнее")
+    .setDescription(lines.join("\n"));
 }
 
 function buildMyRentEditEmbed(member: GuildMember): EmbedBuilder {
@@ -1374,10 +1470,8 @@ function buildShopLotteryEmbed(member: GuildMember): EmbedBuilder {
   const st = getLotteryState(gid, period);
   const drawTs = lotteryDrawUnixTs();
   const lines = [
-    `Билет — **1 000** ₽. Джекпот: **${fmt(st.jackpotRub)}** ₽ · в продаже: **${st.ticketsSold}**`,
+    `Билет — **${fmt(LOTTERY_TICKET_PRICE_RUB)}** ₽. Джекпот: **${fmt(st.jackpotRub)}** ₽ · в продаже: **${st.ticketsSold}**`,
     `Розыгрыш: <t:${drawTs}:R> (**21:00** МСК)`,
-    "",
-    "Шансы: возврат **25%** / **50%**, доли джекпота **10%** / **50%** / **100%** (крупные — по одному на период).",
   ];
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Магазин · Лотерея").setDescription(lines.join("\n")).setFooter({ text: `Запросил: ${member.user.tag}` });
 }
@@ -1386,9 +1480,24 @@ function buildShopLotteryRows(member: GuildMember): ActionRowBuilder<ButtonBuild
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY_BUY_OPEN).setLabel("Купить").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
     ),
     shopNavBottomRow(ECON_SHOP_HUB),
   ];
+}
+
+function buildShopLotteryDetailsEmbed(): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Лотерея · подробнее")
+    .setDescription(
+      [
+        `**Каждый билет:** полный возврат **${LOTTERY_REFUND_CHANCES.full}%**, половина **${LOTTERY_REFUND_CHANCES.half}%**, без возврата **${LOTTERY_REFUND_CHANCES.none}%**.`,
+        "",
+        `**Один общий крупный исход за период:** 100% джекпота **${LOTTERY_JACKPOT_CHANCES.full}%**, 50% **${LOTTERY_JACKPOT_CHANCES.half}%**, 10% **${LOTTERY_JACKPOT_CHANCES.tenth}%**.`,
+        "Если крупный исход выпал, победитель случайно выбирается среди всех билетов; больше билетов повышает шанс быть выбранным.",
+      ].join("\n"),
+    );
 }
 
 function buildLotteryConfirmEmbed(member: GuildMember, qty: number): EmbedBuilder {
@@ -1653,6 +1762,34 @@ function buildJobDetailBody(member: GuildMember, jobId: JobId): string {
   if (jobId === "assembler" && u.jobId === "assembler") {
     tail.push("", ...assemblerWorkExtrasLines(u, now));
   }
+  const exp = getJobExp(u, jobId);
+  const t12Rank = isTier12JobId(jobId) ? tier12RankFromShifts(exp, def.baseCooldownMs) : 0;
+  if (jobId === "waiter") {
+    const p = streetBrokerChances(t12Rank);
+    tail.push(
+      "",
+      `**Шансы при ранге ${t12Rank}:** штраф **${fmt(p.fine)}%** · слабый **${fmt(p.bad)}%** · обычный **${fmt(p.normal)}%** · хороший **${fmt(p.good)}%** · джекпот **${fmt(p.jackpot)}%**.`,
+    );
+  } else if (jobId === "expediter") {
+    const p = corporateBrokerChances(t12Rank);
+    tail.push(
+      "",
+      `**Шансы при ранге ${t12Rank}:** штраф **${fmt(p.fine)}%** · слабый **${fmt(p.weak)}%** · обычный **${fmt(p.normal)}%** · крупный **${fmt(p.big)}%** · контракт **${fmt(p.contract)}%**.`,
+    );
+  } else if (jobId === "shadowFixer") {
+    tail.push(
+      "",
+      "**Шансы:** облава **10%** · срыв **22%** · средний поток **32%** · крупная сделка **24%** · очень крупно **9%** · куш **3%**.",
+    );
+  }
+  if (isTier12JobId(jobId)) {
+    tail.push("", "**Карьера:**", ...tier12CareerEmbedLines(jobId, exp, def.baseCooldownMs));
+  } else if (isTier3JobId(jobId)) {
+    tail.push("", "**Карьера:**", ...tier3CareerEmbedLines(gid, u, jobId));
+  }
+  const cdAcc = workShiftCdAccStatusLines(u, jobId, now);
+  if (cdAcc.length) tail.push("", ...cdAcc);
+  tail.push("", ...jobTaxEmbedLines(gid, jobId));
   return [main, ...tail].join("\n\n");
 }
 
@@ -1687,11 +1824,6 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   body.push("");
   const exp = getJobExp(u, jobId);
   body.push(`Опыт смен на **этой** профессии: **${exp}**`);
-  if (isTier12JobId(jobId)) {
-    body.push(...tier12CareerEmbedLines(jobId, exp, def.baseCooldownMs));
-  } else if (isTier3JobId(jobId)) {
-    body.push(...tier3CareerEmbedLines(guildId, u, jobId));
-  }
 
   if (jobId === "courier" && u.jobId === "courier") {
     body.push("");
@@ -1701,12 +1833,6 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
     body.push("");
     body.push(...assemblerWorkExtrasLines(u, now));
   }
-  const cdAcc = workShiftCdAccStatusLines(u, jobId, now);
-  if (cdAcc.length) {
-    body.push("");
-    body.push(...cdAcc);
-  }
-
   const t3 = tier3StatusLines(guildId, u, jobId, now);
   if (t3.length) {
     body.push("");
@@ -1737,9 +1863,6 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   }
 
   body.push("");
-  body.push(...jobTaxEmbedLines(guildId, jobId));
-
-  body.push("");
   body.push(u.jobId === jobId ? "Статус: **это ваша текущая работа**." : "Статус: **не выбрана**.");
 
   return new EmbedBuilder()
@@ -1761,30 +1884,6 @@ function workCatalogBackButtonId(jobId: JobId): string {
   if (isTier3PanelJob(jobId)) return ECON_WORK_BUTTON_TIER3;
   if (isTier2JobId(jobId)) return ECON_WORK_BUTTON_TIER2;
   return ECON_WORK_BUTTON_STARTERS;
-}
-
-/** Ориентир суточного оклада ИП при разных вложениях (риск 0 — без рандом-джиттера). */
-function solePropPassiveExampleLines(guildId: string, u: ReturnType<typeof getEconomyUser>): string[] {
-  const sdef = getTier3JobDef("soleProp");
-  const streak = u.jobMskDayStreak ?? 0;
-  const out: string[] = [
-    `**Ориентир суточного оклада** (риск **0**, ранг **${tier3PromotionRank(streak)}**):`,
-  ];
-  for (const cap of [0, 500_000, 2_000_000, 5_000_000]) {
-    const night = computeTier3PassiveRub({
-      guildId,
-      jobId: "soleProp",
-      def: sdef,
-      streakDays: streak,
-      solePropCapitalRub: cap,
-      solePropRiskDial: 0,
-      prestigePoints: u.prestigePoints ?? 0,
-      solePropPassiveEffMult: u.solePropPassiveEffMult ?? 1,
-      solePropPassiveTempMult: u.solePropPassiveTempMult ?? 1,
-    });
-    out.push(`• **${fmt(cap)}** ₽ → **~${fmt(night)}** ₽/сут`);
-  }
-  return out;
 }
 
 function tier3StatusLines(guildId: string, u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): string[] {
@@ -1825,8 +1924,7 @@ function tier3StatusLines(guildId: string, u: ReturnType<typeof getEconomyUser>,
     lines.push(adL > 0 ? `Реклама: через **${formatCooldown(adL)}**.` : `Реклама: **доступна**.`);
     lines.push(stL > 0 ? `Персонал: через **${formatCooldown(stL)}**.` : `Персонал: **доступен**.`);
     lines.push(ctL > 0 ? `Контроль: через **${formatCooldown(ctL)}**.` : `Контроль: **доступен**.`);
-    lines.push("");
-    lines.push(...solePropPassiveExampleLines(guildId, u));
+    lines.push("Точный прогноз для любой суммы — кнопка **Калькулятор**.");
     return lines;
   }
   const bossLeft = (u.tier3BossReadyAt ?? 0) - now;
@@ -1838,6 +1936,63 @@ function tier3StatusLines(guildId: string, u: ReturnType<typeof getEconomyUser>,
     lines.push(bossLeft > 0 ? `Совещание: через **${formatCooldown(bossLeft)}**.` : `Совещание: **доступно**.`);
   }
   return lines;
+}
+
+function solePropCalculatedIncome(
+  guildId: string,
+  u: ReturnType<typeof getEconomyUser>,
+  capitalRub: number,
+): { gross: number; afterPlate: number; tax: number; net: number } {
+  const tempMult =
+    u.solePropPassiveTempUntilMs && Date.now() < u.solePropPassiveTempUntilMs
+      ? (u.solePropPassiveTempMult ?? 1)
+      : 1;
+  const gross = computeTier3PassiveRubDetailed({
+    guildId,
+    jobId: "soleProp",
+    def: getTier3JobDef("soleProp"),
+    streakDays: u.jobMskDayStreak ?? 0,
+    solePropCapitalRub: capitalRub,
+    solePropRiskDial: 0,
+    prestigePoints: u.prestigePoints ?? 0,
+    solePropPassiveEffMult: u.solePropPassiveEffMult ?? 1,
+    solePropPassiveTempMult: tempMult,
+  }).total;
+  const afterPlate = applyUnregisteredVehiclePenalty(u, gross);
+  const taxPercent = getLegalIncomeTaxPercent(guildId);
+  const tax = Math.min(afterPlate, Math.floor((afterPlate * taxPercent) / 100));
+  return { gross, afterPlate, tax, net: afterPlate - tax };
+}
+
+function buildSolePropCalculatorEmbed(member: GuildMember, capitalRub: number): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const result = solePropCalculatedIncome(gid, u, capitalRub);
+  const currentCapital = u.solePropCapitalRub ?? 0;
+  const current = solePropCalculatedIncome(gid, u, currentCapital);
+  const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
+  const tempMult =
+    u.solePropPassiveTempUntilMs && Date.now() < u.solePropPassiveTempUntilMs
+      ? (u.solePropPassiveTempMult ?? 1)
+      : 1;
+  const plateLoss = result.gross - result.afterPlate;
+  const delta = result.net - current.net;
+  const lines = [
+    `Капитал: **${fmt(capitalRub)}** ₽ (сейчас **${fmt(currentCapital)}** ₽)`,
+    `Валовой оклад: **${fmt(result.gross)}** ₽/сут`,
+    plateLoss > 0 ? `Авто без номера: **−${fmt(plateLoss)}** ₽` : "Штраф за госномер: **нет**",
+    `Подоходный налог **${fmt(getLegalIncomeTaxPercent(gid))}%**: **−${fmt(result.tax)}** ₽`,
+    `**На личный счёт: ${fmt(result.net)} ₽/сут**`,
+    "",
+    `Множители: ранг **×${(1 + rank * 0.08).toFixed(2)}** · престиж **×${prestigePassiveIncomeMult(u.prestigePoints ?? 0).toFixed(3)}** · эффективность **×${(u.solePropPassiveEffMult ?? 1).toFixed(2)}** · временный **×${tempMult.toFixed(2)}**.`,
+    `К текущему капиталу: **${delta >= 0 ? "+" : "−"}${fmt(Math.abs(delta))}** ₽/сут.`,
+    "",
+    "Прогноз использует риск **0**: случайный риск-джиттер не применяется. Баланс не меняется.",
+  ];
+  return new EmbedBuilder()
+    .setColor(PROFILE_COLOR)
+    .setTitle("ИП · калькулятор суточного оклада")
+    .setDescription(lines.join("\n"));
 }
 
 function buildTier3JobsOverviewEmbed(member: GuildMember): EmbedBuilder {
@@ -1880,6 +2035,7 @@ function buildTier3ActionRows(member: GuildMember, jobId: JobId): ActionRowBuild
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(ECON_IP_DEP_OPEN).setLabel("В бизнес…").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(ECON_IP_WD_OPEN).setLabel("На счёт…").setStyle(ButtonStyle.Secondary).setDisabled((u.solePropCapitalRub ?? 0) < 1),
+        new ButtonBuilder().setCustomId(ECON_IP_CALC_OPEN).setLabel("Калькулятор").setStyle(ButtonStyle.Secondary),
       ),
     ];
   }
@@ -2040,11 +2196,6 @@ function buildCurrentJobEmbed(
 
   lines.push("");
   lines.push(`Опыт смен на этой работе: **${exp}**`);
-  if (isTier12JobId(jid)) {
-    lines.push(...tier12CareerEmbedLines(jid, exp, def.baseCooldownMs));
-  } else if (isTier3JobId(jid)) {
-    lines.push(...tier3CareerEmbedLines(guildId, u, jid));
-  }
 
   if (jid === "courier") {
     lines.push("");
@@ -2054,20 +2205,11 @@ function buildCurrentJobEmbed(
     lines.push("");
     lines.push(...assemblerWorkExtrasLines(u, now));
   }
-  const cdAcc = workShiftCdAccStatusLines(u, jid, now);
-  if (cdAcc.length) {
-    lines.push("");
-    lines.push(...cdAcc);
-  }
-
   const t3 = tier3StatusLines(guildId, u, jid, now);
   if (t3.length) {
     lines.push("");
     lines.push(...t3);
   }
-
-  lines.push("");
-  lines.push(...jobTaxEmbedLines(guildId, jid));
 
   if (jid !== "soleProp") {
     lines.push("");
@@ -2159,6 +2301,7 @@ const SKILLS: Array<{ id: SkillId; title: string }> = [
 ];
 
 const ECON_SKILL_BUTTON_PREFIX = "econ:skill:";
+const ECON_SKILLS_DETAILS = "econ:skills:details";
 /** Общий КД на любую тренировку: ~2–3 раза в сутки при активной игре. */
 export const ECONOMY_TRAIN_COOLDOWN_MS = 8 * 60 * 60 * 1000;
 
@@ -2172,6 +2315,30 @@ function buildSkillsEmbed(member: GuildMember): EmbedBuilder {
     .setColor(PANEL_COLOR)
     .setTitle("Навыки")
     .setDescription([cdLine, "", ...lines].join("\n"))
+    .setFooter({ text: `Запросил: ${member.user.tag}` });
+}
+
+function buildSkillsDetailsEmbed(member: GuildMember): EmbedBuilder {
+  const reqLines = WORK_JOB_IDS.map((id) => getAnyJobDef(id))
+    .filter((d) => d.reqSkills && Object.keys(d.reqSkills).length > 0)
+    .map((d) => {
+      const req = SKILLS.flatMap((s) => {
+        const level = d.reqSkills?.[s.id];
+        return level == null ? [] : [`${s.title} **${level}**`];
+      });
+      return `• **${d.title}** — ${req.join(" · ")}`;
+    });
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Навыки · подробнее")
+    .setDescription(
+      [
+        `Одна тренировка повышает выбранный навык на **1**. Общий КД — **${formatCooldown(ECONOMY_TRAIN_COOLDOWN_MS)}**, максимум — **${ECONOMY_SKILL_MAX}**.`,
+        "",
+        "**Требования работ:**",
+        ...reqLines,
+      ].join("\n"),
+    )
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -2194,6 +2361,9 @@ function buildSkillsRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[]
       trainRow2.addComponents(btn);
     }
   }
+  trainRow2.addComponents(
+    new ButtonBuilder().setCustomId(ECON_SKILLS_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
+  );
   return [trainRow1, trainRow2, shopNavBottomRow(ECON_BUTTON_WORK, "К работе")];
 }
 
@@ -2373,7 +2543,9 @@ function isEconomyButton(id: string): boolean {
       ECON_HOUSING_EDIT,
       ECON_HOUSING_BACK,
       ECON_HOUSING_LEAVE,
+      ECON_HOUSING_DETAILS,
       ECON_PROFILE_BUTTON_INFO,
+      ECON_PROFILE_BUTTON_DETAILS,
       ECON_PROFILE_BUTTON_TG,
       ECON_TG_BACK_PROFILE,
       ECON_TG_MENU_ROOT,
@@ -2381,6 +2553,7 @@ function isEconomyButton(id: string): boolean {
       ECON_TG_NEW_CONFIRM,
       ECON_TG_NEW_CANCEL,
       ECON_PROFILE_BUTTON_LADDER,
+      ECON_PROFILE_BUTTON_LADDER_ALL,
       ECON_PROFILE_BUTTON_BETS_HISTORY,
       ECON_BUTTON_WORK,
       ECON_BUTTON_SHOP,
@@ -2408,6 +2581,7 @@ function isEconomyButton(id: string): boolean {
       ECON_SHOP_SIM_TOPUP_OPEN,
       ECON_SHOP_LOTTERY,
       ECON_SHOP_LOTTERY_BUY_OPEN,
+      ECON_SHOP_LOTTERY_DETAILS,
       ECON_LOTTERY_CANCEL,
       ECON_SHOP_APT_SELL_SOVIET,
       ECON_SHOP_APT_SELL_SOVIET_CONFIRM,
@@ -2435,6 +2609,7 @@ function isEconomyButton(id: string): boolean {
       ECON_WORK_BUTTON_QUIT,
       ECON_WORK_BUTTON_QUIT_CONFIRM,
       ECON_BUTTON_SKILLS,
+      ECON_SKILLS_DETAILS,
       ECON_BUTTON_PLAYERS,
       ECON_PLAYERS_BUTTON_TOP_PS,
       ECON_PLAYERS_BUTTON_TOP_RUB,
@@ -2978,6 +3153,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_HOUSING_DETAILS) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildMyRentDetailsEmbed(member)],
+      components: [shopNavBottomRow(ECON_BUTTON_HOUSING)],
+    });
+    return true;
+  }
+
   if (id === ECON_HOUSING_EDIT) {
     const ue = getEconomyUser(member.guild.id, member.id);
     if ((ue.housingKind ?? "none") !== "rent") {
@@ -3088,6 +3271,22 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_PROFILE_BUTTON_LADDER_ALL) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildLadderAllEmbed(member)],
+      components: [shopNavBottomRow(ECON_PROFILE_BUTTON_LADDER)],
+    });
+    return true;
+  }
+
+  if (id === ECON_PROFILE_BUTTON_DETAILS) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildProfileDetailsEmbed(member)],
+      components: [shopNavBottomRow(ECON_PROFILE_BUTTON_INFO)],
+    });
+    return true;
+  }
+
   if (id === ECON_PROFILE_BUTTON_BETS_HISTORY) {
     await replyOrUpdate(interaction, {
       embeds: [buildProfileBetHistoryEmbed(member, 0)],
@@ -3136,6 +3335,16 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     await replyOrUpdate(interaction, {
       embeds: [buildShopOriginPickEmbed("Телефон", member, "phone")],
       components: buildShopOriginPickRows("phone", ECON_SHOP_HUB),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PHONE_DETAILS_PREFIX)) {
+    const origin = parseOriginFromSuffix(id.slice(ECON_SHOP_PHONE_DETAILS_PREFIX.length));
+    if (!origin) return true;
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPhoneDetailsEmbed(member, origin)],
+      components: [shopNavBottomRow(`${ECON_SHOP_PHONE_ORIGIN_PREFIX}${origin}`)],
     });
     return true;
   }
@@ -3243,6 +3452,16 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     await replyOrUpdate(interaction, {
       embeds: [buildShopOriginPickEmbed("Авто", member, "car")],
       components: buildShopOriginPickRows("car", ECON_SHOP_HUB),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_CAR_DETAILS_PREFIX)) {
+    const origin = parseOriginFromSuffix(id.slice(ECON_SHOP_CAR_DETAILS_PREFIX.length));
+    if (!origin) return true;
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopCarDetailsEmbed(member, origin)],
+      components: [shopNavBottomRow(`${ECON_SHOP_CAR_ORIGIN_PREFIX}${origin}`)],
     });
     return true;
   }
@@ -3369,7 +3588,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_PLATE_DETAILS) {
     await replyOrUpdate(interaction, {
       embeds: [buildShopPlateDetailsEmbed(member)],
-      components: buildShopPlateRows(member),
+      components: [shopNavBottomRow(ECON_SHOP_PLATE)],
     });
     return true;
   }
@@ -3423,6 +3642,16 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id.startsWith(ECON_SHOP_HOUSE_DETAILS_PREFIX)) {
+    const origin = parseOriginFromSuffix(id.slice(ECON_SHOP_HOUSE_DETAILS_PREFIX.length));
+    if (!origin) return true;
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopHouseDetailsEmbed(member, origin)],
+      components: [shopNavBottomRow(`${ECON_SHOP_HOUSE_ORIGIN_PREFIX}${origin}`)],
+    });
+    return true;
+  }
+
   if (id === ECON_SHOP_HOUSE_RENT_MENU) {
     await replyOrUpdate(interaction, {
       embeds: [buildShopHouseRentEmbed(member)],
@@ -3444,6 +3673,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_SHOP_ANIMALS) {
     await replyOrUpdate(interaction, { embeds: [buildShopAnimalsEmbed(member)], components: buildShopAnimalsRows(member) });
+    return true;
+  }
+
+  if (id === ECON_SHOP_ANIMALS_DETAILS) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopAnimalsDetailsEmbed(member)],
+      components: [shopNavBottomRow(ECON_SHOP_ANIMALS)],
+    });
     return true;
   }
 
@@ -3737,6 +3974,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_SHOP_LOTTERY_DETAILS) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopLotteryDetailsEmbed()],
+      components: [shopNavBottomRow(ECON_SHOP_LOTTERY)],
+    });
+    return true;
+  }
+
   if (id === ECON_SHOP_LOTTERY_BUY_OPEN) {
     const modal = new ModalBuilder().setCustomId(ECON_MODAL_LOTTERY_QTY).setTitle("Купить лотерейные билеты");
     modal.addComponents(
@@ -3867,7 +4112,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_SIM_DETAILS) {
     await replyOrUpdate(interaction, {
       embeds: [buildShopSimDetailsEmbed(member)],
-      components: buildShopSimChangeRows(member),
+      components: [shopNavBottomRow(ECON_SHOP_SIM)],
     });
     return true;
   }
@@ -3960,6 +4205,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     id === ECON_IP_AD_OPEN ||
     id === ECON_IP_DEP_OPEN ||
     id === ECON_IP_WD_OPEN ||
+    id === ECON_IP_CALC_OPEN ||
     id === ECON_IP_STAFF ||
     id === ECON_IP_CONTROL
   ) {
@@ -3984,6 +4230,23 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
             .setMinLength(4)
+            .setMaxLength(12),
+        ),
+      );
+      await interaction.showModal(modal);
+      return true;
+    }
+    if (id === ECON_IP_CALC_OPEN) {
+      const modal = new ModalBuilder().setCustomId(ECON_MODAL_IP_CALC).setTitle("Калькулятор ИП");
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("amount")
+            .setLabel("Капитал бизнеса: 0–500 000 000 ₽")
+            .setStyle(TextInputStyle.Short)
+            .setValue(String(u.solePropCapitalRub ?? 0))
+            .setRequired(true)
+            .setMinLength(1)
             .setMaxLength(12),
         ),
       );
@@ -4354,6 +4617,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_SKILLS_DETAILS) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildSkillsDetailsEmbed(member)],
+      components: [shopNavBottomRow(ECON_BUTTON_SKILLS)],
+    });
+    return true;
+  }
+
   if (id.startsWith(ECON_SKILL_BUTTON_PREFIX)) {
     const skillId = id.slice(ECON_SKILL_BUTTON_PREFIX.length) as SkillId;
     const tr = economyRunTrainSkill(member, skillId);
@@ -4494,6 +4765,34 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
     await interaction.reply({
       embeds: [buildShopSimEmbed(mem)],
       components: buildShopSimRows(mem),
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+
+  if (modalId === ECON_MODAL_IP_CALC) {
+    if (!interaction.inGuild() || !interaction.guildId || !interaction.member) {
+      await interaction.reply({ content: "Калькулятор работает только на сервере.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const mem = interaction.member as GuildMember;
+    const u = getEconomyUser(mem.guild.id, mem.id);
+    if (u.jobId !== "soleProp") {
+      await interaction.reply({ content: "Калькулятор доступен только на работе **ИП**.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const raw = interaction.fields.getTextInputValue("amount").trim().replace(/\s/g, "").replace(",", ".");
+    const capital = Math.floor(Number(raw));
+    if (!Number.isFinite(capital) || capital < 0 || capital > SOLE_PROP_CAP_MAX) {
+      await interaction.reply({
+        content: `Введите целое число от **0** до **${fmt(SOLE_PROP_CAP_MAX)}** ₽.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    await interaction.reply({
+      embeds: [buildSolePropCalculatorEmbed(mem, capital)],
+      components: buildCurrentJobRows(mem),
       flags: MessageFlags.Ephemeral,
     });
     return true;

@@ -56,13 +56,16 @@ type DrawOutcome = {
   label: string;
 };
 
+export const LOTTERY_JACKPOT_CHANCES = { full: 2, half: 8, tenth: 15 } as const;
+export const LOTTERY_REFUND_CHANCES = { full: 25, half: 50, none: 25 } as const;
+
 function pickJackpotWinner(tickets: LotteryTicketEntry[]): { entry: LotteryTicketEntry; tier: "10" | "50" | "100" } | null {
   if (!tickets.length) return null;
   const r = Math.random() * 100;
   let tier: "10" | "50" | "100" | null = null;
-  if (r < 2) tier = "100";
-  else if (r < 10) tier = "50";
-  else if (r < 25) tier = "10";
+  if (r < LOTTERY_JACKPOT_CHANCES.full) tier = "100";
+  else if (r < LOTTERY_JACKPOT_CHANCES.full + LOTTERY_JACKPOT_CHANCES.half) tier = "50";
+  else if (r < LOTTERY_JACKPOT_CHANCES.full + LOTTERY_JACKPOT_CHANCES.half + LOTTERY_JACKPOT_CHANCES.tenth) tier = "10";
   if (!tier) return null;
   const idx = Math.floor(Math.random() * tickets.length);
   return { entry: tickets[idx]!, tier };
@@ -70,8 +73,8 @@ function pickJackpotWinner(tickets: LotteryTicketEntry[]): { entry: LotteryTicke
 
 function rollPerTicketRefund(): number {
   const r = Math.random() * 100;
-  if (r < 25) return LOTTERY_TICKET_PRICE_RUB;
-  if (r < 75) return Math.floor(LOTTERY_TICKET_PRICE_RUB / 2);
+  if (r < LOTTERY_REFUND_CHANCES.full) return LOTTERY_TICKET_PRICE_RUB;
+  if (r < LOTTERY_REFUND_CHANCES.full + LOTTERY_REFUND_CHANCES.half) return Math.floor(LOTTERY_TICKET_PRICE_RUB / 2);
   return 0;
 }
 

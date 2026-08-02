@@ -22,6 +22,7 @@ import { addToTreasury, trySpendTreasuryRub } from "../economy/taxTreasury.js";
 import { applyUnregisteredVehiclePenalty } from "../economy/economyLicensePlate.js";
 import { scalePositiveIncome } from "../economy/economyMacro.js";
 import { getEconomyUser, patchEconomyUser } from "../economy/userStore.js";
+import { getGuildConfig } from "../guildConfig/store.js";
 import {
   buildAdminEconEmbed,
   buildAdminEconRows,
@@ -51,6 +52,7 @@ const MODAL_TAKE_RUB = "modal:econ:takeRub";
 const BET_BUTTON_OPEN_PREFIX = "bet:open:";
 const BET_MENU_PICK_PREFIX = "bet:menuPick:";
 const BET_MENU_BACK_PREFIX = "bet:menuBack:";
+const BET_MENU_RULES_PREFIX = "bet:rules:";
 const BET_MENU_CLOSE = "bet:menuClose";
 const BET_MENU_MORE_GO_PREFIX = "bet:moreGo:";
 const BET_MENU_MORE_ABORT_PREFIX = "bet:moreAbort:";
@@ -70,6 +72,12 @@ const ADMIN_BET_CHOOSE_PREFIX = "neuroAdmin:betChoose:";
 const ADMIN_BET_CONFIRM_PREFIX = "neuroAdmin:betConfirm:";
 const ADMIN_BET_CANCEL_PREFIX = "neuroAdmin:betCancel:";
 const ADMIN_BET_EDIT_PREFIX = "neuroAdmin:betEdit:";
+
+function budgetBalancesLine(guildId: string, userId: string): string {
+  const wallet = getEconomyUser(guildId, userId).rubles;
+  const treasury = getGuildConfig(guildId).treasuryRubles ?? 0;
+  return `Баланс игрока: **${wallet.toLocaleString("ru-RU")} ₽** · казна: **${treasury.toLocaleString("ru-RU")} ₽**.`;
+}
 
 function isAcceptingBets(ev: BetEvent, now = Date.now()): boolean {
   return ev.status === "open" && now <= ev.closesAt;
@@ -201,7 +209,7 @@ export async function handleMoneyOwnerSlashCommand(interaction: ChatInputCommand
       return true;
     }
     await interaction.reply({
-      content: `Выдано **${amount.toLocaleString("ru-RU")}** ₽ пользователю ${target} (из казны).`,
+      content: `Выдано **${amount.toLocaleString("ru-RU")}** ₽ пользователю ${target}.\n${budgetBalancesLine(guildId, target.id)}`,
       flags: MessageFlags.Ephemeral,
     });
     return true;
@@ -223,8 +231,8 @@ export async function handleMoneyOwnerSlashCommand(interaction: ChatInputCommand
   }
   await interaction.reply({
     content: creditTreasury
-      ? `Снято **${amount.toLocaleString("ru-RU")}** ₽ с ${target} и зачислено в казну.`
-      : `Снято **${amount.toLocaleString("ru-RU")}** ₽ с ${target} (в казну не зачислено).`,
+      ? `Снято **${amount.toLocaleString("ru-RU")}** ₽ с ${target} в казну.\n${budgetBalancesLine(guildId, target.id)}`
+      : `Снято **${amount.toLocaleString("ru-RU")}** ₽ с ${target}.\n${budgetBalancesLine(guildId, target.id)}`,
     flags: MessageFlags.Ephemeral,
   });
   return true;
@@ -773,11 +781,25 @@ function buildBetMenuEmbed(ev: BetEvent, balanceRub: number, userId: string): Em
         "",
         `Ваш баланс: **${balanceRub.toLocaleString("ru-RU")} ₽**`,
         "",
-        "Коротко: ставок можно несколько; принятую ставку отменить нельзя; кэф фиксируется в момент приёма.",
         stakesBlock,
         opts,
         "",
         "Выберите исход.",
+      ].join("\n"),
+    );
+}
+
+function buildBetRulesEmbed(guildId: string, ev: BetEvent): EmbedBuilder {
+  return new EmbedBuilder()
+    .setColor(BET_COLOR)
+    .setTitle(`Ставка · правила: ${ev.title}`)
+    .setDescription(
+      [
+        "• На одно событие можно сделать **несколько ставок**, в том числе на разные исходы.",
+        "• Принятую ставку отменить нельзя; коэффициент фиксируется **в момент приёма**.",
+        `• Потенциальная выплата по одному исходу ограничена **${betMaxPayoutCapRub(guildId).toLocaleString("ru-RU")} ₽** на игрока.`,
+        "• При отмене события суммы ставок возвращаются.",
+        "• Авто без госномера уменьшает положительную выплату на **10%**.",
       ].join("\n"),
     );
 }
@@ -797,6 +819,10 @@ function buildBetMenuRows(ev: BetEvent): ActionRowBuilder<ButtonBuilder>[] {
   return [
     row,
     new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${BET_MENU_RULES_PREFIX}${ev.id}`)
+        .setLabel("Правила")
+        .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(BET_MENU_CLOSE).setLabel("Закрыть").setStyle(ButtonStyle.Secondary),
     ),
   ];
@@ -808,6 +834,7 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
     !id.startsWith(BET_BUTTON_OPEN_PREFIX) &&
     !id.startsWith(BET_MENU_PICK_PREFIX) &&
     !id.startsWith(BET_MENU_BACK_PREFIX) &&
+    !id.startsWith(BET_MENU_RULES_PREFIX) &&
     id !== BET_MENU_CLOSE &&
     !id.startsWith(BET_MENU_MORE_GO_PREFIX) &&
     !id.startsWith(BET_MENU_MORE_ABORT_PREFIX) &&
@@ -843,7 +870,44 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
     return true;
   }
 
-  if (id === BET_MENU_CLOSE || id.startsWith(BET_MENU_BACK_PREFIX)) {
+  if (id.startsWith(BET_MENU_RULES_PREFIX)) {
+    const eventId = id.slice(BET_MENU_RULES_PREFIX.length);
+    const ev = getBetEvent(guildId, eventId);
+    if (!ev) {
+      await interaction.reply({ content: "Событие не найдено.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await interaction.update({
+      embeds: [buildBetRulesEmbed(guildId, ev)],
+      components: [
+        new ActionRowBuilder<ButtonBuilder>().addComponents(
+          new ButtonBuilder()
+            .setCustomId(`${BET_MENU_BACK_PREFIX}${ev.id}`)
+            .setLabel("Назад")
+            .setStyle(ButtonStyle.Secondary),
+        ),
+      ],
+    });
+    return true;
+  }
+
+  if (id.startsWith(BET_MENU_BACK_PREFIX)) {
+    const eventId = id.slice(BET_MENU_BACK_PREFIX.length);
+    const ev = getBetEvent(guildId, eventId);
+    if (!ev) {
+      await interaction.reply({ content: "Событие не найдено.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const userId = interaction.user.id;
+    const u = getEconomyUser(guildId, userId);
+    await interaction.update({
+      embeds: [buildBetMenuEmbed(ev, u.rubles, userId)],
+      components: buildBetMenuRows(ev),
+    });
+    return true;
+  }
+
+  if (id === BET_MENU_CLOSE) {
     // Закрываем личное окно ставок
     const isEphemeralMessage = Boolean(interaction.message?.flags?.has(MessageFlags.Ephemeral));
     if (interaction.message && isEphemeralMessage) {
@@ -1271,7 +1335,7 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
     }
 
     await interaction.reply({
-      content: `Выдано ${amount.toLocaleString("ru-RU")} ₽ пользователю <@${userId}> (из казны).`,
+      content: `Выдано **${amount.toLocaleString("ru-RU")} ₽** пользователю <@${userId}>.\n${budgetBalancesLine(guildId, userId)}`,
       flags: MessageFlags.Ephemeral,
     });
     return true;
@@ -1315,7 +1379,7 @@ export async function handleBetModal(interaction: ModalSubmitInteraction): Promi
     }
 
     await interaction.reply({
-      content: `Снято ${amount.toLocaleString("ru-RU")} ₽ с <@${userId}> и зачислено в казну.`,
+      content: `Снято **${amount.toLocaleString("ru-RU")} ₽** с <@${userId}> в казну.\n${budgetBalancesLine(guildId, userId)}`,
       flags: MessageFlags.Ephemeral,
     });
     return true;

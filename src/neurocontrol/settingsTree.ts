@@ -38,9 +38,12 @@ const NEURO_TAX_GENERAL = "neuro:tax:general";
 const NEURO_TAX_IP = "neuro:tax:ip";
 const NEURO_TAX_OPEN_LEGAL = "neuro:tax:open:legal";
 const NEURO_TAX_OPEN_VAT = "neuro:tax:open:vat";
+const NEURO_TAX_GENERAL_DETAILS = "neuro:tax:general:details";
 const MODAL_NEURO_SHOP_VAT = "modal:neuro:shopVat";
 const NEURO_TAX_OPEN_IP_WD = "neuro:tax:open:ipWd";
 const NEURO_TAX_OPEN_IP_CAP = "neuro:tax:open:ipCap";
+const NEURO_TAX_IP_DETAILS = "neuro:tax:ip:details";
+const NEURO_MACRO_DETAILS = "neuro:macro:details";
 
 const MODAL_NEURO_LEGAL_TAX = "modal:neuro:legalTax";
 const MODAL_NEURO_IP_WD = "modal:neuro:ipWithdrawFee";
@@ -197,12 +200,9 @@ function buildGeneralTaxEmbed(guildId: string): EmbedBuilder {
     .setDescription(
       [
         `**Подоходный налог (легальные работы):** **${p}** %`,
-        "Удерживается с суммы, которая **зачисляется на личный счёт**: смены (кроме нелегала), **суточные** оклады офиса и ИП.",
-        "",
         `**НДС (магазин терминала):** **${vat}** % — включён в цену товаров, в казну.`,
-        "",
-        `**Казна страны:** **${fmtTreasury(guildId)}** ₽ (пополняется налогами и комиссиями).`,
-      ].join("\n\n"),
+        `**Казна страны:** **${fmtTreasury(guildId)}** ₽`,
+      ].join("\n"),
     );
 }
 
@@ -211,6 +211,7 @@ function buildGeneralTaxRows(): ActionRowBuilder<ButtonBuilder>[] {
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_TAX_OPEN_LEGAL).setLabel("Подоходный, %").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(NEURO_TAX_OPEN_VAT).setLabel("НДС, %").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(NEURO_TAX_GENERAL_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_SETTINGS_TAXES).setLabel("Назад").setStyle(ButtonStyle.Secondary),
@@ -227,11 +228,9 @@ function buildIpTaxEmbed(guildId: string): EmbedBuilder {
     .setDescription(
       [
         `**Комиссия вывода** (с бизнеса → на личный счёт): **${wd}** %`,
-        "Удерживается с запрошенной суммы вывода; на балансе бизнеса списывается полная сумма, на счёт приходит сумма минус комиссия, комиссия — в казну.",
-        "",
         `**Еженедельный налог с капитала бизнеса:** **${cap}** %`,
-        "Списывается с баланса бизнеса ИП по **понедельникам** (начало календарного дня), в казну. Один раз за календарный понедельник.",
-      ].join("\n\n"),
+        `**Казна страны:** **${fmtTreasury(guildId)}** ₽`,
+      ].join("\n"),
     );
 }
 
@@ -245,13 +244,9 @@ function buildMacroEmbed(guildId: string): EmbedBuilder {
     .setDescription(
       [
         `**Индексация (настройка):** **${indexing}** % за цикл`,
-        "Применяется **1 марта, 1 июня, 1 сентября, 1 декабря** (МСК): повышаются **все** ставки дохода; у рандомных работ **шире** минусы и **выше** плюсы, **шансы** не меняются.",
-        "",
         `**Текущий множитель доходов:** **×${salaryMult.toFixed(4)}**`,
         `**Текущий множитель цен магазина:** **×${priceMult.toFixed(4)}** (сим-карта и лотерея **без** инфляции)`,
-        "",
-        "Инфляция цен начисляется **ежемесячно** (случайный % вокруг индексации, чтобы за квартал покупательская способность в среднем сохранялась).",
-      ].join("\n\n"),
+      ].join("\n"),
     );
 }
 
@@ -259,6 +254,7 @@ function buildMacroRows(): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_MACRO_OPEN_INDEXING).setLabel("Индексация, %").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(NEURO_MACRO_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_BUTTON_ADMIN_SETTINGS_ROOT).setLabel("Назад").setStyle(ButtonStyle.Secondary),
@@ -271,9 +267,40 @@ function buildIpTaxRows(): ActionRowBuilder<ButtonBuilder>[] {
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_TAX_OPEN_IP_WD).setLabel("Комиссия").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(NEURO_TAX_OPEN_IP_CAP).setLabel("Налог").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(NEURO_TAX_IP_DETAILS).setLabel("Подробнее").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_SETTINGS_TAXES).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+    ),
+  ];
+}
+
+function buildPolicyDetailsEmbed(kind: "general" | "ip" | "macro"): EmbedBuilder {
+  const lines =
+    kind === "general"
+      ? [
+          "Подоходный налог удерживается с легальных смен и суточных окладов офиса/ИП.",
+          "НДС уже включён в цену магазина; удержания поступают в казну.",
+        ]
+      : kind === "ip"
+        ? [
+            "При выводе бизнес списывает полную сумму, игрок получает её за вычетом комиссии.",
+            "Налог с капитала списывается один раз в календарный понедельник МСК и поступает в казну.",
+          ]
+        : [
+            "Индексация доходов применяется 1 марта, июня, сентября и декабря (МСК); вероятности исходов не меняются.",
+            "Цены индексируются ежемесячно. Сим-карта и лотерея не участвуют в инфляции.",
+          ];
+  return new EmbedBuilder()
+    .setColor(SETTINGS_COLOR)
+    .setTitle(`${kind === "general" ? "Общие налоги" : kind === "ip" ? "ИП" : "Макроэкономика"} · подробнее`)
+    .setDescription(lines.join("\n"));
+}
+
+function buildDetailsBackRows(backId: string): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(backId).setLabel("Назад").setStyle(ButtonStyle.Secondary),
     ),
   ];
 }
@@ -299,6 +326,9 @@ export async function handleNeuroSettingsTreeButton(interaction: ButtonInteracti
     NEURO_TAX_OPEN_VAT,
     NEURO_TAX_OPEN_IP_WD,
     NEURO_TAX_OPEN_IP_CAP,
+    NEURO_TAX_GENERAL_DETAILS,
+    NEURO_TAX_IP_DETAILS,
+    NEURO_MACRO_DETAILS,
   ]);
   if (!navIds.has(id)) return false;
 
@@ -350,6 +380,14 @@ export async function handleNeuroSettingsTreeButton(interaction: ButtonInteracti
     return true;
   }
 
+  if (id === NEURO_TAX_GENERAL_DETAILS) {
+    await replyOrUpdateEphemeral(interaction, {
+      embeds: [buildPolicyDetailsEmbed("general")],
+      components: buildDetailsBackRows(NEURO_TAX_GENERAL),
+    });
+    return true;
+  }
+
   if (id === NEURO_TAX_IP) {
     await replyOrUpdateEphemeral(interaction, {
       embeds: [buildIpTaxEmbed(gid)],
@@ -358,10 +396,26 @@ export async function handleNeuroSettingsTreeButton(interaction: ButtonInteracti
     return true;
   }
 
+  if (id === NEURO_TAX_IP_DETAILS) {
+    await replyOrUpdateEphemeral(interaction, {
+      embeds: [buildPolicyDetailsEmbed("ip")],
+      components: buildDetailsBackRows(NEURO_TAX_IP),
+    });
+    return true;
+  }
+
   if (id === NEURO_SETTINGS_MACRO) {
     await replyOrUpdateEphemeral(interaction, {
       embeds: [buildMacroEmbed(gid)],
       components: buildMacroRows(),
+    });
+    return true;
+  }
+
+  if (id === NEURO_MACRO_DETAILS) {
+    await replyOrUpdateEphemeral(interaction, {
+      embeds: [buildPolicyDetailsEmbed("macro")],
+      components: buildDetailsBackRows(NEURO_SETTINGS_MACRO),
     });
     return true;
   }

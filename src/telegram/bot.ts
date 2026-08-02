@@ -329,7 +329,7 @@ function screenStatus(member: GuildMember): ScreenPayload {
     tline = left > 0 ? `Навыки: КД ${fmtMs(left)}` : "Навыки: <b>можно</b>";
   }
   return {
-    text: ["<b>Статус</b>", "", line, tline, "", economyFormatSkillsNotify(eu)].join("\n"),
+    text: ["<b>Статус</b>", "", line, tline].join("\n"),
     markup: mainMenuKeyboard(),
   };
 }
