@@ -1833,7 +1833,12 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
     body.push("");
     body.push(...assemblerWorkExtrasLines(u, now));
   }
-  const t3 = tier3StatusLines(guildId, u, jobId, now);
+  const t3 =
+    u.jobId === jobId
+      ? tier3StatusLines(guildId, u, jobId, now)
+      : jobId === "soleProp"
+        ? ["Прогноз суточного оклада — кнопка **Калькулятор**."]
+        : [];
   if (t3.length) {
     body.push("");
     body.push(...t3);
@@ -1943,19 +1948,20 @@ function solePropCalculatedIncome(
   u: ReturnType<typeof getEconomyUser>,
   capitalRub: number,
 ): { gross: number; afterPlate: number; tax: number; net: number } {
+  const isCurrentIp = u.jobId === "soleProp";
   const tempMult =
-    u.solePropPassiveTempUntilMs && Date.now() < u.solePropPassiveTempUntilMs
+    isCurrentIp && u.solePropPassiveTempUntilMs && Date.now() < u.solePropPassiveTempUntilMs
       ? (u.solePropPassiveTempMult ?? 1)
       : 1;
   const gross = computeTier3PassiveRubDetailed({
     guildId,
     jobId: "soleProp",
     def: getTier3JobDef("soleProp"),
-    streakDays: u.jobMskDayStreak ?? 0,
+    streakDays: isCurrentIp ? (u.jobMskDayStreak ?? 0) : 0,
     solePropCapitalRub: capitalRub,
     solePropRiskDial: 0,
     prestigePoints: u.prestigePoints ?? 0,
-    solePropPassiveEffMult: u.solePropPassiveEffMult ?? 1,
+    solePropPassiveEffMult: isCurrentIp ? (u.solePropPassiveEffMult ?? 1) : 1,
     solePropPassiveTempMult: tempMult,
   }).total;
   const afterPlate = applyUnregisteredVehiclePenalty(u, gross);
@@ -1967,14 +1973,16 @@ function solePropCalculatedIncome(
 function buildSolePropCalculatorEmbed(member: GuildMember, capitalRub: number): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const gid = member.guild.id;
+  const isCurrentIp = u.jobId === "soleProp";
   const result = solePropCalculatedIncome(gid, u, capitalRub);
-  const currentCapital = u.solePropCapitalRub ?? 0;
+  const currentCapital = isCurrentIp ? (u.solePropCapitalRub ?? 0) : 0;
   const current = solePropCalculatedIncome(gid, u, currentCapital);
-  const rank = tier3PromotionRank(u.jobMskDayStreak ?? 0);
+  const rank = tier3PromotionRank(isCurrentIp ? (u.jobMskDayStreak ?? 0) : 0);
   const tempMult =
-    u.solePropPassiveTempUntilMs && Date.now() < u.solePropPassiveTempUntilMs
+    isCurrentIp && u.solePropPassiveTempUntilMs && Date.now() < u.solePropPassiveTempUntilMs
       ? (u.solePropPassiveTempMult ?? 1)
       : 1;
+  const efficiency = isCurrentIp ? (u.solePropPassiveEffMult ?? 1) : 1;
   const plateLoss = result.gross - result.afterPlate;
   const delta = result.net - current.net;
   const lines = [
@@ -1984,7 +1992,7 @@ function buildSolePropCalculatorEmbed(member: GuildMember, capitalRub: number): 
     `Подоходный налог **${fmt(getLegalIncomeTaxPercent(gid))}%**: **−${fmt(result.tax)}** ₽`,
     `**На личный счёт: ${fmt(result.net)} ₽/сут**`,
     "",
-    `Множители: ранг **×${(1 + rank * 0.08).toFixed(2)}** · престиж **×${prestigePassiveIncomeMult(u.prestigePoints ?? 0).toFixed(3)}** · эффективность **×${(u.solePropPassiveEffMult ?? 1).toFixed(2)}** · временный **×${tempMult.toFixed(2)}**.`,
+    `Множители: ранг **×${(1 + rank * 0.08).toFixed(2)}** · престиж **×${prestigePassiveIncomeMult(u.prestigePoints ?? 0).toFixed(3)}** · эффективность **×${efficiency.toFixed(2)}** · временный **×${tempMult.toFixed(2)}**.`,
     `К текущему капиталу: **${delta >= 0 ? "+" : "−"}${fmt(Math.abs(delta))}** ₽/сут.`,
     "",
     "Прогноз использует риск **0**: случайный риск-джиттер не применяется. Баланс не меняется.",
@@ -2160,6 +2168,14 @@ function buildJobInfoRows(member: GuildMember, jobId: JobId, canTakeSkills: bool
         .setCustomId(`${ECON_WORK_BUTTON_JOB_DETAIL_PREFIX}${jobId}`)
         .setLabel("Условия")
         .setStyle(ButtonStyle.Secondary),
+      ...(jobId === "soleProp"
+        ? [
+            new ButtonBuilder()
+              .setCustomId(ECON_IP_CALC_OPEN)
+              .setLabel("Калькулятор")
+              .setStyle(ButtonStyle.Secondary),
+          ]
+        : []),
     ),
   );
   rows.push(shopNavBottomRow(backId));
@@ -4211,6 +4227,23 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   ) {
     const u = getEconomyUser(member.guild.id, member.id);
     const now = Date.now();
+    if (id === ECON_IP_CALC_OPEN) {
+      const modal = new ModalBuilder().setCustomId(ECON_MODAL_IP_CALC).setTitle("Калькулятор ИП");
+      modal.addComponents(
+        new ActionRowBuilder<TextInputBuilder>().addComponents(
+          new TextInputBuilder()
+            .setCustomId("amount")
+            .setLabel("Капитал бизнеса: 0–500 000 000 ₽")
+            .setStyle(TextInputStyle.Short)
+            .setValue(String(u.jobId === "soleProp" ? (u.solePropCapitalRub ?? 0) : 0))
+            .setRequired(true)
+            .setMinLength(1)
+            .setMaxLength(12),
+        ),
+      );
+      await interaction.showModal(modal);
+      return true;
+    }
     if (u.jobId !== "soleProp") {
       await interaction.reply({ content: "Эти действия доступны только на работе **ИП**.", flags: MessageFlags.Ephemeral });
       return true;
@@ -4230,23 +4263,6 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
             .setStyle(TextInputStyle.Short)
             .setRequired(true)
             .setMinLength(4)
-            .setMaxLength(12),
-        ),
-      );
-      await interaction.showModal(modal);
-      return true;
-    }
-    if (id === ECON_IP_CALC_OPEN) {
-      const modal = new ModalBuilder().setCustomId(ECON_MODAL_IP_CALC).setTitle("Калькулятор ИП");
-      modal.addComponents(
-        new ActionRowBuilder<TextInputBuilder>().addComponents(
-          new TextInputBuilder()
-            .setCustomId("amount")
-            .setLabel("Капитал бизнеса: 0–500 000 000 ₽")
-            .setStyle(TextInputStyle.Short)
-            .setValue(String(u.solePropCapitalRub ?? 0))
-            .setRequired(true)
-            .setMinLength(1)
             .setMaxLength(12),
         ),
       );
@@ -4776,11 +4792,6 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
       return true;
     }
     const mem = interaction.member as GuildMember;
-    const u = getEconomyUser(mem.guild.id, mem.id);
-    if (u.jobId !== "soleProp") {
-      await interaction.reply({ content: "Калькулятор доступен только на работе **ИП**.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
     const raw = interaction.fields.getTextInputValue("amount").trim().replace(/\s/g, "").replace(",", ".");
     const capital = Math.floor(Number(raw));
     if (!Number.isFinite(capital) || capital < 0 || capital > SOLE_PROP_CAP_MAX) {
@@ -4792,7 +4803,7 @@ export async function handleEconomyModal(interaction: ModalSubmitInteraction): P
     }
     await interaction.reply({
       embeds: [buildSolePropCalculatorEmbed(mem, capital)],
-      components: buildCurrentJobRows(mem),
+      components: [shopNavBottomRow(`${ECON_WORK_BUTTON_JOB_PREFIX}soleProp`, "К карточке ИП")],
       flags: MessageFlags.Ephemeral,
     });
     return true;
