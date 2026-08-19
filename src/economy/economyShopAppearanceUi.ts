@@ -224,9 +224,23 @@ async function replyOrUpdateAppearanceMenu(interaction: ButtonInteraction, membe
     embeds: [buildShopAppearanceEmbed(member)],
     components: buildShopAppearanceRows(),
   };
-  if (interaction.deferred || interaction.replied) {
-    await interaction.editReply(payload);
-  } else {
-    await interaction.update(payload);
+  try {
+    if (interaction.deferred || interaction.replied) {
+      await interaction.editReply(payload);
+    } else {
+      await interaction.update(payload);
+    }
+  } catch (e) {
+    console.error("appearance replyOrUpdate:", e);
+    if (!interaction.replied && !interaction.deferred) {
+      try {
+        await interaction.reply({
+          content: "Не удалось открыть оформление. Попробуйте ещё раз.",
+          flags: MessageFlags.Ephemeral,
+        });
+      } catch {
+        /* Discord уже показал таймаут */
+      }
+    }
   }
 }

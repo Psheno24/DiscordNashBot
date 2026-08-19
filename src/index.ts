@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
+import { Client, Events, GatewayIntentBits, MessageFlags, Partials } from "discord.js";
 import { ensureMacroScheduleV2Migration, processAllGuildsMacroMonth } from "./economy/economyMacro.js";
 import { discordToken } from "./config.js";
 import { registerMemberJoin } from "./listeners/memberJoin.js";
@@ -165,6 +165,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
     return;
   } catch (e) {
     console.error("ИИ Управление: кнопка панели:", e);
+    if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+      try {
+        await interaction.reply({
+          content: "Не удалось обработать нажатие. Попробуйте ещё раз.",
+          flags: MessageFlags.Ephemeral,
+        });
+      } catch {
+        /* Discord уже показал таймаут */
+      }
+    }
   }
 });
 

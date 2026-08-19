@@ -147,10 +147,20 @@ const PANEL_COLOR = 0x2b2d31;
 /** То же, что `ECON_BUTTON_MENU` в `panel.ts`. */
 export const ECON_BUTTON_MENU = "econ:menu";
 
+/**
+ * «Назад» на экранах, где назад = главное меню.
+ * Discord запрещает два кнопки с одним customId в одном сообщении, поэтому не `econ:menu`.
+ */
+export const ECON_NAV_BACK_TO_MENU = "econ:nav:backMenu";
+
+function shopNavBackCustomId(backId: string): string {
+  return backId === ECON_BUTTON_MENU ? ECON_NAV_BACK_TO_MENU : backId;
+}
+
 /** Нижний ряд: «Назад» и «Главное меню» рядом (всегда последний ряд). */
 export function shopNavBottomRow(backId: string, backLabel = "Назад"): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(backId).setLabel(backLabel).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(shopNavBackCustomId(backId)).setLabel(backLabel).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
   );
 }
@@ -184,7 +194,7 @@ function shopDetailsNavBottomRow(
 ): ActionRowBuilder<ButtonBuilder> {
   return new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder().setCustomId(detailsId).setLabel("Условия").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(backId).setLabel(backLabel).setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(shopNavBackCustomId(backId)).setLabel(backLabel).setStyle(ButtonStyle.Secondary),
     new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
   );
 }
@@ -1160,8 +1170,8 @@ export function buildShopPhoneSellPickRows(member: GuildMember): ActionRowBuilde
   const u = getEconomyUser(member.guild.id, member.id);
   const owned = listOwnedPhones(u);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
-    const slice = owned.slice(i, i + 2);
+  for (let i = 0; i < Math.min(owned.length, 12); i += 4) {
+    const slice = owned.slice(i, i + 4);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((rec) => {
@@ -1195,8 +1205,8 @@ export function buildShopCarSellPickRows(member: GuildMember): ActionRowBuilder<
   const u = getEconomyUser(member.guild.id, member.id);
   const owned = listOwnedCars(u);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
-    const slice = owned.slice(i, i + 2);
+  for (let i = 0; i < Math.min(owned.length, 12); i += 4) {
+    const slice = owned.slice(i, i + 4);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((rec) => {
@@ -1230,8 +1240,8 @@ export function buildShopAptSellPickRows(member: GuildMember, origin: CatalogOri
   const u = getEconomyUser(member.guild.id, member.id);
   const owned = listOwnedApartmentsByOrigin(u, origin);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
-    const slice = owned.slice(i, i + 2);
+  for (let i = 0; i < Math.min(owned.length, 12); i += 4) {
+    const slice = owned.slice(i, i + 4);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((rec) => {
@@ -1267,8 +1277,8 @@ export function buildShopPlateAttachRows(member: GuildMember, carUid: string): A
   const u = getEconomyUser(member.guild.id, member.id);
   const unattached = listUnattachedPlates(u);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let i = 0; i < Math.min(unattached.length, 12); i += 2) {
-    const slice = unattached.slice(i, i + 2);
+  for (let i = 0; i < Math.min(unattached.length, 12); i += 4) {
+    const slice = unattached.slice(i, i + 4);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((p) =>
@@ -1708,8 +1718,8 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
     );
   }
   const list = apartmentsByOrigin(origin);
-  for (let i = 0; i < list.length; i += 3) {
-    const slice = list.slice(i, i + 3);
+  for (let i = 0; i < list.length; i += 4) {
+    const slice = list.slice(i, i + 4);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((a) => {
@@ -1802,8 +1812,8 @@ export function buildShopAnimalsDetailsEmbed(member: GuildMember): EmbedBuilder 
 export function buildShopAnimalsBuyRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let i = 0; i < PET_MODELS.length; i += 2) {
-    const slice = PET_MODELS.slice(i, i + 2);
+  for (let i = 0; i < PET_MODELS.length; i += 3) {
+    const slice = PET_MODELS.slice(i, i + 3);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((p) => {

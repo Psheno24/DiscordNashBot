@@ -288,6 +288,7 @@ import {
   ECON_SHOP_CAR_SELL_CANCEL,
   ECON_SHOP_APPEARANCE,
   shopNavBottomRow,
+  ECON_NAV_BACK_TO_MENU,
   buildShopSimEmbed,
   buildShopSimDetailsEmbed,
   buildShopSimChangeEmbed,
@@ -2641,13 +2642,51 @@ export async function ensureEconomyFeedPanel(client: Client) {
   }
 }
 
-async function replyOrUpdate(interaction: ButtonInteraction, payload: { embeds: EmbedBuilder[]; components: any[] }) {
-  const isEphemeralMessage = Boolean(interaction.message?.flags?.has(MessageFlags.Ephemeral));
-  if (interaction.message && isEphemeralMessage) {
-    await interaction.update(payload);
-    return;
+function logInvalidMessageComponents(components: unknown[] | undefined, context: string): void {
+  if (!components) return;
+  if (components.length > 5) {
+    console.error(`${context}: ${components.length} рядов кнопок (лимит Discord — 5)`);
   }
-  await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+  const seen = new Set<string>();
+  for (const row of components as Array<{ components?: Array<{ data?: { custom_id?: string } }> }>) {
+    const comps = row.components ?? [];
+    if (comps.length > 5) {
+      console.error(`${context}: в ряду ${comps.length} кнопок (лимит — 5)`);
+    }
+    for (const c of comps) {
+      const id = c.data?.custom_id;
+      if (!id) continue;
+      if (seen.has(id)) console.error(`${context}: повторный customId ${id}`);
+      seen.add(id);
+    }
+  }
+}
+
+async function ackInteractionFailed(interaction: ButtonInteraction): Promise<void> {
+  if (interaction.replied || interaction.deferred) return;
+  try {
+    await interaction.reply({
+      content: "Не удалось открыть этот экран. Попробуйте ещё раз.",
+      flags: MessageFlags.Ephemeral,
+    });
+  } catch {
+    /* Discord уже показал таймаут */
+  }
+}
+
+async function replyOrUpdate(interaction: ButtonInteraction, payload: { embeds: EmbedBuilder[]; components: any[] }) {
+  logInvalidMessageComponents(payload.components, "economy replyOrUpdate");
+  try {
+    const isEphemeralMessage = Boolean(interaction.message?.flags?.has(MessageFlags.Ephemeral));
+    if (interaction.message && isEphemeralMessage) {
+      await interaction.update(payload);
+      return;
+    }
+    await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+  } catch (e) {
+    console.error("economy replyOrUpdate:", e);
+    await ackInteractionFailed(interaction);
+  }
 }
 
 async function replyShopNotice(
@@ -3283,6 +3322,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     cid.startsWith(ECON_WORK_BUTTON_SWITCH_CONFIRM_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_JOB_DETAIL_PREFIX) ||
     cid.startsWith(ECON_WORK_BUTTON_JOB_DETAIL_CLOSE_PREFIX) ||
+    cid.startsWith("econ:nav:") ||
     cid.startsWith("econ:shop") ||
     isAppearanceShopButton(cid) ||
     cid.startsWith(ECON_LOTTERY_CONFIRM_PREFIX) ||
@@ -3303,7 +3343,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   const id = interaction.customId;
 
-  if (id === ECON_BUTTON_MENU) {
+  if (id === ECON_BUTTON_MENU || id === ECON_NAV_BACK_TO_MENU) {
     await replyOrUpdate(interaction, {
       embeds: [buildTerminalPanelEmbed(member.guild.name)],
       components: buildTerminalPanelRows(member),
