@@ -46,9 +46,14 @@ import {
   carPlateParts,
   decodePlateKey,
   findOwnedApartment,
+  formatOwnedPetLine,
   listOwnedApartmentsByOrigin,
   listOwnedCars,
+  listOwnedCarsByOrigin,
+  listOwnedPets,
   listOwnedPhones,
+  listOwnedPhonesByOrigin,
+  PET_NAME_MAX,
 } from "./economyAssets.js";
 import {
   computeTier3PassiveRub,
@@ -82,7 +87,6 @@ import {
   getApartmentDef,
   getCarDef,
   getPhoneDef,
-  getPetDef,
   APARTMENT_SELL_REFUND_RATE,
   HOUSING_CALENDAR_MONTH_MS,
   HOUSING_RENT_DAY_PKG_RUB,
@@ -98,6 +102,12 @@ import {
   shopPhonePurchaseCostRub,
   type HousingRentPlan,
 } from "./economyCatalog.js";
+import {
+  beginShopTradeDraft,
+  clearShopTradeDraft,
+  selectedShopTradeUids,
+  toggleShopTradeUid,
+} from "./shopTradeDraft.js";
 import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub, userHasActiveHousing } from "./economyHousing.js";
 import { clearSovietHousingRentPatch } from "./economyHousingUtil.js";
 import { feedNetPrestigeRubBonus, feedPrestigeDomesticBonusSuffix } from "./economyFeedBonus.js";
@@ -129,19 +139,26 @@ import {
   buildShopPhoneListRows,
   buildShopPhoneDetailsEmbed,
   ECON_SHOP_ANIMALS,
+  ECON_SHOP_ANIMALS_BUY,
+  ECON_SHOP_ANIMALS_OWNED,
   ECON_SHOP_ANIMALS_DETAILS,
   ECON_SHOP_APT_BUY_PREFIX,
   ECON_SHOP_APT_FULL_PREFIX,
   ECON_SHOP_APT_TRADE_PREFIX,
   ECON_SHOP_APT_TRADE_OK_PREFIX,
+  ECON_SHOP_APT_TRADE_TG_PREFIX,
+  ECON_SHOP_APT_TRADE_GO_PREFIX,
   ECON_SHOP_APT_SELL_FOREIGN,
   ECON_SHOP_APT_SELL_SOVIET,
   ECON_SHOP_APT_SELL_UID_PREFIX,
+  ECON_SHOP_APT_SELL_OK_PREFIX,
   ECON_SHOP_CAR,
   ECON_SHOP_CAR_BUY_PREFIX,
   ECON_SHOP_CAR_FULL_PREFIX,
   ECON_SHOP_CAR_TRADE_PREFIX,
   ECON_SHOP_CAR_TRADE_OK_PREFIX,
+  ECON_SHOP_CAR_TRADE_TG_PREFIX,
+  ECON_SHOP_CAR_TRADE_GO_PREFIX,
   ECON_SHOP_CAR_ORIGIN_PREFIX,
   ECON_SHOP_CAR_DETAILS_PREFIX,
   ECON_SHOP_HOUSE,
@@ -154,15 +171,21 @@ import {
   ECON_SHOP_HOUSE_RENT_7D,
   ECON_SHOP_HUB,
   ECON_SHOP_PET_BUY_PREFIX,
+  ECON_SHOP_PET_VIEW_PREFIX,
+  ECON_SHOP_PET_RENAME_PREFIX,
+  ECON_MODAL_PET_RENAME_PREFIX,
   ECON_SHOP_PHONE,
   ECON_SHOP_PHONE_BUY_PREFIX,
   ECON_SHOP_PHONE_FULL_PREFIX,
   ECON_SHOP_PHONE_TRADE_PREFIX,
   ECON_SHOP_PHONE_TRADE_OK_PREFIX,
+  ECON_SHOP_PHONE_TRADE_TG_PREFIX,
+  ECON_SHOP_PHONE_TRADE_GO_PREFIX,
   ECON_SHOP_PHONE_BUY_CONFIRM_PREFIX,
   ECON_SHOP_PHONE_BUY_CANCEL_PREFIX,
   ECON_SHOP_PHONE_SELL,
   ECON_SHOP_PHONE_SELL_UID_PREFIX,
+  ECON_SHOP_PHONE_SELL_OK_PREFIX,
   ECON_SHOP_PHONE_SELL_CONFIRM,
   ECON_SHOP_PHONE_SELL_CANCEL,
   ECON_SHOP_PHONE_ORIGIN_PREFIX,
@@ -175,6 +198,7 @@ import {
   purchaseCarFull,
   purchaseCarTrade,
   purchasePet,
+  renameOwnedPet,
   purchasePhone,
   purchasePhoneFull,
   purchasePhoneTrade,
@@ -219,6 +243,9 @@ import {
   buildShopApartmentSellConfirmEmbed,
   buildShopApartmentSellSovietConfirmRows,
   buildShopApartmentSellForeignConfirmRows,
+  buildShopAptUidSellConfirmRows,
+  buildShopNoticeEmbed,
+  withShopNote,
   ECON_SHOP_CAR_BUY_CONFIRM_PREFIX,
   ECON_SHOP_CAR_BUY_CANCEL_PREFIX,
   ECON_SHOP_APT_BUY_CONFIRM_PREFIX,
@@ -256,6 +283,7 @@ import {
   ECON_SHOP_PLATE_ATT_OK_PREFIX,
   ECON_SHOP_CAR_SELL,
   ECON_SHOP_CAR_SELL_UID_PREFIX,
+  ECON_SHOP_CAR_SELL_OK_PREFIX,
   ECON_SHOP_CAR_SELL_CONFIRM,
   ECON_SHOP_CAR_SELL_CANCEL,
   ECON_SHOP_APPEARANCE,
@@ -266,6 +294,12 @@ import {
   buildShopSimChangeRows,
   buildShopSimRows,
   buildShopAnimalsDetailsEmbed,
+  buildShopAnimalsBuyEmbed,
+  buildShopAnimalsBuyRows,
+  buildShopAnimalsOwnedEmbed,
+  buildShopAnimalsOwnedRows,
+  buildShopPetViewEmbed,
+  buildShopPetViewRows,
   changeSimLast,
   changeSimMid,
   changeSimOperator,
@@ -622,7 +656,10 @@ function buildProfilePurchasesBlock(guildId: string, u: ReturnType<typeof getEco
       : "**нет** (зам.)";
   lines.push(`Жильё: ${homeSov} · ${homeFor}`);
   lines.push(`Престиж: **${fmt(u.prestigePoints ?? 0)}** · Быт: **${fmt(u.domesticPoints ?? 0)}**`);
-  if (u.ownedPetId) lines.push(`Питомец: **${getPetDef(u.ownedPetId)?.label ?? "—"}**`);
+  const pets = listOwnedPets(u);
+  if (pets.length > 0) {
+    lines.push(`Питомцы: ${pets.map((p) => formatOwnedPetLine(p)).join("; ")}`);
+  }
   return lines;
 }
 
@@ -2613,6 +2650,35 @@ async function replyOrUpdate(interaction: ButtonInteraction, payload: { embeds: 
   await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
 }
 
+async function replyShopNotice(
+  interaction: ButtonInteraction,
+  body: string,
+  backId: string,
+  title = "Магазин",
+) {
+  await replyOrUpdate(interaction, {
+    embeds: [buildShopNoticeEmbed(title, body)],
+    components: [shopNavBottomRow(backId)],
+  });
+}
+
+async function replyPlateCarScreen(
+  interaction: ButtonInteraction,
+  member: GuildMember,
+  carUid: string,
+  note?: string,
+) {
+  const emb = buildShopPlateCarEmbed(member, carUid);
+  if (!emb) {
+    await replyShopNotice(interaction, note ?? "Авто не найдено.", ECON_SHOP_PLATE);
+    return;
+  }
+  await replyOrUpdate(interaction, {
+    embeds: [note ? withShopNote(emb, note) : emb],
+    components: buildShopPlateCarRows(member, carUid),
+  });
+}
+
 /** Обновить то же сообщение с кнопкой (эпhemeral или канал) — для согласованности нескольких панелей. */
 async function updateButtonParentMessage(
   interaction: ButtonInteraction,
@@ -3473,13 +3539,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id.startsWith(ECON_SHOP_PHONE_BUY_PREFIX)) {
     const pid = id.slice(ECON_SHOP_PHONE_BUY_PREFIX.length);
     const defP = getPhoneDef(pid);
-    if (!defP) {
-      await interaction.reply({ content: "Неизвестная модель телефона.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    const emb = buildShopPhoneBuyConfirmEmbed(member, pid);
-    if (!emb) {
-      await interaction.reply({ content: "Неизвестная модель телефона.", flags: MessageFlags.Ephemeral });
+    const emb = defP ? buildShopPhoneBuyConfirmEmbed(member, pid) : undefined;
+    if (!defP || !emb) {
+      await replyShopNotice(interaction, "Неизвестная модель телефона.", ECON_SHOP_PHONE);
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -3493,16 +3555,45 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const pid = id.slice(ECON_SHOP_PHONE_FULL_PREFIX.length);
     const defP = getPhoneDef(pid);
     if (!defP) {
-      await interaction.reply({ content: "Неизвестная модель телефона.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Неизвестная модель телефона.", ECON_SHOP_PHONE);
       return true;
     }
     const r = purchasePhoneFull(member, pid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      const emb = buildShopPhoneBuyConfirmEmbed(member, pid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Покупка телефона", r.reply), r.reply)],
+        components: buildShopPhoneBuyConfirmRows(member, pid, defP.origin),
+      });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPhoneListEmbed(member, defP.origin)],
+      embeds: [withShopNote(buildShopPhoneListEmbed(member, defP.origin), `Куплено за полную стоимость.`)],
+      components: buildShopPhoneListRows(member, defP.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PHONE_TRADE_GO_PREFIX)) {
+    const pid = id.slice(ECON_SHOP_PHONE_TRADE_GO_PREFIX.length);
+    const defP = getPhoneDef(pid);
+    if (!defP) {
+      await replyShopNotice(interaction, "Неизвестная модель телефона.", ECON_SHOP_PHONE);
+      return true;
+    }
+    const uids = selectedShopTradeUids(member.guild.id, member.id, "phone", pid);
+    const r = purchasePhoneTrade(member, pid, uids);
+    if (!r.ok) {
+      const emb = buildShopPhoneTradePickEmbed(member, pid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Обмен телефона", r.reply), r.reply)],
+        components: buildShopPhoneTradePickRows(member, pid),
+      });
+      return true;
+    }
+    clearShopTradeDraft(member.guild.id, member.id);
+    await replyOrUpdate(interaction, {
+      embeds: [withShopNote(buildShopPhoneListEmbed(member, defP.origin), "Обмен выполнен.")],
       components: buildShopPhoneListRows(member, defP.origin),
     });
     return true;
@@ -3515,46 +3606,62 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const uid = rest.slice(sep + 1);
     const defP = getPhoneDef(pid);
     if (!defP) {
-      await interaction.reply({ content: "Неизвестная модель телефона.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Неизвестная модель телефона.", ECON_SHOP_PHONE);
       return true;
     }
+    beginShopTradeDraft(member.guild.id, member.id, "phone", pid, uid ? [uid] : []);
     const r = purchasePhoneTrade(member, pid, uid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      const emb = buildShopPhoneTradePickEmbed(member, pid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Обмен телефона", r.reply), r.reply)],
+        components: buildShopPhoneTradePickRows(member, pid),
+      });
       return true;
     }
+    clearShopTradeDraft(member.guild.id, member.id);
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPhoneListEmbed(member, defP.origin)],
+      embeds: [withShopNote(buildShopPhoneListEmbed(member, defP.origin), "Обмен выполнен.")],
       components: buildShopPhoneListRows(member, defP.origin),
     });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PHONE_TRADE_TG_PREFIX)) {
+    const rest = id.slice(ECON_SHOP_PHONE_TRADE_TG_PREFIX.length);
+    const sep = rest.lastIndexOf(":");
+    const pid = rest.slice(0, sep);
+    const uid = rest.slice(sep + 1);
+    const defP = getPhoneDef(pid);
+    if (!defP) {
+      await replyShopNotice(interaction, "Неизвестная модель телефона.", ECON_SHOP_PHONE);
+      return true;
+    }
+    toggleShopTradeUid(member.guild.id, member.id, "phone", pid, uid);
+    const emb = buildShopPhoneTradePickEmbed(member, pid);
+    if (!emb) {
+      await replyShopNotice(interaction, "Неизвестная модель телефона.", ECON_SHOP_PHONE);
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [emb], components: buildShopPhoneTradePickRows(member, pid) });
     return true;
   }
 
   if (id.startsWith(ECON_SHOP_PHONE_TRADE_PREFIX)) {
     const pid = id.slice(ECON_SHOP_PHONE_TRADE_PREFIX.length);
     const defP = getPhoneDef(pid);
+    if (!defP) {
+      await replyShopNotice(interaction, "Неизвестная модель телефона.", ECON_SHOP_PHONE);
+      return true;
+    }
+    const owned = listOwnedPhonesByOrigin(getEconomyUser(member.guild.id, member.id), defP.origin);
+    beginShopTradeDraft(member.guild.id, member.id, "phone", pid, owned.length === 1 ? [owned[0]!.uid] : []);
     const emb = buildShopPhoneTradePickEmbed(member, pid);
-    if (!defP || !emb) {
-      await interaction.reply({ content: "Неизвестная модель телефона.", flags: MessageFlags.Ephemeral });
+    if (!emb) {
+      await replyShopNotice(interaction, "Неизвестная модель телефона.", ECON_SHOP_PHONE);
       return true;
     }
-    const owned = listOwnedPhones(getEconomyUser(member.guild.id, member.id)).filter((p) => getPhoneDef(p.id)?.origin === defP.origin);
-    if (owned.length === 1) {
-      const r = purchasePhoneTrade(member, pid, owned[0]!.uid);
-      if (!r.ok) {
-        await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
-        return true;
-      }
-      await replyOrUpdate(interaction, {
-        embeds: [buildShopPhoneListEmbed(member, defP.origin)],
-        components: buildShopPhoneListRows(member, defP.origin),
-      });
-      return true;
-    }
-    await replyOrUpdate(interaction, {
-      embeds: [emb],
-      components: buildShopPhoneTradePickRows(member, pid),
-    });
+    await replyOrUpdate(interaction, { embeds: [emb], components: buildShopPhoneTradePickRows(member, pid) });
     return true;
   }
 
@@ -3562,16 +3669,20 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const pid = id.slice(ECON_SHOP_PHONE_BUY_CONFIRM_PREFIX.length);
     const defP = getPhoneDef(pid);
     if (!defP) {
-      await interaction.reply({ content: "Неизвестная модель телефона.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Неизвестная модель телефона.", ECON_SHOP_PHONE);
       return true;
     }
     const r = purchasePhone(member, pid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      const emb = buildShopPhoneBuyConfirmEmbed(member, pid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Покупка телефона", r.reply), r.reply)],
+        components: buildShopPhoneBuyConfirmRows(member, pid, defP.origin),
+      });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPhoneListEmbed(member, defP.origin)],
+      embeds: [withShopNote(buildShopPhoneListEmbed(member, defP.origin), "Куплено за полную стоимость.")],
       components: buildShopPhoneListRows(member, defP.origin),
     });
     return true;
@@ -3590,7 +3701,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_PHONE_SELL) {
     const u = getEconomyUser(member.guild.id, member.id);
     if (listOwnedPhones(u).length === 0) {
-      await interaction.reply({ content: "Нет **телефона** для продажи.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Нет **телефона** для продажи.", ECON_SHOP_PHONE);
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -3600,18 +3711,32 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
-  if (id.startsWith(ECON_SHOP_PHONE_SELL_UID_PREFIX)) {
-    const uid = id.slice(ECON_SHOP_PHONE_SELL_UID_PREFIX.length);
+  if (id.startsWith(ECON_SHOP_PHONE_SELL_OK_PREFIX)) {
+    const uid = id.slice(ECON_SHOP_PHONE_SELL_OK_PREFIX.length);
     const r = sellOwnedPhone(member, uid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, r.reply, ECON_SHOP_PHONE_SELL);
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopOriginPickEmbed("Телефон", member, "phone")],
+      embeds: [withShopNote(buildShopOriginPickEmbed("Телефон", member, "phone"), `Телефон продан: **+${fmt(r.refund)}** ₽.`)],
       components: buildShopOriginPickRows(member, "phone", ECON_SHOP_HUB),
     });
-    await interaction.followUp({ content: `Телефон продан: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PHONE_SELL_UID_PREFIX)) {
+    const uid = id.slice(ECON_SHOP_PHONE_SELL_UID_PREFIX.length);
+    const rec = listOwnedPhones(getEconomyUser(member.guild.id, member.id)).find((p) => p.uid === uid);
+    const origin = rec ? (getPhoneDef(rec.id)?.origin ?? "soviet") : "soviet";
+    if (!rec) {
+      await replyShopNotice(interaction, "Нет **телефона** для продажи.", ECON_SHOP_PHONE);
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPhoneSellConfirmEmbed(member, uid)],
+      components: buildShopPhoneSellConfirmRows(origin, uid),
+    });
     return true;
   }
 
@@ -3631,14 +3756,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const origin = cur?.origin ?? "soviet";
     const r = sellOwnedPhone(member);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, r.reply, ECON_SHOP_PHONE);
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopOriginPickEmbed("Телефон", member, "phone")],
+      embeds: [withShopNote(buildShopOriginPickEmbed("Телефон", member, "phone"), `Телефон продан: **+${fmt(r.refund)}** ₽.`)],
       components: buildShopOriginPickRows(member, "phone", ECON_SHOP_HUB),
     });
-    await interaction.followUp({ content: `Телефон продан: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -3674,13 +3798,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id.startsWith(ECON_SHOP_CAR_BUY_PREFIX)) {
     const cid = id.slice(ECON_SHOP_CAR_BUY_PREFIX.length);
     const defC = getCarDef(cid);
-    if (!defC) {
-      await interaction.reply({ content: "Неизвестная модель авто.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    const emb = buildShopCarBuyConfirmEmbed(member, cid);
-    if (!emb) {
-      await interaction.reply({ content: "Неизвестная модель авто.", flags: MessageFlags.Ephemeral });
+    const emb = defC ? buildShopCarBuyConfirmEmbed(member, cid) : undefined;
+    if (!defC || !emb) {
+      await replyShopNotice(interaction, "Неизвестная модель авто.", ECON_SHOP_CAR);
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -3694,16 +3814,45 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const cid = id.slice(ECON_SHOP_CAR_FULL_PREFIX.length);
     const defC = getCarDef(cid);
     if (!defC) {
-      await interaction.reply({ content: "Неизвестная модель авто.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Неизвестная модель авто.", ECON_SHOP_CAR);
       return true;
     }
     const r = purchaseCarFull(member, cid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      const emb = buildShopCarBuyConfirmEmbed(member, cid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Покупка авто", r.reply), r.reply)],
+        components: buildShopCarBuyConfirmRows(member, cid, defC.origin),
+      });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopCarListEmbed(member, defC.origin)],
+      embeds: [withShopNote(buildShopCarListEmbed(member, defC.origin), "Куплено за полную стоимость.")],
+      components: buildShopCarListRows(member, defC.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_CAR_TRADE_GO_PREFIX)) {
+    const cid = id.slice(ECON_SHOP_CAR_TRADE_GO_PREFIX.length);
+    const defC = getCarDef(cid);
+    if (!defC) {
+      await replyShopNotice(interaction, "Неизвестная модель авто.", ECON_SHOP_CAR);
+      return true;
+    }
+    const uids = selectedShopTradeUids(member.guild.id, member.id, "car", cid);
+    const r = purchaseCarTrade(member, cid, uids);
+    if (!r.ok) {
+      const emb = buildShopCarTradePickEmbed(member, cid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Обмен авто", r.reply), r.reply)],
+        components: buildShopCarTradePickRows(member, cid),
+      });
+      return true;
+    }
+    clearShopTradeDraft(member.guild.id, member.id);
+    await replyOrUpdate(interaction, {
+      embeds: [withShopNote(buildShopCarListEmbed(member, defC.origin), "Обмен выполнен.")],
       components: buildShopCarListRows(member, defC.origin),
     });
     return true;
@@ -3716,46 +3865,62 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const uid = rest.slice(sep + 1);
     const defC = getCarDef(cid);
     if (!defC) {
-      await interaction.reply({ content: "Неизвестная модель авто.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Неизвестная модель авто.", ECON_SHOP_CAR);
       return true;
     }
+    beginShopTradeDraft(member.guild.id, member.id, "car", cid, uid ? [uid] : []);
     const r = purchaseCarTrade(member, cid, uid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      const emb = buildShopCarTradePickEmbed(member, cid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Обмен авто", r.reply), r.reply)],
+        components: buildShopCarTradePickRows(member, cid),
+      });
       return true;
     }
+    clearShopTradeDraft(member.guild.id, member.id);
     await replyOrUpdate(interaction, {
-      embeds: [buildShopCarListEmbed(member, defC.origin)],
+      embeds: [withShopNote(buildShopCarListEmbed(member, defC.origin), "Обмен выполнен.")],
       components: buildShopCarListRows(member, defC.origin),
     });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_CAR_TRADE_TG_PREFIX)) {
+    const rest = id.slice(ECON_SHOP_CAR_TRADE_TG_PREFIX.length);
+    const sep = rest.lastIndexOf(":");
+    const cid = rest.slice(0, sep);
+    const uid = rest.slice(sep + 1);
+    const defC = getCarDef(cid);
+    if (!defC) {
+      await replyShopNotice(interaction, "Неизвестная модель авто.", ECON_SHOP_CAR);
+      return true;
+    }
+    toggleShopTradeUid(member.guild.id, member.id, "car", cid, uid);
+    const emb = buildShopCarTradePickEmbed(member, cid);
+    if (!emb) {
+      await replyShopNotice(interaction, "Неизвестная модель авто.", ECON_SHOP_CAR);
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [emb], components: buildShopCarTradePickRows(member, cid) });
     return true;
   }
 
   if (id.startsWith(ECON_SHOP_CAR_TRADE_PREFIX)) {
     const cid = id.slice(ECON_SHOP_CAR_TRADE_PREFIX.length);
     const defC = getCarDef(cid);
+    if (!defC) {
+      await replyShopNotice(interaction, "Неизвестная модель авто.", ECON_SHOP_CAR);
+      return true;
+    }
+    const owned = listOwnedCarsByOrigin(getEconomyUser(member.guild.id, member.id), defC.origin);
+    beginShopTradeDraft(member.guild.id, member.id, "car", cid, owned.length === 1 ? [owned[0]!.uid] : []);
     const emb = buildShopCarTradePickEmbed(member, cid);
-    if (!defC || !emb) {
-      await interaction.reply({ content: "Неизвестная модель авто.", flags: MessageFlags.Ephemeral });
+    if (!emb) {
+      await replyShopNotice(interaction, "Неизвестная модель авто.", ECON_SHOP_CAR);
       return true;
     }
-    const owned = listOwnedCars(getEconomyUser(member.guild.id, member.id)).filter((c) => getCarDef(c.id)?.origin === defC.origin);
-    if (owned.length === 1) {
-      const r = purchaseCarTrade(member, cid, owned[0]!.uid);
-      if (!r.ok) {
-        await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
-        return true;
-      }
-      await replyOrUpdate(interaction, {
-        embeds: [buildShopCarListEmbed(member, defC.origin)],
-        components: buildShopCarListRows(member, defC.origin),
-      });
-      return true;
-    }
-    await replyOrUpdate(interaction, {
-      embeds: [emb],
-      components: buildShopCarTradePickRows(member, cid),
-    });
+    await replyOrUpdate(interaction, { embeds: [emb], components: buildShopCarTradePickRows(member, cid) });
     return true;
   }
 
@@ -3763,16 +3928,20 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const cid = id.slice(ECON_SHOP_CAR_BUY_CONFIRM_PREFIX.length);
     const defC = getCarDef(cid);
     if (!defC) {
-      await interaction.reply({ content: "Неизвестная модель авто.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Неизвестная модель авто.", ECON_SHOP_CAR);
       return true;
     }
     const r = purchaseCar(member, cid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      const emb = buildShopCarBuyConfirmEmbed(member, cid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Покупка авто", r.reply), r.reply)],
+        components: buildShopCarBuyConfirmRows(member, cid, defC.origin),
+      });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopCarListEmbed(member, defC.origin)],
+      embeds: [withShopNote(buildShopCarListEmbed(member, defC.origin), "Куплено за полную стоимость.")],
       components: buildShopCarListRows(member, defC.origin),
     });
     return true;
@@ -3799,15 +3968,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id.startsWith(ECON_SHOP_PLATE_CAR_PREFIX)) {
     const carUid = id.slice(ECON_SHOP_PLATE_CAR_PREFIX.length);
-    const emb = buildShopPlateCarEmbed(member, carUid);
-    if (!emb) {
-      await interaction.reply({ content: "Авто не найдено.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    await replyOrUpdate(interaction, {
-      embeds: [emb],
-      components: buildShopPlateCarRows(member, carUid),
-    });
+    await replyPlateCarScreen(interaction, member, carUid);
     return true;
   }
 
@@ -3815,7 +3976,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const carUid = id.slice(ECON_SHOP_PLATE_NEW_PREFIX.length);
     const r = registerVehiclePlateForCar(member, carUid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyPlateCarScreen(interaction, member, carUid, r.reply);
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -3829,7 +3990,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const carUid = id.slice(ECON_SHOP_PLATE_DIG_PREFIX.length);
     const r = changeVehiclePlateDigitsForCar(member, carUid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyPlateCarScreen(interaction, member, carUid, r.reply);
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -3843,7 +4004,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const carUid = id.slice(ECON_SHOP_PLATE_LET_PREFIX.length);
     const r = changeVehiclePlateLettersForCar(member, carUid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyPlateCarScreen(interaction, member, carUid, r.reply);
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -3857,7 +4018,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const carUid = id.slice(ECON_SHOP_PLATE_RGN_PREFIX.length);
     const r = changeVehiclePlateRegionForCar(member, carUid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyPlateCarScreen(interaction, member, carUid, r.reply);
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -3871,13 +4032,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const carUid = id.slice(ECON_SHOP_PLATE_DET_OK_PREFIX.length);
     const r = detachVehiclePlateFromCar(member, carUid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyPlateCarScreen(interaction, member, carUid, r.reply);
       return true;
     }
-    await replyOrUpdate(interaction, {
-      embeds: [buildShopPlateCarEmbed(member, carUid)!],
-      components: buildShopPlateCarRows(member, carUid),
-    });
+    await replyPlateCarScreen(interaction, member, carUid, `Номер снят: **${r.plate}**.`);
     return true;
   }
 
@@ -3885,7 +4043,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const carUid = id.slice(ECON_SHOP_PLATE_DET_PREFIX.length);
     const emb = buildShopPlateDetachConfirmEmbed(member, carUid);
     if (!emb) {
-      await interaction.reply({ content: "На этом авто нет госномера.", flags: MessageFlags.Ephemeral });
+      await replyPlateCarScreen(interaction, member, carUid, "На этом авто нет госномера.");
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -3901,18 +4059,15 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const carUid = rest.slice(0, sep);
     const parts = decodePlateKey(rest.slice(sep + 1));
     if (!parts) {
-      await interaction.reply({ content: "Некорректный госномер.", flags: MessageFlags.Ephemeral });
+      await replyPlateCarScreen(interaction, member, carUid, "Некорректный госномер.");
       return true;
     }
     const r = attachVehiclePlateToCar(member, carUid, parts);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyPlateCarScreen(interaction, member, carUid, r.reply);
       return true;
     }
-    await replyOrUpdate(interaction, {
-      embeds: [buildShopPlateCarEmbed(member, carUid)!],
-      components: buildShopPlateCarRows(member, carUid),
-    });
+    await replyPlateCarScreen(interaction, member, carUid, `Номер прикреплён: **${r.plate}**.`);
     return true;
   }
 
@@ -3922,12 +4077,12 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const carUid = rest.slice(0, sep);
     const parts = decodePlateKey(rest.slice(sep + 1));
     if (!parts) {
-      await interaction.reply({ content: "Некорректный госномер.", flags: MessageFlags.Ephemeral });
+      await replyPlateCarScreen(interaction, member, carUid, "Некорректный госномер.");
       return true;
     }
     const emb = buildShopPlateAttachConfirmEmbed(member, carUid, parts);
     if (!emb) {
-      await interaction.reply({ content: "Авто не найдено.", flags: MessageFlags.Ephemeral });
+      await replyPlateCarScreen(interaction, member, carUid, "Авто не найдено.");
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -3941,7 +4096,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const carUid = id.slice(ECON_SHOP_PLATE_ATT_PREFIX.length);
     const emb = buildShopPlateAttachEmbed(member, carUid);
     if (!emb) {
-      await interaction.reply({ content: "Авто не найдено.", flags: MessageFlags.Ephemeral });
+      await replyPlateCarScreen(interaction, member, carUid, "Авто не найдено.");
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -3962,7 +4117,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_CAR_SELL) {
     const u = getEconomyUser(member.guild.id, member.id);
     if (listOwnedCars(u).length === 0) {
-      await interaction.reply({ content: "Нет **авто** для продажи.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Нет **авто** для продажи.", ECON_SHOP_CAR);
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -3972,18 +4127,31 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
-  if (id.startsWith(ECON_SHOP_CAR_SELL_UID_PREFIX)) {
-    const uid = id.slice(ECON_SHOP_CAR_SELL_UID_PREFIX.length);
+  if (id.startsWith(ECON_SHOP_CAR_SELL_OK_PREFIX)) {
+    const uid = id.slice(ECON_SHOP_CAR_SELL_OK_PREFIX.length);
     const r = sellOwnedCar(member, uid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, r.reply, ECON_SHOP_CAR_SELL);
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopOriginPickEmbed("Авто", member, "car")],
+      embeds: [withShopNote(buildShopOriginPickEmbed("Авто", member, "car"), `Авто продано: **+${fmt(r.refund)}** ₽.`)],
       components: buildShopOriginPickRows(member, "car", ECON_SHOP_HUB),
     });
-    await interaction.followUp({ content: `Авто продано: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_CAR_SELL_UID_PREFIX)) {
+    const uid = id.slice(ECON_SHOP_CAR_SELL_UID_PREFIX.length);
+    const rec = listOwnedCars(getEconomyUser(member.guild.id, member.id)).find((c) => c.uid === uid);
+    if (!rec) {
+      await replyShopNotice(interaction, "Нет **авто** для продажи.", ECON_SHOP_CAR);
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopCarSellConfirmEmbed(member, uid)],
+      components: buildShopCarSellConfirmRows(uid),
+    });
     return true;
   }
 
@@ -3999,19 +4167,15 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   }
 
   if (id === ECON_SHOP_CAR_SELL_CONFIRM) {
-    const u = getEconomyUser(member.guild.id, member.id);
-    const cur = getCarDef(u.ownedCarId);
-    const origin = cur?.origin ?? "soviet";
     const r = sellOwnedCar(member);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, r.reply, ECON_SHOP_CAR);
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopOriginPickEmbed("Авто", member, "car")],
+      embeds: [withShopNote(buildShopOriginPickEmbed("Авто", member, "car"), `Авто продано: **+${fmt(r.refund)}** ₽.`)],
       components: buildShopOriginPickRows(member, "car", ECON_SHOP_HUB),
     });
-    await interaction.followUp({ content: `Авто продано: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -4057,11 +4221,61 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
+  if (id === ECON_SHOP_ANIMALS_BUY) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopAnimalsBuyEmbed(member)],
+      components: buildShopAnimalsBuyRows(member),
+    });
+    return true;
+  }
+
+  if (id === ECON_SHOP_ANIMALS_OWNED) {
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopAnimalsOwnedEmbed(member)],
+      components: buildShopAnimalsOwnedRows(member),
+    });
+    return true;
+  }
+
   if (id === ECON_SHOP_ANIMALS_DETAILS) {
     await replyOrUpdate(interaction, {
       embeds: [buildShopAnimalsDetailsEmbed(member)],
-      components: [shopNavBottomRow(ECON_SHOP_ANIMALS)],
+      components: [shopNavBottomRow(ECON_SHOP_ANIMALS_BUY)],
     });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PET_VIEW_PREFIX)) {
+    const uid = id.slice(ECON_SHOP_PET_VIEW_PREFIX.length);
+    const emb = buildShopPetViewEmbed(member, uid);
+    if (!emb) {
+      await replyShopNotice(interaction, "Питомец не найден.", ECON_SHOP_ANIMALS_OWNED);
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [emb], components: buildShopPetViewRows(uid) });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PET_RENAME_PREFIX)) {
+    const uid = id.slice(ECON_SHOP_PET_RENAME_PREFIX.length);
+    const rec = listOwnedPets(getEconomyUser(member.guild.id, member.id)).find((p) => p.uid === uid);
+    if (!rec) {
+      await replyShopNotice(interaction, "Питомец не найден.", ECON_SHOP_ANIMALS_OWNED);
+      return true;
+    }
+    const modal = new ModalBuilder().setCustomId(`${ECON_MODAL_PET_RENAME_PREFIX}${uid}`).setTitle("Имя питомца");
+    modal.addComponents(
+      new ActionRowBuilder<TextInputBuilder>().addComponents(
+        new TextInputBuilder()
+          .setCustomId("name")
+          .setLabel("Имя")
+          .setStyle(TextInputStyle.Short)
+          .setRequired(true)
+          .setMaxLength(PET_NAME_MAX)
+          .setValue(rec.name.slice(0, PET_NAME_MAX)),
+      ),
+    );
+    await interaction.showModal(modal);
     return true;
   }
 
@@ -4069,10 +4283,16 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const petId = id.slice(ECON_SHOP_PET_BUY_PREFIX.length);
     const r = purchasePet(member, petId);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(buildShopAnimalsBuyEmbed(member), r.reply)],
+        components: buildShopAnimalsBuyRows(member),
+      });
       return true;
     }
-    await replyOrUpdate(interaction, { embeds: [buildShopAnimalsEmbed(member)], components: buildShopAnimalsRows(member) });
+    await replyOrUpdate(interaction, {
+      embeds: [withShopNote(buildShopAnimalsBuyEmbed(member), "Питомец куплен.")],
+      components: buildShopAnimalsBuyRows(member),
+    });
     return true;
   }
 
@@ -4080,7 +4300,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const plan: HousingRentPlan = id === ECON_SHOP_HOUSE_RENT_1D ? "day" : id === ECON_SHOP_HOUSE_RENT_7D ? "week" : "month";
     const r = applyRentPlanPurchase(member, plan);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(buildShopHouseRentEmbed(member), r.reply)],
+        components: buildShopHouseRentRows(member),
+      });
       return true;
     }
     await replyAfterRentPlanPurchase(interaction, member, "shop");
@@ -4092,12 +4315,15 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const plan: HousingRentPlan | undefined =
       raw === "day" ? "day" : raw === "week" ? "week" : raw === "month" ? "month" : undefined;
     if (!plan) {
-      await interaction.reply({ content: "Неверный пакет.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Неверный пакет.", ECON_BUTTON_HOUSING);
       return true;
     }
     const r = applyRentPlanPurchase(member, plan);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(buildMyRentEditEmbed(member), r.reply)],
+        components: buildMyRentEditRows(member),
+      });
       return true;
     }
     await replyAfterRentPlanPurchase(interaction, member, "myRentEdit");
@@ -4107,7 +4333,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_HOUSE_LEAVE || id === ECON_HOUSING_LEAVE) {
     const u = getEconomyUser(member.guild.id, member.id);
     if ((u.housingKind ?? "none") !== "rent") {
-      await interaction.reply({ content: "Вы **не** на аренде.", flags: MessageFlags.Ephemeral });
+      if (id === ECON_HOUSING_LEAVE) {
+        await replyShopNotice(interaction, "Вы **не** на аренде.", ECON_BUTTON_HOUSING);
+      } else {
+        await replyOrUpdate(interaction, {
+          embeds: [withShopNote(buildShopHouseRentEmbed(member), "Вы **не** на аренде.")],
+          components: buildShopHouseRentRows(member),
+        });
+      }
       return true;
     }
     const quitJob = economyUserClearTier2PlusJobPatch(u);
@@ -4225,13 +4458,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id.startsWith(ECON_SHOP_APT_BUY_PREFIX)) {
     const aid = id.slice(ECON_SHOP_APT_BUY_PREFIX.length);
     const defA = getApartmentDef(aid);
-    if (!defA) {
-      await interaction.reply({ content: "Неизвестная квартира.", flags: MessageFlags.Ephemeral });
-      return true;
-    }
-    const emb = buildShopApartmentBuyConfirmEmbed(member, aid);
-    if (!emb) {
-      await interaction.reply({ content: "Неизвестная квартира.", flags: MessageFlags.Ephemeral });
+    const emb = defA ? buildShopApartmentBuyConfirmEmbed(member, aid) : undefined;
+    if (!defA || !emb) {
+      await replyShopNotice(interaction, "Неизвестная квартира.", ECON_SHOP_HOUSE);
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -4245,12 +4474,16 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const aid = id.slice(ECON_SHOP_APT_FULL_PREFIX.length);
     const defA = getApartmentDef(aid);
     if (!defA) {
-      await interaction.reply({ content: "Неизвестная квартира.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Неизвестная квартира.", ECON_SHOP_HOUSE);
       return true;
     }
     const r = purchaseApartmentFull(member, aid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      const emb = buildShopApartmentBuyConfirmEmbed(member, aid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Покупка жилья", r.reply), r.reply)],
+        components: buildShopApartmentBuyConfirmRows(member, aid, defA.origin),
+      });
       return true;
     }
     if (r.refund > 0) {
@@ -4264,7 +4497,32 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await ensureEconomyFeedPanel(interaction.client);
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopHouseListEmbed(member, defA.origin)],
+      embeds: [withShopNote(buildShopHouseListEmbed(member, defA.origin), "Куплено за полную стоимость.")],
+      components: buildShopHouseListRows(member, defA.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_APT_TRADE_GO_PREFIX)) {
+    const aid = id.slice(ECON_SHOP_APT_TRADE_GO_PREFIX.length);
+    const defA = getApartmentDef(aid);
+    if (!defA) {
+      await replyShopNotice(interaction, "Неизвестная квартира.", ECON_SHOP_HOUSE);
+      return true;
+    }
+    const uids = selectedShopTradeUids(member.guild.id, member.id, "apt", aid);
+    const r = purchaseApartmentTrade(member, aid, uids);
+    if (!r.ok) {
+      const emb = buildShopAptTradePickEmbed(member, aid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Обмен жилья", r.reply), r.reply)],
+        components: buildShopAptTradePickRows(member, aid),
+      });
+      return true;
+    }
+    clearShopTradeDraft(member.guild.id, member.id);
+    await replyOrUpdate(interaction, {
+      embeds: [withShopNote(buildShopHouseListEmbed(member, defA.origin), "Обмен выполнен.")],
       components: buildShopHouseListRows(member, defA.origin),
     });
     return true;
@@ -4277,46 +4535,62 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const uid = rest.slice(sep + 1);
     const defA = getApartmentDef(aid);
     if (!defA) {
-      await interaction.reply({ content: "Неизвестная квартира.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Неизвестная квартира.", ECON_SHOP_HOUSE);
       return true;
     }
+    beginShopTradeDraft(member.guild.id, member.id, "apt", aid, uid ? [uid] : []);
     const r = purchaseApartmentTrade(member, aid, uid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      const emb = buildShopAptTradePickEmbed(member, aid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Обмен жилья", r.reply), r.reply)],
+        components: buildShopAptTradePickRows(member, aid),
+      });
       return true;
     }
+    clearShopTradeDraft(member.guild.id, member.id);
     await replyOrUpdate(interaction, {
-      embeds: [buildShopHouseListEmbed(member, defA.origin)],
+      embeds: [withShopNote(buildShopHouseListEmbed(member, defA.origin), "Обмен выполнен.")],
       components: buildShopHouseListRows(member, defA.origin),
     });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_APT_TRADE_TG_PREFIX)) {
+    const rest = id.slice(ECON_SHOP_APT_TRADE_TG_PREFIX.length);
+    const sep = rest.lastIndexOf(":");
+    const aid = rest.slice(0, sep);
+    const uid = rest.slice(sep + 1);
+    const defA = getApartmentDef(aid);
+    if (!defA) {
+      await replyShopNotice(interaction, "Неизвестная квартира.", ECON_SHOP_HOUSE);
+      return true;
+    }
+    toggleShopTradeUid(member.guild.id, member.id, "apt", aid, uid);
+    const emb = buildShopAptTradePickEmbed(member, aid);
+    if (!emb) {
+      await replyShopNotice(interaction, "Неизвестная квартира.", ECON_SHOP_HOUSE);
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [emb], components: buildShopAptTradePickRows(member, aid) });
     return true;
   }
 
   if (id.startsWith(ECON_SHOP_APT_TRADE_PREFIX)) {
     const aid = id.slice(ECON_SHOP_APT_TRADE_PREFIX.length);
     const defA = getApartmentDef(aid);
-    const emb = buildShopAptTradePickEmbed(member, aid);
-    if (!defA || !emb) {
-      await interaction.reply({ content: "Неизвестная квартира.", flags: MessageFlags.Ephemeral });
+    if (!defA) {
+      await replyShopNotice(interaction, "Неизвестная квартира.", ECON_SHOP_HOUSE);
       return true;
     }
     const owned = listOwnedApartmentsByOrigin(getEconomyUser(member.guild.id, member.id), defA.origin);
-    if (owned.length === 1) {
-      const r = purchaseApartmentTrade(member, aid, owned[0]!.uid);
-      if (!r.ok) {
-        await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
-        return true;
-      }
-      await replyOrUpdate(interaction, {
-        embeds: [buildShopHouseListEmbed(member, defA.origin)],
-        components: buildShopHouseListRows(member, defA.origin),
-      });
+    beginShopTradeDraft(member.guild.id, member.id, "apt", aid, owned.length === 1 ? [owned[0]!.uid] : []);
+    const emb = buildShopAptTradePickEmbed(member, aid);
+    if (!emb) {
+      await replyShopNotice(interaction, "Неизвестная квартира.", ECON_SHOP_HOUSE);
       return true;
     }
-    await replyOrUpdate(interaction, {
-      embeds: [emb],
-      components: buildShopAptTradePickRows(member, aid),
-    });
+    await replyOrUpdate(interaction, { embeds: [emb], components: buildShopAptTradePickRows(member, aid) });
     return true;
   }
 
@@ -4324,12 +4598,16 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const aid = id.slice(ECON_SHOP_APT_BUY_CONFIRM_PREFIX.length);
     const defA = getApartmentDef(aid);
     if (!defA) {
-      await interaction.reply({ content: "Неизвестная квартира.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Неизвестная квартира.", ECON_SHOP_HOUSE);
       return true;
     }
     const r = purchaseApartment(member, aid);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      const emb = buildShopApartmentBuyConfirmEmbed(member, aid);
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(emb ?? buildShopNoticeEmbed("Покупка жилья", r.reply), r.reply)],
+        components: buildShopApartmentBuyConfirmRows(member, aid, defA.origin),
+      });
       return true;
     }
     if (r.refund > 0) {
@@ -4343,7 +4621,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       await ensureEconomyFeedPanel(interaction.client);
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopHouseListEmbed(member, defA.origin)],
+      embeds: [withShopNote(buildShopHouseListEmbed(member, defA.origin), "Куплено за полную стоимость.")],
       components: buildShopHouseListRows(member, defA.origin),
     });
     return true;
@@ -4362,7 +4640,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_APT_SELL_SOVIET) {
     const u = getEconomyUser(member.guild.id, member.id);
     if (listOwnedApartmentsByOrigin(u, "soviet").length === 0) {
-      await interaction.reply({ content: "Нет **советского** жилья для продажи.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Нет **советского** жилья для продажи.", `${ECON_SHOP_HOUSE_ORIGIN_PREFIX}soviet`);
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -4383,21 +4661,20 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_APT_SELL_SOVIET_CONFIRM) {
     const r = sellSovietApartment(member);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, r.reply, ECON_SHOP_APT_SELL_SOVIET);
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopHouseListEmbed(member, "soviet")],
+      embeds: [withShopNote(buildShopHouseListEmbed(member, "soviet"), `Жильё продано: **+${fmt(r.refund)}** ₽.`)],
       components: buildShopHouseListRows(member, "soviet"),
     });
-    await interaction.followUp({ content: `Жильё продано: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
     return true;
   }
 
   if (id === ECON_SHOP_APT_SELL_FOREIGN) {
     const u = getEconomyUser(member.guild.id, member.id);
     if (listOwnedApartmentsByOrigin(u, "foreign").length === 0) {
-      await interaction.reply({ content: "Нет **заморского** жилья для продажи.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Нет **заморского** жилья для продажи.", `${ECON_SHOP_HOUSE_ORIGIN_PREFIX}foreign`);
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -4418,14 +4695,29 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_APT_SELL_FOREIGN_CONFIRM) {
     const r = sellForeignApartment(member);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, r.reply, ECON_SHOP_APT_SELL_FOREIGN);
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopHouseListEmbed(member, "foreign")],
+      embeds: [withShopNote(buildShopHouseListEmbed(member, "foreign"), `Жильё продано: **+${fmt(r.refund)}** ₽.`)],
       components: buildShopHouseListRows(member, "foreign"),
     });
-    await interaction.followUp({ content: `Жильё продано: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_APT_SELL_OK_PREFIX)) {
+    const uid = id.slice(ECON_SHOP_APT_SELL_OK_PREFIX.length);
+    const rec = findOwnedApartment(getEconomyUser(member.guild.id, member.id), uid);
+    const origin = getApartmentDef(rec?.id)?.origin ?? "soviet";
+    const r = sellOwnedApartment(member, uid);
+    if (!r.ok) {
+      await replyShopNotice(interaction, r.reply, origin === "foreign" ? ECON_SHOP_APT_SELL_FOREIGN : ECON_SHOP_APT_SELL_SOVIET);
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [withShopNote(buildShopHouseListEmbed(member, origin), `Жильё продано: **+${fmt(r.refund)}** ₽.`)],
+      components: buildShopHouseListRows(member, origin),
+    });
     return true;
   }
 
@@ -4433,16 +4725,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     const uid = id.slice(ECON_SHOP_APT_SELL_UID_PREFIX.length);
     const rec = findOwnedApartment(getEconomyUser(member.guild.id, member.id), uid);
     const origin = getApartmentDef(rec?.id)?.origin ?? "soviet";
-    const r = sellOwnedApartment(member, uid);
-    if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+    if (!rec) {
+      await replyShopNotice(interaction, "Жильё не найдено.", ECON_SHOP_HOUSE);
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopHouseListEmbed(member, origin)],
-      components: buildShopHouseListRows(member, origin),
+      embeds: [buildShopApartmentSellConfirmEmbed(member, origin, uid)],
+      components: buildShopAptUidSellConfirmRows(origin, uid),
     });
-    await interaction.followUp({ content: `Жильё продано: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -4479,13 +4769,16 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id.startsWith(ECON_LOTTERY_CONFIRM_PREFIX)) {
     const qty = Number.parseInt(id.slice(ECON_LOTTERY_CONFIRM_PREFIX.length), 10);
     if (!Number.isFinite(qty) || qty < 1) {
-      await interaction.reply({ content: "Некорректное количество.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Некорректное количество.", ECON_SHOP_LOTTERY);
       return true;
     }
     const total = qty * LOTTERY_TICKET_PRICE_RUB;
     const spend = trySpendEconomyUserRubles(member.guild.id, member.id, total);
     if (!spend.ok) {
-      await interaction.reply({ content: `Нужно **${fmt(total)}** ₽.`, flags: MessageFlags.Ephemeral });
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(buildShopLotteryEmbed(member), `Не хватает **${fmt(Math.max(0, total - getEconomyUser(member.guild.id, member.id).rubles))}** ₽ (к оплате **${fmt(total)}**).`)],
+        components: buildShopLotteryRows(member),
+      });
       return true;
     }
     remitShopPurchaseVatToTreasury(member.guild.id, total);
@@ -4513,7 +4806,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     syncSimPrestige(member);
     const su = getEconomyUser(member.guild.id, member.id);
     if (!su.hasPhone) {
-      await interaction.reply({ content: "Без **телефона** симку оформить нельзя — сначала купите телефон в магазине.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Без **телефона** симку оформить нельзя — сначала купите телефон в магазине.", ECON_SHOP_HUB);
       return true;
     }
     await replyOrUpdate(interaction, { embeds: [buildShopSimEmbed(member)], components: buildShopSimRows(member) });
@@ -4523,7 +4816,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_SIM_REGISTER) {
     const r = registerSimNumber(member);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(buildShopSimEmbed(member), r.reply)],
+        components: buildShopSimRows(member),
+      });
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -4536,7 +4832,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_SIM_CHANGE) {
     const u = getEconomyUser(member.guild.id, member.id);
     if (!userHasSimNumber(u)) {
-      await interaction.reply({ content: "Сначала **купите симку**.", flags: MessageFlags.Ephemeral });
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(buildShopSimEmbed(member), "Сначала **купите симку**.")],
+        components: buildShopSimRows(member),
+      });
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -4549,7 +4848,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_SIM_OPERATOR) {
     const r = changeSimOperator(member);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(buildShopSimChangeEmbed(member), r.reply)],
+        components: buildShopSimChangeRows(member),
+      });
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -4562,7 +4864,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_SIM_MID) {
     const r = changeSimMid(member);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(buildShopSimChangeEmbed(member), r.reply)],
+        components: buildShopSimChangeRows(member),
+      });
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -4575,7 +4880,10 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_SIM_LAST) {
     const r = changeSimLast(member);
     if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(buildShopSimChangeEmbed(member), r.reply)],
+        components: buildShopSimChangeRows(member),
+      });
       return true;
     }
     await replyOrUpdate(interaction, {
@@ -4596,11 +4904,14 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_SIM_TOPUP_OPEN) {
     const u = getEconomyUser(member.guild.id, member.id);
     if (!u.hasPhone) {
-      await interaction.reply({ content: "Нужен **телефон**.", flags: MessageFlags.Ephemeral });
+      await replyShopNotice(interaction, "Нужен **телефон**.", ECON_SHOP_HUB);
       return true;
     }
     if (!userHasSimNumber(u)) {
-      await interaction.reply({ content: "Сначала купите симку.", flags: MessageFlags.Ephemeral });
+      await replyOrUpdate(interaction, {
+        embeds: [withShopNote(buildShopSimEmbed(member), "Сначала купите симку.")],
+        components: buildShopSimRows(member),
+      });
       return true;
     }
     const modal = new ModalBuilder().setCustomId(ECON_MODAL_SIM_TOPUP).setTitle("Пополнить симку");
@@ -5191,6 +5502,35 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
 export async function handleEconomyModal(interaction: ModalSubmitInteraction): Promise<boolean> {
   const modalId = interaction.customId;
+
+  if (modalId.startsWith(ECON_MODAL_PET_RENAME_PREFIX)) {
+    if (!interaction.inGuild() || !interaction.guildId || !interaction.member) {
+      await interaction.reply({ content: "Эта форма работает только на сервере.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const mem = interaction.member as GuildMember;
+    if (mem.user.bot) {
+      await interaction.reply({ content: "Ботам экономика не положена.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const uid = modalId.slice(ECON_MODAL_PET_RENAME_PREFIX.length);
+    const r = renameOwnedPet(mem, uid, interaction.fields.getTextInputValue("name"));
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const emb = buildShopPetViewEmbed(mem, uid);
+    try {
+      await interaction.deferUpdate();
+      if (emb) {
+        await interaction.editReply({ embeds: [emb], components: buildShopPetViewRows(uid) });
+      }
+    } catch (e) {
+      console.error("pet rename modal:", e);
+      await interaction.followUp({ content: `Имя сохранено: **${r.name}**.`, flags: MessageFlags.Ephemeral });
+    }
+    return true;
+  }
 
   if (modalId === ECON_MODAL_LOTTERY_QTY) {
     if (!interaction.inGuild() || !interaction.guildId || !interaction.member) {

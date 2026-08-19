@@ -1,5 +1,5 @@
-import { getApartmentDef, getPetDef, getPhoneDef } from "./economyCatalog.js";
-import { listOwnedApartmentsByOrigin, listOwnedPhones } from "./economyAssets.js";
+import { getApartmentDef, getPhoneDef } from "./economyCatalog.js";
+import { listOwnedApartmentsByOrigin, listOwnedPets, listOwnedPhones, formatOwnedPetLine } from "./economyAssets.js";
 import { economyCarDisplayLine } from "./economyLicensePlate.js";
 import { formatSimNumberFromUser } from "./economySimNumber.js";
 import { economyJobTitle } from "./jobTitles.js";
@@ -71,7 +71,11 @@ export function buildProfileCardContent(
   const rubPlace = r.rubPlaceByUserId.get(userId) ?? r.totalPlayers;
 
   const jobName = u.jobId ? economyJobTitle(u.jobId) : "не выбрана";
-  const pet = u.ownedPetId ? getPetDef(u.ownedPetId) : undefined;
+  const petLine = (() => {
+    const pets = listOwnedPets(u);
+    if (pets.length === 0) return "Питомец: нет";
+    return `Питомцы: ${pets.map((p) => formatOwnedPetLine(p, { markdown: false })).join("; ")}`;
+  })();
 
   const lines = [
     `Престиж: ${fmt(u.prestigePoints ?? 0)}`,
@@ -80,7 +84,7 @@ export function buildProfileCardContent(
     phoneLine(u),
     economyCarDisplayLine(u, { markdown: false }),
     housingLine(u),
-    `Питомец: ${pet?.label ?? "нет"}`,
+    petLine,
     "",
     `Работа: ${jobName}`,
     `СР: ${fmt(u.psTotal)} (${formatServerPlace(psPlace, r.totalPlayers)})`,

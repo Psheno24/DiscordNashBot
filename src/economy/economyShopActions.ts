@@ -54,6 +54,16 @@ function fmt(n: number): string {
   return n.toLocaleString("ru-RU");
 }
 
+function shopShortageReply(have: number, need: number): string {
+  const lack = Math.max(0, need - have);
+  return `Не хватает **${fmt(lack)}** ₽ (на счёте **${fmt(have)}**, к оплате **${fmt(need)}**).`;
+}
+
+function asUidList(uids: string | string[]): string[] {
+  const list = Array.isArray(uids) ? uids : [uids];
+  return [...new Set(list.filter((u) => u.length > 0))];
+}
+
 function inflatedPlateShopPrice(guildId: string, baseRub: number): number {
   return scaledShopPrice(guildId, baseRub);
 }
@@ -94,7 +104,7 @@ export function purchasePhoneFull(member: GuildMember, pid: string): { ok: true 
   if (!defP) return { ok: false, reply: "Неизвестная модель." };
   const cost = inflatedCatalogPhonePrice(member.guild.id, defP.id);
   const u = getEconomyUser(member.guild.id, member.id);
-  if (u.rubles < cost) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
+  if (u.rubles < cost) return { ok: false, reply: shopShortageReply(u.rubles, cost) };
   let applied = false;
   updateEconomyUser(member.guild.id, member.id, (curU) => {
     if (curU.rubles < cost) return curU;
@@ -105,7 +115,7 @@ export function purchasePhoneFull(member: GuildMember, pid: string): { ok: true 
       ownedPhones: [...listOwnedPhones(curU), { uid: newAssetUid(), id: defP.id }],
     };
   });
-  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
+  if (!applied) return { ok: false, reply: shopShortageReply(getEconomyUser(member.guild.id, member.id).rubles, cost) };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   return { ok: true };
 }
@@ -113,31 +123,37 @@ export function purchasePhoneFull(member: GuildMember, pid: string): { ok: true 
 export function purchasePhoneTrade(
   member: GuildMember,
   pid: string,
-  uid: string,
+  uids: string | string[],
 ): { ok: true } | { ok: false; reply: string } {
   const defP = getPhoneDef(pid);
   if (!defP) return { ok: false, reply: "Неизвестная модель." };
+  const uidList = asUidList(uids);
+  if (uidList.length === 0) return { ok: false, reply: "Выберите хотя бы один телефон." };
   const u = getEconomyUser(member.guild.id, member.id);
-  const rec = findOwnedPhone(u, uid);
-  const cur = rec ? getPhoneDef(rec.id) : undefined;
-  if (!rec || !cur) return { ok: false, reply: "Этот телефон уже не у вас." };
-  if (cur.origin !== defP.origin) return { ok: false, reply: "Обмен только в той же ветке (советское/заморское)." };
+  let credit = 0;
+  for (const uid of uidList) {
+    const rec = findOwnedPhone(u, uid);
+    const cur = rec ? getPhoneDef(rec.id) : undefined;
+    if (!rec || !cur) return { ok: false, reply: "Этот телефон уже не у вас." };
+    if (cur.origin !== defP.origin) return { ok: false, reply: "Обмен только в той же ветке (советское/заморское)." };
+    credit += Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_TRADE_IN_RATE);
+  }
   const full = inflatedCatalogPhonePrice(member.guild.id, defP.id);
-  const credit = Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_TRADE_IN_RATE);
   const net = full - credit;
-  if (net > 0 && u.rubles < net) return { ok: false, reply: `Нужно ещё **${fmt(net)}** ₽.` };
+  if (net > 0 && u.rubles < net) return { ok: false, reply: shopShortageReply(u.rubles, net) };
+  const drop = new Set(uidList);
   let applied = false;
   updateEconomyUser(member.guild.id, member.id, (curU) => {
     if (net > 0 && curU.rubles < net) return curU;
-    if (!findOwnedPhone(curU, uid)) return curU;
+    if (uidList.some((uid) => !findOwnedPhone(curU, uid))) return curU;
     applied = true;
     return {
       ...curU,
       rubles: applyNet(curU.rubles, net),
-      ownedPhones: listOwnedPhones(curU).map((p) => (p.uid === uid ? { ...p, id: defP.id } : p)),
+      ownedPhones: [...listOwnedPhones(curU).filter((p) => !drop.has(p.uid)), { uid: newAssetUid(), id: defP.id }],
     };
   });
-  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(Math.max(0, net))}** ₽.` };
+  if (!applied) return { ok: false, reply: shopShortageReply(getEconomyUser(member.guild.id, member.id).rubles, Math.max(0, net)) };
   if (net > 0) remitShopPurchaseVatToTreasury(member.guild.id, net);
   return { ok: true };
 }
@@ -147,7 +163,7 @@ export function purchaseCarFull(member: GuildMember, cid: string): { ok: true } 
   if (!defC) return { ok: false, reply: "Неизвестное авто." };
   const cost = inflatedCatalogCarPrice(member.guild.id, defC.id);
   const u = getEconomyUser(member.guild.id, member.id);
-  if (u.rubles < cost) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
+  if (u.rubles < cost) return { ok: false, reply: shopShortageReply(u.rubles, cost) };
   let applied = false;
   updateEconomyUser(member.guild.id, member.id, (curU) => {
     if (curU.rubles < cost) return curU;
@@ -159,7 +175,7 @@ export function purchaseCarFull(member: GuildMember, cid: string): { ok: true } 
       ...cancelRentAndBikeOnAssetPurchase(curU),
     };
   });
-  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
+  if (!applied) return { ok: false, reply: shopShortageReply(getEconomyUser(member.guild.id, member.id).rubles, cost) };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   return { ok: true };
 }
@@ -167,40 +183,46 @@ export function purchaseCarFull(member: GuildMember, cid: string): { ok: true } 
 export function purchaseCarTrade(
   member: GuildMember,
   cid: string,
-  uid: string,
+  uids: string | string[],
 ): { ok: true } | { ok: false; reply: string } {
   const defC = getCarDef(cid);
   if (!defC) return { ok: false, reply: "Неизвестное авто." };
+  const uidList = asUidList(uids);
+  if (uidList.length === 0) return { ok: false, reply: "Выберите хотя бы одно авто." };
   const u = getEconomyUser(member.guild.id, member.id);
-  const rec = findOwnedCar(u, uid);
-  const cur = rec ? getCarDef(rec.id) : undefined;
-  if (!rec || !cur) return { ok: false, reply: "Этого авто уже нет." };
-  if (cur.origin !== defC.origin) return { ok: false, reply: "Обмен только в той же ветке (советское/заморское)." };
+  let credit = 0;
+  for (const uid of uidList) {
+    const rec = findOwnedCar(u, uid);
+    const cur = rec ? getCarDef(rec.id) : undefined;
+    if (!rec || !cur) return { ok: false, reply: "Этого авто уже нет." };
+    if (cur.origin !== defC.origin) return { ok: false, reply: "Обмен только в той же ветке (советское/заморское)." };
+    credit += Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_TRADE_IN_RATE);
+  }
   const full = inflatedCatalogCarPrice(member.guild.id, defC.id);
-  const credit = Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_TRADE_IN_RATE);
   const net = full - credit;
-  if (net > 0 && u.rubles < net) return { ok: false, reply: `Нужно ещё **${fmt(net)}** ₽.` };
-  const detached = carPlateParts(rec);
+  if (net > 0 && u.rubles < net) return { ok: false, reply: shopShortageReply(u.rubles, net) };
+  const drop = new Set(uidList);
   let applied = false;
   updateEconomyUser(member.guild.id, member.id, (curU) => {
     if (net > 0 && curU.rubles < net) return curU;
-    const old = findOwnedCar(curU, uid);
-    if (!old) return curU;
+    if (uidList.some((uid) => !findOwnedCar(curU, uid))) return curU;
     applied = true;
     const unattached = [...listUnattachedPlates(curU)];
-    const plate = carPlateParts(old);
-    if (plate) unattached.push(plate);
+    for (const uid of uidList) {
+      const old = findOwnedCar(curU, uid);
+      const plate = old ? carPlateParts(old) : undefined;
+      if (plate) unattached.push(plate);
+    }
     return {
       ...curU,
       rubles: applyNet(curU.rubles, net),
-      ownedCars: listOwnedCars(curU).map((c) => (c.uid === uid ? { uid: c.uid, id: defC.id } : c)),
+      ownedCars: [...listOwnedCars(curU).filter((c) => !drop.has(c.uid)), { uid: newAssetUid(), id: defC.id }],
       unattachedPlates: unattached,
       ...cancelRentAndBikeOnAssetPurchase(curU),
     };
   });
-  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(Math.max(0, net))}** ₽.` };
+  if (!applied) return { ok: false, reply: shopShortageReply(getEconomyUser(member.guild.id, member.id).rubles, Math.max(0, net)) };
   if (net > 0) remitShopPurchaseVatToTreasury(member.guild.id, net);
-  void detached;
   return { ok: true };
 }
 
@@ -216,7 +238,7 @@ export function purchaseApartmentFull(
   const cost = inflatedCatalogApartmentPrice(gid, defA.id);
   const rentRefund = defA.origin === "soviet" && (u.housingKind ?? "none") === "rent" ? housingRentUnusedRefundRub(u, now, gid) : 0;
   if (u.rubles + rentRefund < cost) {
-    return { ok: false, reply: `Нужно ещё **${fmt(Math.max(0, cost - rentRefund))}** ₽.` };
+    return { ok: false, reply: shopShortageReply(u.rubles + rentRefund, cost) };
   }
   let applied = false;
   updateEconomyUser(member.guild.id, member.id, (curU) => {
@@ -233,7 +255,12 @@ export function purchaseApartmentFull(
       ...patch,
     };
   });
-  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(Math.max(0, cost - rentRefund))}** ₽.` };
+  if (!applied) {
+    const later = getEconomyUser(member.guild.id, member.id);
+    const laterRefund =
+      defA.origin === "soviet" && (later.housingKind ?? "none") === "rent" ? housingRentUnusedRefundRub(later, Date.now(), gid) : 0;
+    return { ok: false, reply: shopShortageReply(later.rubles + laterRefund, cost) };
+  }
   remitShopPurchaseVatToTreasury(gid, cost);
   return { ok: true, refund: rentRefund };
 }
@@ -241,36 +268,43 @@ export function purchaseApartmentFull(
 export function purchaseApartmentTrade(
   member: GuildMember,
   aid: string,
-  uid: string,
+  uids: string | string[],
 ): { ok: true; refund: number } | { ok: false; reply: string } {
   const defA = getApartmentDef(aid);
   if (!defA) return { ok: false, reply: "Неизвестная квартира." };
+  const uidList = asUidList(uids);
+  if (uidList.length === 0) return { ok: false, reply: "Выберите хотя бы одно жильё." };
   const u = getEconomyUser(member.guild.id, member.id);
-  const rec = findOwnedApartment(u, uid);
-  const cur = rec ? getApartmentDef(rec.id) : undefined;
-  if (!rec || !cur) return { ok: false, reply: "Этого жилья уже нет." };
-  if (cur.origin !== defA.origin) return { ok: false, reply: "Обмен только в той же ветке (советское/заморское)." };
   const now = Date.now();
   const gid = member.guild.id;
+  let credit = 0;
+  for (const uid of uidList) {
+    const rec = findOwnedApartment(u, uid);
+    const cur = rec ? getApartmentDef(rec.id) : undefined;
+    if (!rec || !cur) return { ok: false, reply: "Этого жилья уже нет." };
+    if (cur.origin !== defA.origin) return { ok: false, reply: "Обмен только в той же ветке (советское/заморское)." };
+    const rate = apartmentTradeInRate(rec.purchasedAtMs, now);
+    credit += Math.floor(inflatedCatalogApartmentPrice(gid, cur.id) * rate);
+  }
   const full = inflatedCatalogApartmentPrice(gid, defA.id);
-  const rate = apartmentTradeInRate(rec.purchasedAtMs, now);
-  const credit = Math.floor(inflatedCatalogApartmentPrice(gid, cur.id) * rate);
   const net = full - credit;
-  if (net > 0 && u.rubles < net) return { ok: false, reply: `Нужно ещё **${fmt(net)}** ₽.` };
+  if (net > 0 && u.rubles < net) return { ok: false, reply: shopShortageReply(u.rubles, net) };
+  const drop = new Set(uidList);
   let applied = false;
   updateEconomyUser(member.guild.id, member.id, (curU) => {
     if (net > 0 && curU.rubles < net) return curU;
-    if (!findOwnedApartment(curU, uid)) return curU;
+    if (uidList.some((uid) => !findOwnedApartment(curU, uid))) return curU;
     applied = true;
     return {
       ...curU,
       rubles: applyNet(curU.rubles, net),
-      ownedApartments: listOwnedApartments(curU).map((a) =>
-        a.uid === uid ? { uid: a.uid, id: defA.id, purchasedAtMs: now } : a,
-      ),
+      ownedApartments: [
+        ...listOwnedApartments(curU).filter((a) => !drop.has(a.uid)),
+        { uid: newAssetUid(), id: defA.id, purchasedAtMs: now },
+      ],
     };
   });
-  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(Math.max(0, net))}** ₽.` };
+  if (!applied) return { ok: false, reply: shopShortageReply(getEconomyUser(member.guild.id, member.id).rubles, Math.max(0, net)) };
   if (net > 0) remitShopPurchaseVatToTreasury(gid, net);
   return { ok: true, refund: 0 };
 }
@@ -374,7 +408,7 @@ function mutateCarPlate(
   const u = getEconomyUser(member.guild.id, member.id);
   const car = findOwnedCar(u, carUid);
   if (!car) return { ok: false, reply: "Авто не найдено." };
-  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  if (u.rubles < cost) return { ok: false, reply: shopShortageReply(u.rubles, cost) };
   const except = carPlateParts(car) ? vehiclePlateKey(carPlateParts(car)!) : undefined;
   const taken = guildTakenVehiclePlateKeys(member.guild.id, except);
   if (taken.has(vehiclePlateKey(nextPlate))) {
@@ -393,7 +427,7 @@ function mutateCarPlate(
       ownedCars: applyCarPlate(listOwnedCars(cur), carUid, nextPlate),
     };
   });
-  if (!applied) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  if (!applied) return { ok: false, reply: shopShortageReply(getEconomyUser(member.guild.id, member.id).rubles, cost) };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   const plate = formatVehiclePlate(nextPlate);
   const tips = buildPlateUpgradeTips(nextPlate, taken);
@@ -414,7 +448,7 @@ export function registerVehiclePlateForCar(
   if (!car) return { ok: false, reply: "Авто не найдено." };
   if (carPlateParts(car)) return { ok: false, reply: "На этом авто госномер **уже есть**. Снимите его, чтобы оформить новый." };
   const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_REGISTER_BASE_RUB);
-  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  if (u.rubles < cost) return { ok: false, reply: shopShortageReply(u.rubles, cost) };
   const taken = guildTakenVehiclePlateKeys(member.guild.id);
   const parts = rollUniqueVehiclePlateParts(taken);
   return mutateCarPlate(member, carUid, parts, cost, "Оформлен госномер");

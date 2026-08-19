@@ -12,6 +12,7 @@ import {
   statsFromOwnedAssets,
   type OwnedApartmentRecord,
   type OwnedCarRecord,
+  type OwnedPetRecord,
   type OwnedPhoneRecord,
   type UnattachedPlateRecord,
 } from "./economyAssets.js";
@@ -21,7 +22,7 @@ import { nextHousingUtilityDueMs } from "./economyMacro.js";
 import { SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS } from "./shiftPayCoeff.js";
 import { writeJsonAtomicSync } from "../storage/atomicJson.js";
 
-export type { OwnedApartmentRecord, OwnedCarRecord, OwnedPhoneRecord, UnattachedPlateRecord };
+export type { OwnedApartmentRecord, OwnedCarRecord, OwnedPetRecord, OwnedPhoneRecord, UnattachedPlateRecord };
 
 export type JobId =
   | "courier"
@@ -141,10 +142,12 @@ export interface EconomyUser {
   housingForeignUtilityNextDueMs?: number;
   housingForeignLastMskYmd?: string;
 
-  /** Активный питомец. */
+  /** Купленные питомцы (по одному каждого типа). */
+  ownedPets?: OwnedPetRecord[];
+  /** Зеркало: id первого питомца (совместимость). */
   ownedPetId?: string;
   petLastMskYmd?: string;
-  /** Нет ₽ на содержание — бонус СР приостановлен. */
+  /** Зеркало: хотя бы у одного питомца нет ₽ на содержание. */
   petPausedNoFunds?: boolean;
 
   /** @deprecated Старый 5-значный номер; мигрируется в courierSimOperator/Mid/Last. */
@@ -495,13 +498,13 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
       ? (u as any).housingForeignLastMskYmd
       : undefined;
 
-  const ownedPetId =
-    typeof (u as any)?.ownedPetId === "string" && (u as any).ownedPetId.length > 0 ? (u as any).ownedPetId : undefined;
+  const ownedPets = assets.ownedPets;
+  const ownedPetId = ownedPets[0]?.id;
   const petLastMskYmd =
     typeof (u as any)?.petLastMskYmd === "string" && /^\d{4}-\d{2}-\d{2}$/.test((u as any).petLastMskYmd)
       ? (u as any).petLastMskYmd
       : undefined;
-  const petPausedNoFunds = (u as any)?.petPausedNoFunds === true ? true : undefined;
+  const petPausedNoFunds = ownedPets.some((p) => p.pausedNoFunds === true) ? true : undefined;
 
   const stats = statsFromOwnedAssets(assets);
   let prestigePoints = stats.prestigePoints;
@@ -569,6 +572,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     ownedForeignApartmentPurchasedAtMs,
     housingForeignUtilityNextDueMs,
     housingForeignLastMskYmd,
+    ownedPets,
     ownedPetId,
     petLastMskYmd,
     petPausedNoFunds,

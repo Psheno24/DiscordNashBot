@@ -12,6 +12,7 @@ import {
 import { isMskMonday, msUntilNextMskMidnight, mskTodayYmd } from "./mskCalendar.js";
 import { addToTreasury, getSolePropWeeklyCapitalTaxPercent, withholdLegalIncomeTax } from "./taxTreasury.js";
 import { getEconomyUser, listEconomyUsers, patchEconomyUser } from "./userStore.js";
+import { listOwnedPets } from "./economyAssets.js";
 import { solePropMidnightPatch } from "./tier3SolePropMsk.js";
 import {
   computeTier3PassiveRubDetailed,
@@ -169,7 +170,7 @@ export function seedMidnightTickStateIfAlreadyCurrent(client: Client, nowMs: num
       if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId && u.housingForeignLastMskYmd !== today) {
         return;
       }
-      if (u.ownedPetId && u.petLastMskYmd !== today) return;
+      if ((listOwnedPets(u).length > 0 || u.ownedPetId) && u.petLastMskYmd !== today) return;
       if (u.jobId && isTier3JobId(u.jobId) && u.economyLastMskYmd !== today) return;
     }
   }

@@ -15,7 +15,6 @@ import {
   HOUSING_CALENDAR_MONTH_MS,
   MS_PER_DAY,
   PET_MODELS,
-  PET_TRADE_IN_RATE,
   PHONE_SELL_REFUND_RATE,
   PHONE_TRADE_IN_RATE,
   apartmentShopShortLabel,
@@ -29,7 +28,6 @@ import {
   housingRentPlanPeriodMs,
   patchStatsFromShop,
   petOwnershipBlockReason,
-  petPurchaseCostRub,
   petRequirementsLine,
   phonesByOrigin,
   statDeltasOnReplace,
@@ -82,17 +80,26 @@ import { housingRentUnusedRefundRub } from "./economyHousing.js";
 import {
   carPlateParts,
   encodePlateKey,
+  findOwnedApartment,
   findOwnedCar,
+  findOwnedPet,
+  findOwnedPhone,
   formatCarWithPlateLine,
+  formatOwnedPetLine,
   listAttachedPlates,
   listOwnedApartmentsByOrigin,
   listOwnedCars,
   listOwnedCarsByOrigin,
+  listOwnedPets,
   listOwnedPhones,
   listOwnedPhonesByOrigin,
   listUnattachedPlates,
+  newAssetUid,
+  sanitizePetName,
   shortCarLabel,
+  shortPetButtonLabel,
   userCanOpenPlateShop,
+  userOwnsPetType,
 } from "./economyAssets.js";
 import {
   inflatedApartmentUtilityRub,
@@ -106,6 +113,7 @@ import {
 } from "./economyMacro.js";
 import { remitShopPurchaseVatToTreasury } from "./taxTreasury.js";
 import { getEconomyUser, listEconomyUsers, patchEconomyUser, updateEconomyUser, type EconomyUser } from "./userStore.js";
+import { selectedShopTradeUids } from "./shopTradeDraft.js";
 export {
   attachVehiclePlateToCar,
   changeVehiclePlateDigits,
@@ -147,6 +155,28 @@ export function shopNavBottomRow(backId: string, backLabel = "Назад"): Acti
   );
 }
 
+export function buildShopNoticeEmbed(title: string, body: string): EmbedBuilder {
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle(title).setDescription(body);
+}
+
+export function withShopNote(embed: EmbedBuilder, note?: string): EmbedBuilder {
+  if (!note) return embed;
+  const d = embed.data.description ?? "";
+  return EmbedBuilder.from(embed).setDescription(`${note}\n\n${d}`);
+}
+
+function shopShortageLine(have: number, need: number): string | undefined {
+  if (have >= need) return undefined;
+  return `Не хватает **${fmt(need - have)}** ₽ (на счёте **${fmt(have)}**, к оплате **${fmt(need)}**).`;
+}
+
+function tradeConfirmLabel(net: number, selectedCount: number): string {
+  if (selectedCount === 0) return "Подтвердить обмен";
+  if (net > 0) return `Подтвердить · оплата ${fmt(net)} ₽`;
+  if (net < 0) return `Подтвердить · возврат ${fmt(-net)} ₽`;
+  return "Подтвердить · без доплаты";
+}
+
 function shopDetailsNavBottomRow(
   detailsId: string,
   backId: string,
@@ -166,10 +196,13 @@ export const ECON_SHOP_PHONE_BUY_PREFIX = "econ:shop:phoneBuy:";
 export const ECON_SHOP_PHONE_FULL_PREFIX = "econ:shop:phoneFull:";
 export const ECON_SHOP_PHONE_TRADE_PREFIX = "econ:shop:phoneTr:";
 export const ECON_SHOP_PHONE_TRADE_OK_PREFIX = "econ:shop:phoneTrOk:";
+export const ECON_SHOP_PHONE_TRADE_TG_PREFIX = "econ:shop:phoneTrTg:";
+export const ECON_SHOP_PHONE_TRADE_GO_PREFIX = "econ:shop:phoneTrGo:";
 export const ECON_SHOP_PHONE_BUY_CONFIRM_PREFIX = "econ:shop:phoneBuyOk:";
 export const ECON_SHOP_PHONE_BUY_CANCEL_PREFIX = "econ:shop:phoneBuyCan:";
 export const ECON_SHOP_PHONE_SELL = "econ:shop:phone:sell";
 export const ECON_SHOP_PHONE_SELL_UID_PREFIX = "econ:shop:phoneSellU:";
+export const ECON_SHOP_PHONE_SELL_OK_PREFIX = "econ:shop:phoneSellY:";
 export const ECON_SHOP_PHONE_SELL_CONFIRM = "econ:shop:phone:sell:ok";
 export const ECON_SHOP_PHONE_SELL_CANCEL = "econ:shop:phone:sell:cancel";
 export const ECON_SHOP_PHONE_DETAILS_PREFIX = "econ:shop:phoneCatalog:";
@@ -179,6 +212,8 @@ export const ECON_SHOP_CAR_BUY_PREFIX = "econ:shop:carBuy:";
 export const ECON_SHOP_CAR_FULL_PREFIX = "econ:shop:carFull:";
 export const ECON_SHOP_CAR_TRADE_PREFIX = "econ:shop:carTr:";
 export const ECON_SHOP_CAR_TRADE_OK_PREFIX = "econ:shop:carTrOk:";
+export const ECON_SHOP_CAR_TRADE_TG_PREFIX = "econ:shop:carTrTg:";
+export const ECON_SHOP_CAR_TRADE_GO_PREFIX = "econ:shop:carTrGo:";
 export const ECON_SHOP_CAR_BUY_CONFIRM_PREFIX = "econ:shop:carBuyOk:";
 export const ECON_SHOP_CAR_BUY_CANCEL_PREFIX = "econ:shop:carBuyCan:";
 export const ECON_SHOP_CAR_DETAILS_PREFIX = "econ:shop:carCatalog:";
@@ -200,6 +235,7 @@ export const ECON_SHOP_PLATE_ATT_PICK_PREFIX = "econ:shop:plateAtP:";
 export const ECON_SHOP_PLATE_ATT_OK_PREFIX = "econ:shop:plateAtY:";
 export const ECON_SHOP_CAR_SELL = "econ:shop:car:sell";
 export const ECON_SHOP_CAR_SELL_UID_PREFIX = "econ:shop:carSellU:";
+export const ECON_SHOP_CAR_SELL_OK_PREFIX = "econ:shop:carSellY:";
 export const ECON_SHOP_CAR_SELL_CONFIRM = "econ:shop:car:sell:ok";
 export const ECON_SHOP_CAR_SELL_CANCEL = "econ:shop:car:sell:cancel";
 export const ECON_SHOP_HOUSE = "econ:shop:house";
@@ -215,18 +251,26 @@ export const ECON_SHOP_APT_BUY_PREFIX = "econ:shop:aptBuy:";
 export const ECON_SHOP_APT_FULL_PREFIX = "econ:shop:aptFull:";
 export const ECON_SHOP_APT_TRADE_PREFIX = "econ:shop:aptTr:";
 export const ECON_SHOP_APT_TRADE_OK_PREFIX = "econ:shop:aptTrOk:";
+export const ECON_SHOP_APT_TRADE_TG_PREFIX = "econ:shop:aptTrTg:";
+export const ECON_SHOP_APT_TRADE_GO_PREFIX = "econ:shop:aptTrGo:";
 export const ECON_SHOP_APT_BUY_CONFIRM_PREFIX = "econ:shop:aptBuyOk:";
 export const ECON_SHOP_APT_BUY_CANCEL_PREFIX = "econ:shop:aptBuyCan:";
 export const ECON_SHOP_APT_SELL_SOVIET = "econ:shop:apt:sell:sov";
 export const ECON_SHOP_APT_SELL_UID_PREFIX = "econ:shop:aptSellU:";
+export const ECON_SHOP_APT_SELL_OK_PREFIX = "econ:shop:aptSellY:";
 export const ECON_SHOP_APT_SELL_SOVIET_CONFIRM = "econ:shop:apt:sell:sov:ok";
 export const ECON_SHOP_APT_SELL_SOVIET_CANCEL = "econ:shop:apt:sell:sov:cancel";
 export const ECON_SHOP_APT_SELL_FOREIGN = "econ:shop:apt:sell:for";
 export const ECON_SHOP_APT_SELL_FOREIGN_CONFIRM = "econ:shop:apt:sell:for:ok";
 export const ECON_SHOP_APT_SELL_FOREIGN_CANCEL = "econ:shop:apt:sell:for:cancel";
 export const ECON_SHOP_ANIMALS = "econ:shop:animals";
+export const ECON_SHOP_ANIMALS_BUY = "econ:shop:animals:buy";
+export const ECON_SHOP_ANIMALS_OWNED = "econ:shop:animals:mine";
 export const ECON_SHOP_ANIMALS_DETAILS = "econ:shop:animalsCatalog";
 export const ECON_SHOP_PET_BUY_PREFIX = "econ:shop:petBuy:";
+export const ECON_SHOP_PET_VIEW_PREFIX = "econ:shop:petView:";
+export const ECON_SHOP_PET_RENAME_PREFIX = "econ:shop:petRen:";
+export const ECON_MODAL_PET_RENAME_PREFIX = "modal:econ:petName:";
 
 function fmt(n: number): string {
   return n.toLocaleString("ru-RU");
@@ -299,6 +343,50 @@ function netSpendLabel(net: number): string {
   if (net > 0) return `спишется **${fmt(net)}** ₽`;
   if (net < 0) return `вернётся **${fmt(-net)}** ₽`;
   return "без доплаты";
+}
+
+function canAffordNet(rubles: number, net: number): boolean {
+  return net <= 0 || rubles >= net;
+}
+
+function canAffordAnyTrade(rubles: number, nets: number[]): boolean {
+  return nets.some((n) => canAffordNet(rubles, n));
+}
+
+function phoneTradeNets(gid: string, full: number, owned: ReturnType<typeof listOwnedPhonesByOrigin>): number[] {
+  const nets: number[] = [];
+  for (const rec of owned) {
+    const cur = getPhoneDef(rec.id);
+    if (!cur) continue;
+    nets.push(full - Math.floor(inflatedCatalogPhonePrice(gid, cur.id) * PHONE_TRADE_IN_RATE));
+  }
+  return nets;
+}
+
+function carTradeNets(gid: string, full: number, owned: ReturnType<typeof listOwnedCarsByOrigin>): number[] {
+  const nets: number[] = [];
+  for (const rec of owned) {
+    const cur = getCarDef(rec.id);
+    if (!cur) continue;
+    nets.push(full - Math.floor(inflatedCatalogCarPrice(gid, cur.id) * CAR_TRADE_IN_RATE));
+  }
+  return nets;
+}
+
+function aptTradeNets(
+  gid: string,
+  full: number,
+  owned: ReturnType<typeof listOwnedApartmentsByOrigin>,
+  now: number = Date.now(),
+): number[] {
+  const nets: number[] = [];
+  for (const rec of owned) {
+    const cur = getApartmentDef(rec.id);
+    if (!cur) continue;
+    const rate = apartmentTradeInRate(rec.purchasedAtMs, now);
+    nets.push(full - Math.floor(inflatedCatalogApartmentPrice(gid, cur.id) * rate));
+  }
+  return nets;
 }
 
 function formatOwnedList(
@@ -391,9 +479,7 @@ export function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBu
       new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY).setLabel("Лотерея").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(ECON_SHOP_APPEARANCE).setLabel("Оформление").setStyle(ButtonStyle.Secondary),
     ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-    ),
+    shopNavBottomRow(ECON_BUTTON_MENU),
   ];
 }
 
@@ -598,13 +684,14 @@ export function buildShopPlateCarRows(member: GuildMember, carUid: string): Acti
   ];
 }
 
-export function buildShopCarSellConfirmEmbed(member: GuildMember): EmbedBuilder {
+export function buildShopCarSellConfirmEmbed(member: GuildMember, uid?: string): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getCarDef(u.ownedCarId);
+  const rec = uid ? findOwnedCar(u, uid) : listOwnedCars(u)[0];
+  const cur = rec ? getCarDef(rec.id) : getCarDef(u.ownedCarId);
   const refund = cur
     ? Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_SELL_REFUND_RATE)
     : 0;
-  const plate = formatVehiclePlateFromUser(u);
+  const plate = rec ? carPlateParts(rec) : undefined;
   const lines = [
     `Продать **${cur?.label ?? "авто"}**?`,
     `Вернётся **${fmt(refund)}** ₽ (**${tradeInPctLabel(CAR_SELL_REFUND_RATE)}** каталожной цены).`,
@@ -612,17 +699,23 @@ export function buildShopCarSellConfirmEmbed(member: GuildMember): EmbedBuilder 
     "Это **продажа**, не замена на лучшее — авто исчезнет с профиля.",
   ];
   if (plate) {
-    lines.push("", `⚠️ Вместе с авто будет снят госномер **${plate}**. При следующей покупке авто номер нужно оформить **заново**.`);
+    lines.push(
+      "",
+      `Госномер **${formatVehiclePlate(plate)}** уйдёт в неприкрепленные (престиж номера не действует, пока снова не будет на авто).`,
+    );
   }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Подтверждение продажи").setDescription(lines.join("\n"));
 }
 
-export function buildShopCarSellConfirmRows(): ActionRowBuilder<ButtonBuilder>[] {
+export function buildShopCarSellConfirmRows(uid?: string): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_CAR_SELL_CONFIRM).setLabel("Продать").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId(uid ? `${ECON_SHOP_CAR_SELL_OK_PREFIX}${uid}` : ECON_SHOP_CAR_SELL_CONFIRM)
+        .setLabel("Продать")
+        .setStyle(ButtonStyle.Danger),
     ),
-    shopNavBottomRow(ECON_SHOP_CAR_SELL_CANCEL, "Отменить"),
+    shopNavBottomRow(uid ? ECON_SHOP_CAR_SELL : ECON_SHOP_CAR_SELL_CANCEL, "Отменить"),
   ];
 }
 
@@ -654,38 +747,34 @@ export function buildShopPhoneBuyConfirmEmbed(member: GuildMember, pid: string):
   if (owned.length === 0) {
     lines.push("", "Обменять пока **нечего** — можно только купить за полную стоимость.");
   } else {
-    lines.push("", `Обмен своей (зачёт **${tradeInPctLabel(PHONE_TRADE_IN_RATE)}**):`);
+    lines.push("", `Обмен своей (зачёт **${tradeInPctLabel(PHONE_TRADE_IN_RATE)}**): можно сдать **несколько** телефонов, зачёт суммируется.`);
     for (const rec of owned) {
       const cur = getPhoneDef(rec.id);
       if (!cur) continue;
       const credit = Math.floor(inflatedCatalogPhonePrice(gid, cur.id) * PHONE_TRADE_IN_RATE);
       const net = full - credit;
-      const delta = statDeltasOnReplace(cur, defP);
       lines.push(`• **${cur.label}**: ${netSpendLabel(net)} · ${statChangeLabel(cur, defP)}`);
-      void delta;
     }
   }
+  const lack = shopShortageLine(u.rubles, full);
+  if (lack) lines.push("", lack);
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Покупка телефона").setDescription(lines.join("\n"));
 }
 
 export function buildShopPhoneBuyConfirmRows(member: GuildMember, pid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
-  const gid = member.guild.id;
-  const defP = getPhoneDef(pid);
-  const full = defP ? inflatedCatalogPhonePrice(gid, defP.id) : 0;
-  const canTrade = listOwnedPhonesByOrigin(u, origin).length > 0;
+  const hasTrade = listOwnedPhonesByOrigin(u, origin).length > 0;
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_PHONE_FULL_PREFIX}${pid}`)
         .setLabel("Купить за полную стоимость")
-        .setStyle(ButtonStyle.Success)
-        .setDisabled(u.rubles < full),
+        .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_PHONE_TRADE_PREFIX}${pid}`)
         .setLabel("Обменять свою")
         .setStyle(ButtonStyle.Primary)
-        .setDisabled(!canTrade),
+        .setDisabled(!hasTrade),
     ),
     shopNavBottomRow(`${ECON_SHOP_PHONE_BUY_CANCEL_PREFIX}${origin}`, "Назад"),
   ];
@@ -705,7 +794,7 @@ export function buildShopCarBuyConfirmEmbed(member: GuildMember, cid: string): E
   if (owned.length === 0) {
     lines.push("", "Обменять пока **нечего** — можно только купить за полную стоимость.");
   } else {
-    lines.push("", `Обмен своей (зачёт **${tradeInPctLabel(CAR_TRADE_IN_RATE)}**). Госномер с обмениваемой машины уйдёт в неприкрепленные.`);
+    lines.push("", `Обмен своей (зачёт **${tradeInPctLabel(CAR_TRADE_IN_RATE)}**). Можно сдать **несколько** авто; госномера уйдут в неприкрепленные.`);
     for (const rec of owned) {
       const cur = getCarDef(rec.id);
       if (!cur) continue;
@@ -713,27 +802,25 @@ export function buildShopCarBuyConfirmEmbed(member: GuildMember, cid: string): E
       lines.push(`• **${cur.label}**: ${netSpendLabel(full - credit)} · ${statChangeLabel(cur, defC)}`);
     }
   }
+  const lack = shopShortageLine(u.rubles, full);
+  if (lack) lines.push("", lack);
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Покупка авто").setDescription(lines.join("\n"));
 }
 
 export function buildShopCarBuyConfirmRows(member: GuildMember, cid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
-  const gid = member.guild.id;
-  const defC = getCarDef(cid);
-  const full = defC ? inflatedCatalogCarPrice(gid, defC.id) : 0;
-  const canTrade = listOwnedCarsByOrigin(u, origin).length > 0;
+  const hasTrade = listOwnedCarsByOrigin(u, origin).length > 0;
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_CAR_FULL_PREFIX}${cid}`)
         .setLabel("Купить за полную стоимость")
-        .setStyle(ButtonStyle.Success)
-        .setDisabled(u.rubles < full),
+        .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_CAR_TRADE_PREFIX}${cid}`)
         .setLabel("Обменять свою")
         .setStyle(ButtonStyle.Primary)
-        .setDisabled(!canTrade),
+        .setDisabled(!hasTrade),
     ),
     shopNavBottomRow(`${ECON_SHOP_CAR_BUY_CANCEL_PREFIX}${origin}`, "Назад"),
   ];
@@ -760,7 +847,7 @@ export function buildShopApartmentBuyConfirmEmbed(member: GuildMember, aid: stri
   if (owned.length === 0) {
     lines.push("", "Обменять пока **нечего** — можно только купить за полную стоимость.");
   } else {
-    lines.push("", "Обмен своей (зачёт зависит от срока владения):");
+    lines.push("", "Обмен своей (зачёт зависит от срока владения). Можно сдать **несколько** квартир, зачёт суммируется.");
     for (const rec of owned) {
       const cur = getApartmentDef(rec.id);
       if (!cur) continue;
@@ -769,29 +856,25 @@ export function buildShopApartmentBuyConfirmEmbed(member: GuildMember, aid: stri
       lines.push(`• **${cur.label}**: ${netSpendLabel(full - credit)} · ${statChangeLabel(cur, defA)} · зачёт **${tradeInPctLabel(rate)}**`);
     }
   }
+  const lack = shopShortageLine(u.rubles + (defA.origin === "soviet" && (u.housingKind ?? "none") === "rent" ? housingRentUnusedRefundRub(u, now, gid) : 0), full);
+  if (lack) lines.push("", lack);
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Покупка жилья").setDescription(lines.join("\n"));
 }
 
 export function buildShopApartmentBuyConfirmRows(member: GuildMember, aid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
-  const gid = member.guild.id;
-  const defA = getApartmentDef(aid);
-  const full = defA ? inflatedCatalogApartmentPrice(gid, defA.id) : 0;
-  const rentRefund =
-    defA?.origin === "soviet" && (u.housingKind ?? "none") === "rent" ? housingRentUnusedRefundRub(u, Date.now(), gid) : 0;
-  const canTrade = listOwnedApartmentsByOrigin(u, origin).length > 0;
+  const hasTrade = listOwnedApartmentsByOrigin(u, origin).length > 0;
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_APT_FULL_PREFIX}${aid}`)
         .setLabel("Купить за полную стоимость")
-        .setStyle(ButtonStyle.Success)
-        .setDisabled(u.rubles + rentRefund < full),
+        .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_APT_TRADE_PREFIX}${aid}`)
         .setLabel("Обменять свою")
         .setStyle(ButtonStyle.Primary)
-        .setDisabled(!canTrade),
+        .setDisabled(!hasTrade),
     ),
     shopNavBottomRow(`${ECON_SHOP_APT_BUY_CANCEL_PREFIX}${origin}`, "Назад"),
   ];
@@ -804,12 +887,35 @@ export function buildShopPhoneTradePickEmbed(member: GuildMember, pid: string): 
   const gid = member.guild.id;
   const full = inflatedCatalogPhonePrice(gid, defP.id);
   const owned = listOwnedPhonesByOrigin(u, defP.origin);
-  const lines = [`Обменять на **${defP.label}** (полная цена **${fmt(full)}** ₽). Выберите свой телефон:`, ""];
-  for (const rec of owned) {
-    const cur = getPhoneDef(rec.id);
-    if (!cur) continue;
-    const credit = Math.floor(inflatedCatalogPhonePrice(gid, cur.id) * PHONE_TRADE_IN_RATE);
-    lines.push(`• **${cur.label}**: ${netSpendLabel(full - credit)}`);
+  const selected = new Set(selectedShopTradeUids(gid, member.id, "phone", pid));
+  let credit = 0;
+  const lines = [
+    `Обмен на **${defP.label}**. Полная цена **${fmt(full)}** ₽.`,
+    `Зачёт **${tradeInPctLabel(PHONE_TRADE_IN_RATE)}**. Можно отметить **несколько** телефонов — зачёт суммируется.`,
+    `Баланс: **${fmt(u.rubles)}** ₽`,
+    "",
+  ];
+  if (owned.length === 0) {
+    lines.push("Обменивать **нечего**.");
+  } else {
+    for (const rec of owned) {
+      const cur = getPhoneDef(rec.id);
+      if (!cur) continue;
+      const itemCredit = Math.floor(inflatedCatalogPhonePrice(gid, cur.id) * PHONE_TRADE_IN_RATE);
+      const mark = selected.has(rec.uid) ? "☑" : "☐";
+      lines.push(`${mark} **${cur.label}** — зачёт **${fmt(itemCredit)}** ₽`);
+      if (selected.has(rec.uid)) credit += itemCredit;
+    }
+    lines.push("");
+    if (selected.size === 0) {
+      lines.push("Отметьте один или несколько телефонов.");
+    } else {
+      const net = full - credit;
+      lines.push(`Итого зачёт: **${fmt(credit)}** ₽`);
+      lines.push(`Итог: ${netSpendLabel(net)}`);
+      const lack = shopShortageLine(u.rubles, Math.max(0, net));
+      if (lack) lines.push(lack);
+    }
   }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Обмен телефона").setDescription(lines.join("\n"));
 }
@@ -817,26 +923,46 @@ export function buildShopPhoneTradePickEmbed(member: GuildMember, pid: string): 
 export function buildShopPhoneTradePickRows(member: GuildMember, pid: string): ActionRowBuilder<ButtonBuilder>[] {
   const defP = getPhoneDef(pid);
   const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
   const owned = defP ? listOwnedPhonesByOrigin(u, defP.origin) : [];
+  const selected = new Set(selectedShopTradeUids(gid, member.id, "phone", pid));
+  const full = defP ? inflatedCatalogPhonePrice(gid, defP.id) : 0;
+  let credit = 0;
+  for (const rec of owned) {
+    if (!selected.has(rec.uid)) continue;
+    const cur = getPhoneDef(rec.id);
+    if (!cur) continue;
+    credit += Math.floor(inflatedCatalogPhonePrice(gid, cur.id) * PHONE_TRADE_IN_RATE);
+  }
+  const net = full - credit;
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
-    const slice = owned.slice(i, i + 2);
+  for (let i = 0; i < Math.min(owned.length, 12); i += 4) {
+    const slice = owned.slice(i, i + 4);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((rec) => {
           const cur = getPhoneDef(rec.id);
-          const full = defP ? inflatedCatalogPhonePrice(member.guild.id, defP.id) : 0;
-          const credit = cur ? Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_TRADE_IN_RATE) : 0;
-          const net = full - credit;
+          const on = selected.has(rec.uid);
+          const name = cur?.label ?? "телефон";
+          const label = `${on ? "✓ " : ""}${name}`.slice(0, 80);
           return new ButtonBuilder()
-            .setCustomId(`${ECON_SHOP_PHONE_TRADE_OK_PREFIX}${pid}:${rec.uid}`)
-            .setLabel(shopItemButtonLabel(cur?.label ?? "телефон", Math.max(0, net)))
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(net > 0 && u.rubles < net);
+            .setCustomId(`${ECON_SHOP_PHONE_TRADE_TG_PREFIX}${pid}:${rec.uid}`)
+            .setLabel(label)
+            .setStyle(on ? ButtonStyle.Primary : ButtonStyle.Secondary);
         }),
       ),
     );
   }
+  const canConfirm = selected.size > 0 && (net <= 0 || u.rubles >= net);
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_PHONE_TRADE_GO_PREFIX}${pid}`)
+        .setLabel(tradeConfirmLabel(net, selected.size).slice(0, 80))
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(!canConfirm),
+    ),
+  );
   rows.push(shopNavBottomRow(`${ECON_SHOP_PHONE_BUY_PREFIX}${pid}`, "Назад"));
   return rows;
 }
@@ -848,16 +974,35 @@ export function buildShopCarTradePickEmbed(member: GuildMember, cid: string): Em
   const gid = member.guild.id;
   const full = inflatedCatalogCarPrice(gid, defC.id);
   const owned = listOwnedCarsByOrigin(u, defC.origin);
+  const selected = new Set(selectedShopTradeUids(gid, member.id, "car", cid));
+  let credit = 0;
   const lines = [
-    `Обменять на **${defC.label}** (полная цена **${fmt(full)}** ₽).`,
-    "Госномер с обмениваемой машины уйдёт в неприкрепленные.",
+    `Обмен на **${defC.label}**. Полная цена **${fmt(full)}** ₽.`,
+    `Зачёт **${tradeInPctLabel(CAR_TRADE_IN_RATE)}**. Можно отметить **несколько** авто. Госномера сданных машин уйдут в неприкрепленные.`,
+    `Баланс: **${fmt(u.rubles)}** ₽`,
     "",
   ];
-  for (const rec of owned) {
-    const cur = getCarDef(rec.id);
-    if (!cur) continue;
-    const credit = Math.floor(inflatedCatalogCarPrice(gid, cur.id) * CAR_TRADE_IN_RATE);
-    lines.push(`• **${cur.label}**: ${netSpendLabel(full - credit)}`);
+  if (owned.length === 0) {
+    lines.push("Обменивать **нечего**.");
+  } else {
+    for (const rec of owned) {
+      const cur = getCarDef(rec.id);
+      if (!cur) continue;
+      const itemCredit = Math.floor(inflatedCatalogCarPrice(gid, cur.id) * CAR_TRADE_IN_RATE);
+      const mark = selected.has(rec.uid) ? "☑" : "☐";
+      lines.push(`${mark} ${formatCarWithPlateLine(rec)} — зачёт **${fmt(itemCredit)}** ₽`);
+      if (selected.has(rec.uid)) credit += itemCredit;
+    }
+    lines.push("");
+    if (selected.size === 0) {
+      lines.push("Отметьте одно или несколько авто.");
+    } else {
+      const net = full - credit;
+      lines.push(`Итого зачёт: **${fmt(credit)}** ₽`);
+      lines.push(`Итог: ${netSpendLabel(net)}`);
+      const lack = shopShortageLine(u.rubles, Math.max(0, net));
+      if (lack) lines.push(lack);
+    }
   }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Обмен авто").setDescription(lines.join("\n"));
 }
@@ -865,26 +1010,45 @@ export function buildShopCarTradePickEmbed(member: GuildMember, cid: string): Em
 export function buildShopCarTradePickRows(member: GuildMember, cid: string): ActionRowBuilder<ButtonBuilder>[] {
   const defC = getCarDef(cid);
   const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
   const owned = defC ? listOwnedCarsByOrigin(u, defC.origin) : [];
+  const selected = new Set(selectedShopTradeUids(gid, member.id, "car", cid));
+  const full = defC ? inflatedCatalogCarPrice(gid, defC.id) : 0;
+  let credit = 0;
+  for (const rec of owned) {
+    if (!selected.has(rec.uid)) continue;
+    const cur = getCarDef(rec.id);
+    if (!cur) continue;
+    credit += Math.floor(inflatedCatalogCarPrice(gid, cur.id) * CAR_TRADE_IN_RATE);
+  }
+  const net = full - credit;
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
-    const slice = owned.slice(i, i + 2);
+  for (let i = 0; i < Math.min(owned.length, 12); i += 4) {
+    const slice = owned.slice(i, i + 4);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((rec) => {
-          const cur = getCarDef(rec.id);
-          const full = defC ? inflatedCatalogCarPrice(member.guild.id, defC.id) : 0;
-          const credit = cur ? Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_TRADE_IN_RATE) : 0;
-          const net = full - credit;
+          const on = selected.has(rec.uid);
+          const name = shortCarLabel(rec);
+          const label = `${on ? "✓ " : ""}${name}`.slice(0, 80);
           return new ButtonBuilder()
-            .setCustomId(`${ECON_SHOP_CAR_TRADE_OK_PREFIX}${cid}:${rec.uid}`)
-            .setLabel(shopItemButtonLabel(cur?.label ?? "авто", Math.max(0, net)))
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(net > 0 && u.rubles < net);
+            .setCustomId(`${ECON_SHOP_CAR_TRADE_TG_PREFIX}${cid}:${rec.uid}`)
+            .setLabel(label)
+            .setStyle(on ? ButtonStyle.Primary : ButtonStyle.Secondary);
         }),
       ),
     );
   }
+  const canConfirm = selected.size > 0 && (net <= 0 || u.rubles >= net);
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_CAR_TRADE_GO_PREFIX}${cid}`)
+        .setLabel(tradeConfirmLabel(net, selected.size).slice(0, 80))
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(!canConfirm),
+    ),
+  );
   rows.push(shopNavBottomRow(`${ECON_SHOP_CAR_BUY_PREFIX}${cid}`, "Назад"));
   return rows;
 }
@@ -897,13 +1061,36 @@ export function buildShopAptTradePickEmbed(member: GuildMember, aid: string): Em
   const now = Date.now();
   const full = inflatedCatalogApartmentPrice(gid, defA.id);
   const owned = listOwnedApartmentsByOrigin(u, defA.origin);
-  const lines = [`Обменять на **${defA.label}** (полная цена **${fmt(full)}** ₽).`, ""];
-  for (const rec of owned) {
-    const cur = getApartmentDef(rec.id);
-    if (!cur) continue;
-    const rate = apartmentTradeInRate(rec.purchasedAtMs, now);
-    const credit = Math.floor(inflatedCatalogApartmentPrice(gid, cur.id) * rate);
-    lines.push(`• **${cur.label}**: ${netSpendLabel(full - credit)} · зачёт **${tradeInPctLabel(rate)}**`);
+  const selected = new Set(selectedShopTradeUids(gid, member.id, "apt", aid));
+  let credit = 0;
+  const lines = [
+    `Обмен на **${defA.label}**. Полная цена **${fmt(full)}** ₽.`,
+    "Можно отметить **несколько** квартир той же ветки. Зачёт зависит от срока владения и суммируется.",
+    `Баланс: **${fmt(u.rubles)}** ₽`,
+    "",
+  ];
+  if (owned.length === 0) {
+    lines.push("Обменивать **нечего**.");
+  } else {
+    for (const rec of owned) {
+      const cur = getApartmentDef(rec.id);
+      if (!cur) continue;
+      const rate = apartmentTradeInRate(rec.purchasedAtMs, now);
+      const itemCredit = Math.floor(inflatedCatalogApartmentPrice(gid, cur.id) * rate);
+      const mark = selected.has(rec.uid) ? "☑" : "☐";
+      lines.push(`${mark} **${cur.label}** — зачёт **${fmt(itemCredit)}** ₽ (**${tradeInPctLabel(rate)}**)`);
+      if (selected.has(rec.uid)) credit += itemCredit;
+    }
+    lines.push("");
+    if (selected.size === 0) {
+      lines.push("Отметьте одно или несколько жилищ.");
+    } else {
+      const net = full - credit;
+      lines.push(`Итого зачёт: **${fmt(credit)}** ₽`);
+      lines.push(`Итог: ${netSpendLabel(net)}`);
+      const lack = shopShortageLine(u.rubles, Math.max(0, net));
+      if (lack) lines.push(lack);
+    }
   }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Обмен жилья").setDescription(lines.join("\n"));
 }
@@ -911,28 +1098,48 @@ export function buildShopAptTradePickEmbed(member: GuildMember, aid: string): Em
 export function buildShopAptTradePickRows(member: GuildMember, aid: string): ActionRowBuilder<ButtonBuilder>[] {
   const defA = getApartmentDef(aid);
   const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
   const now = Date.now();
   const owned = defA ? listOwnedApartmentsByOrigin(u, defA.origin) : [];
+  const selected = new Set(selectedShopTradeUids(gid, member.id, "apt", aid));
+  const full = defA ? inflatedCatalogApartmentPrice(gid, defA.id) : 0;
+  let credit = 0;
+  for (const rec of owned) {
+    if (!selected.has(rec.uid)) continue;
+    const cur = getApartmentDef(rec.id);
+    if (!cur) continue;
+    const rate = apartmentTradeInRate(rec.purchasedAtMs, now);
+    credit += Math.floor(inflatedCatalogApartmentPrice(gid, cur.id) * rate);
+  }
+  const net = full - credit;
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
-    const slice = owned.slice(i, i + 2);
+  for (let i = 0; i < Math.min(owned.length, 12); i += 4) {
+    const slice = owned.slice(i, i + 4);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((rec) => {
           const cur = getApartmentDef(rec.id);
-          const full = defA ? inflatedCatalogApartmentPrice(member.guild.id, defA.id) : 0;
-          const rate = apartmentTradeInRate(rec.purchasedAtMs, now);
-          const credit = cur ? Math.floor(inflatedCatalogApartmentPrice(member.guild.id, cur.id) * rate) : 0;
-          const net = full - credit;
+          const on = selected.has(rec.uid);
+          const name = apartmentShopShortLabel(cur?.label ?? "жильё");
+          const label = `${on ? "✓ " : ""}${name}`.slice(0, 80);
           return new ButtonBuilder()
-            .setCustomId(`${ECON_SHOP_APT_TRADE_OK_PREFIX}${aid}:${rec.uid}`)
-            .setLabel(shopItemButtonLabel(apartmentShopShortLabel(cur?.label ?? "жильё"), Math.max(0, net)))
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(net > 0 && u.rubles < net);
+            .setCustomId(`${ECON_SHOP_APT_TRADE_TG_PREFIX}${aid}:${rec.uid}`)
+            .setLabel(label)
+            .setStyle(on ? ButtonStyle.Primary : ButtonStyle.Secondary);
         }),
       ),
     );
   }
+  const canConfirm = selected.size > 0 && (net <= 0 || u.rubles >= net);
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_APT_TRADE_GO_PREFIX}${aid}`)
+        .setLabel(tradeConfirmLabel(net, selected.size).slice(0, 80))
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(!canConfirm),
+    ),
+  );
   rows.push(shopNavBottomRow(`${ECON_SHOP_APT_BUY_PREFIX}${aid}`, "Назад"));
   return rows;
 }
@@ -1128,9 +1335,10 @@ export function buildShopPlateDetachConfirmRows(carUid: string): ActionRowBuilde
   ];
 }
 
-export function buildShopPhoneSellConfirmEmbed(member: GuildMember): EmbedBuilder {
+export function buildShopPhoneSellConfirmEmbed(member: GuildMember, uid?: string): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPhoneDef(u.phoneModelId);
+  const rec = uid ? findOwnedPhone(u, uid) : listOwnedPhones(u)[0];
+  const cur = rec ? getPhoneDef(rec.id) : getPhoneDef(u.phoneModelId);
   const refund = cur
     ? Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_SELL_REFUND_RATE)
     : 0;
@@ -1147,19 +1355,27 @@ export function buildShopPhoneSellConfirmEmbed(member: GuildMember): EmbedBuilde
     );
 }
 
-export function buildShopPhoneSellConfirmRows(origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+export function buildShopPhoneSellConfirmRows(origin: CatalogOrigin, uid?: string): ActionRowBuilder<ButtonBuilder>[] {
   return buildShopConfirmRows(
-    ECON_SHOP_PHONE_SELL_CONFIRM,
+    uid ? `${ECON_SHOP_PHONE_SELL_OK_PREFIX}${uid}` : ECON_SHOP_PHONE_SELL_CONFIRM,
     "Продать",
     ButtonStyle.Danger,
-    `${ECON_SHOP_PHONE_SELL_CANCEL}:${origin}`,
+    uid ? ECON_SHOP_PHONE_SELL : `${ECON_SHOP_PHONE_SELL_CANCEL}:${origin}`,
   );
 }
 
-export function buildShopApartmentSellConfirmEmbed(member: GuildMember, origin: "soviet" | "foreign"): EmbedBuilder {
+export function buildShopApartmentSellConfirmEmbed(member: GuildMember, origin: "soviet" | "foreign", uid?: string): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur =
-    origin === "soviet" ? getApartmentDef(u.ownedApartmentId) : getApartmentDef(u.ownedForeignApartmentId);
+  const rec = uid
+    ? findOwnedApartment(u, uid)
+    : origin === "soviet"
+      ? listOwnedApartmentsByOrigin(u, "soviet")[0]
+      : listOwnedApartmentsByOrigin(u, "foreign")[0];
+  const cur = rec
+    ? getApartmentDef(rec.id)
+    : origin === "soviet"
+      ? getApartmentDef(u.ownedApartmentId)
+      : getApartmentDef(u.ownedForeignApartmentId);
   const refund = cur
     ? Math.floor(inflatedCatalogApartmentPrice(member.guild.id, cur.id) * APARTMENT_SELL_REFUND_RATE)
     : 0;
@@ -1174,6 +1390,15 @@ export function buildShopApartmentSellConfirmEmbed(member: GuildMember, origin: 
         "Это **продажа**, не переезд на лучшее — жильё исчезнет с профиля.",
       ].join("\n"),
     );
+}
+
+export function buildShopAptUidSellConfirmRows(origin: CatalogOrigin, uid: string): ActionRowBuilder<ButtonBuilder>[] {
+  return buildShopConfirmRows(
+    `${ECON_SHOP_APT_SELL_OK_PREFIX}${uid}`,
+    "Продать",
+    ButtonStyle.Danger,
+    origin === "soviet" ? ECON_SHOP_APT_SELL_SOVIET : ECON_SHOP_APT_SELL_FOREIGN,
+  );
 }
 
 export function buildShopApartmentSellSovietConfirmRows(): ActionRowBuilder<ButtonBuilder>[] {
@@ -1335,10 +1560,12 @@ export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigi
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((p) => {
           const price = inflatedCatalogPhonePrice(member.guild.id, p.id);
+          const canTrade = listOwnedPhonesByOrigin(u, origin).length > 0;
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_PHONE_BUY_PREFIX}${p.id}`)
             .setLabel(shopItemButtonLabel(p.label, price))
-            .setStyle(ButtonStyle.Secondary);
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(u.rubles < price && !canTrade);
         }),
       ),
     );
@@ -1400,10 +1627,12 @@ export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin)
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((c) => {
           const price = inflatedCatalogCarPrice(member.guild.id, c.id);
+          const canTrade = listOwnedCarsByOrigin(u, origin).length > 0;
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_CAR_BUY_PREFIX}${c.id}`)
             .setLabel(shopItemButtonLabel(c.label, price))
-            .setStyle(ButtonStyle.Secondary);
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(u.rubles < price && !canTrade);
         }),
       ),
     );
@@ -1485,10 +1714,16 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((a) => {
           const price = inflatedCatalogApartmentPrice(member.guild.id, a.id);
+          const rentRefund =
+            a.origin === "soviet" && (u.housingKind ?? "none") === "rent"
+              ? housingRentUnusedRefundRub(u, Date.now(), member.guild.id)
+              : 0;
+          const canTrade = listOwnedApartmentsByOrigin(u, origin).length > 0;
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_APT_BUY_PREFIX}${a.id}`)
             .setLabel(shopItemButtonLabel(apartmentShopShortLabel(a.label), price))
-            .setStyle(ButtonStyle.Secondary);
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(u.rubles + rentRefund < price && !canTrade);
         }),
       ),
     );
@@ -1499,21 +1734,49 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
 
 export function buildShopAnimalsEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPetDef(u.ownedPetId);
+  const pets = listOwnedPets(u);
+  const lines = [
+    `Баланс: **${fmt(u.rubles)}** ₽`,
+    pets.length
+      ? `Свои: ${pets.map((p) => formatOwnedPetLine(p)).join("; ")}`
+      : "Свои: **нет**",
+    "Можно держать **несколько разных типов** (по одному каждого). Покупка всегда за **полную** цену.",
+    "Уход в **00:00 МСК** — ₽ и СР с каждого питомца.",
+  ];
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Животные").setDescription(lines.join("\n"));
+}
+
+export function buildShopAnimalsRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const hasPets = listOwnedPets(getEconomyUser(member.guild.id, member.id)).length > 0;
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_ANIMALS_BUY).setLabel("Купить").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId(ECON_SHOP_ANIMALS_OWNED)
+        .setLabel("Свои")
+        .setStyle(ButtonStyle.Secondary)
+        .setDisabled(!hasPets),
+    ),
+    shopNavBottomRow(ECON_SHOP_HUB),
+  ];
+}
+
+export function buildShopAnimalsBuyEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
   const catalog = PET_MODELS.map((p) => {
-    const cost = scaledShopPrice(member.guild.id, petPurchaseCostRub(cur, p));
+    const cost = scaledShopPrice(member.guild.id, p.purchaseRub);
     const ps = scaledEconomyPsIncome(member.guild.id, p.dailyPsRub);
-    return `• **${p.label}** — **${fmt(cost)}** ₽ · **+${fmt(ps)} СР/сут**`;
+    const owned = userOwnsPetType(u, p.id) ? " · **уже есть**" : "";
+    return `• **${p.label}** — **${fmt(cost)}** ₽ · **+${fmt(ps)} СР/сут**${owned}`;
   });
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Животные")
+    .setTitle("Животные · купить")
     .setDescription(
       [
         `Баланс: **${fmt(u.rubles)}** ₽`,
-        cur ? `Питомец: **${cur.label}**` : "Питомец: **нет**",
-        shopUpgradeTradeInLine(PET_TRADE_IN_RATE),
-        "Уход в **00:00 МСК** — ₽ и СР. Нужна **своя** квартира (не аренда).",
+        "На кнопках — **полная** цена. Один питомец каждого типа.",
+        "Уход в **00:00 МСК** — ₽ и СР. Части питомцев нужно жильё или телефон.",
         "",
         ...catalog,
       ].join("\n"),
@@ -1521,10 +1784,8 @@ export function buildShopAnimalsEmbed(member: GuildMember): EmbedBuilder {
 }
 
 export function buildShopAnimalsDetailsEmbed(member: GuildMember): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPetDef(u.ownedPetId);
   const lines = PET_MODELS.map((p) => {
-    const cost = scaledShopPrice(member.guild.id, petPurchaseCostRub(cur, p));
+    const cost = scaledShopPrice(member.guild.id, p.purchaseRub);
     const upkeep = scaledEconomyExpense(member.guild.id, p.dailyUpkeepRub);
     const ps = scaledEconomyPsIncome(member.guild.id, p.dailyPsRub);
     return [
@@ -1534,20 +1795,19 @@ export function buildShopAnimalsDetailsEmbed(member: GuildMember): EmbedBuilder 
   });
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Животные · каталог")
-    .setDescription(["Цена покупки учитывает зачёт текущего питомца.", "", ...lines].join("\n"));
+    .setTitle("Животные · условия")
+    .setDescription(["Полная цена, без зачёта. Можно держать несколько **разных** типов.", "", ...lines].join("\n"));
 }
 
-export function buildShopAnimalsRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+export function buildShopAnimalsBuyRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPetDef(u.ownedPetId);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   for (let i = 0; i < PET_MODELS.length; i += 2) {
     const slice = PET_MODELS.slice(i, i + 2);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((p) => {
-          const cost = scaledShopPrice(member.guild.id, petPurchaseCostRub(cur, p));
+          const cost = scaledShopPrice(member.guild.id, p.purchaseRub);
           const ps = scaledEconomyPsIncome(member.guild.id, p.dailyPsRub);
           const block = petOwnershipBlockReason(u, p);
           const base = shopItemButtonLabel(p.label, cost);
@@ -1556,13 +1816,72 @@ export function buildShopAnimalsRows(member: GuildMember): ActionRowBuilder<Butt
             .setCustomId(`${ECON_SHOP_PET_BUY_PREFIX}${p.id}`)
             .setLabel(withPs.length > 80 ? base : withPs)
             .setStyle(ButtonStyle.Secondary)
-            .setDisabled(Boolean(block) || u.rubles < cost || cur?.id === p.id);
+            .setDisabled(Boolean(block));
         }),
       ),
     );
   }
-  rows.push(shopDetailsNavBottomRow(ECON_SHOP_ANIMALS_DETAILS, ECON_SHOP_HUB));
+  rows.push(shopDetailsNavBottomRow(ECON_SHOP_ANIMALS_DETAILS, ECON_SHOP_ANIMALS));
   return rows;
+}
+
+export function buildShopAnimalsOwnedEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const pets = listOwnedPets(u);
+  const lines = [
+    pets.length
+      ? pets.map((p) => `• ${formatOwnedPetLine(p)}`).join("\n")
+      : "Пока **нет** питомцев. Купите в разделе **Купить**.",
+  ];
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Животные · свои").setDescription(lines.join("\n"));
+}
+
+export function buildShopAnimalsOwnedRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const pets = listOwnedPets(getEconomyUser(member.guild.id, member.id));
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < Math.min(pets.length, 12); i += 4) {
+    const slice = pets.slice(i, i + 4);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((p) =>
+          new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_PET_VIEW_PREFIX}${p.uid}`)
+            .setLabel(shortPetButtonLabel(p))
+            .setStyle(ButtonStyle.Secondary),
+        ),
+      ),
+    );
+  }
+  rows.push(shopNavBottomRow(ECON_SHOP_ANIMALS));
+  return rows;
+}
+
+export function buildShopPetViewEmbed(member: GuildMember, uid: string): EmbedBuilder | undefined {
+  const rec = findOwnedPet(getEconomyUser(member.guild.id, member.id), uid);
+  if (!rec) return undefined;
+  const def = getPetDef(rec.id);
+  const gid = member.guild.id;
+  const upkeep = def ? scaledEconomyExpense(gid, def.dailyUpkeepRub) : 0;
+  const ps = def ? scaledEconomyPsIncome(gid, def.dailyPsRub) : 0;
+  const lines = [
+    `Тип: **${def?.label ?? rec.id}**`,
+    `Имя: **${rec.name}**`,
+    `Содержание: **${fmt(upkeep)}** ₽/сут · **+${fmt(ps)} СР/сут**`,
+  ];
+  if (rec.pausedNoFunds) lines.push("Уход **приостановлен**: не хватило ₽ в полночь МСК.");
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Питомец").setDescription(lines.join("\n"));
+}
+
+export function buildShopPetViewRows(uid: string): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_PET_RENAME_PREFIX}${uid}`)
+        .setLabel("Изменить имя")
+        .setStyle(ButtonStyle.Primary),
+    ),
+    shopNavBottomRow(ECON_SHOP_ANIMALS_OWNED),
+  ];
 }
 
 export function applyRentPlanPurchase(member: GuildMember, plan: HousingRentPlan): { ok: true } | { ok: false; reply: string } {
@@ -1570,7 +1889,7 @@ export function applyRentPlanPurchase(member: GuildMember, plan: HousingRentPlan
   if ((u.housingKind ?? "none") === "owned") return { ok: false, reply: "У вас **своя советская квартира** — аренда недоступна." };
   const price = inflatedHousingRentPrice(member.guild.id, plan);
   const periodMs = housingRentPlanPeriodMs(plan);
-  if (u.rubles < price) return { ok: false, reply: `Нужно **${fmt(price)}** ₽.` };
+  if (u.rubles < price) return { ok: false, reply: shopShortageLine(u.rubles, price) ?? `Не хватает ₽.` };
   const now = Date.now();
   const hk = u.housingKind ?? "none";
   const baseEnd = hk === "rent" && u.housingRentNextDueMs && u.housingRentNextDueMs > now ? u.housingRentNextDueMs : now;
@@ -1594,7 +1913,7 @@ export function applyRentPlanPurchase(member: GuildMember, plan: HousingRentPlan
       courierBikeUntilMs: undefined,
     };
   });
-  if (!applied) return { ok: false, reply: `Нужно **${fmt(price)}** ₽.` };
+  if (!applied) return { ok: false, reply: shopShortageLine(getEconomyUser(member.guild.id, member.id).rubles, price) ?? `Не хватает ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, price);
   return { ok: true };
 }
@@ -1605,23 +1924,41 @@ export function purchasePet(member: GuildMember, petId: string): { ok: true } | 
   const u = getEconomyUser(member.guild.id, member.id);
   const block = petOwnershipBlockReason(u, def);
   if (block) return { ok: false, reply: block };
-  const cur = getPetDef(u.ownedPetId);
-  const cost = scaledShopPrice(member.guild.id, petPurchaseCostRub(cur, def));
-  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  const cost = scaledShopPrice(member.guild.id, def.purchaseRub);
+  if (u.rubles < cost) return { ok: false, reply: shopShortageLine(u.rubles, cost) ?? "Не хватает ₽." };
   let applied = false;
   updateEconomyUser(member.guild.id, member.id, (curU) => {
     if (curU.rubles < cost) return curU;
+    if (listOwnedPets(curU).some((p) => p.id === def.id)) return curU;
     applied = true;
     return {
       ...curU,
       rubles: curU.rubles - cost,
-      ownedPetId: def.id,
-      petPausedNoFunds: false,
+      ownedPets: [...listOwnedPets(curU), { uid: newAssetUid(), id: def.id, name: def.label }],
     };
   });
-  if (!applied) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
+  if (!applied) return { ok: false, reply: shopShortageLine(getEconomyUser(member.guild.id, member.id).rubles, cost) ?? "Не хватает ₽." };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   return { ok: true };
+}
+
+export function renameOwnedPet(
+  member: GuildMember,
+  uid: string,
+  rawName: string,
+): { ok: true; name: string } | { ok: false; reply: string } {
+  const rec = findOwnedPet(getEconomyUser(member.guild.id, member.id), uid);
+  if (!rec) return { ok: false, reply: "Питомец не найден." };
+  const fallback = getPetDef(rec.id)?.label ?? "Питомец";
+  const name = sanitizePetName(rawName, fallback);
+  updateEconomyUser(member.guild.id, member.id, (cur) => {
+    if (!findOwnedPet(cur, uid)) return cur;
+    return {
+      ...cur,
+      ownedPets: listOwnedPets(cur).map((p) => (p.uid === uid ? { ...p, name } : p)),
+    };
+  });
+  return { ok: true, name };
 }
 
 function inflatedSimShopPrice(guildId: string, baseRub: number): number {

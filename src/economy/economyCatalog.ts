@@ -641,9 +641,8 @@ export function petTradeInRub(cur: PetDef | undefined): number {
   return Math.floor(cur.purchaseRub * PET_TRADE_IN_RATE);
 }
 
-export function petPurchaseCostRub(cur: PetDef | undefined, next: PetDef): number {
-  const tradeIn = cur ? petTradeInRub(cur) : 0;
-  return Math.max(0, next.purchaseRub - tradeIn);
+export function petPurchaseCostRub(_cur: PetDef | undefined, next: PetDef): number {
+  return next.purchaseRub;
 }
 
 function sovietAptTierIndex(aptId: string | undefined): number {
@@ -690,12 +689,14 @@ export function petRequirementsLine(pet: PetDef): string {
 export function petOwnershipBlockReason(u: {
   hasPhone?: boolean;
   ownedPhones?: Array<{ id: string }>;
+  ownedPets?: Array<{ id: string }>;
   housingKind?: string;
   ownedApartmentId?: string;
   ownedForeignApartmentId?: string;
   housingForeignKind?: string;
   ownedApartments?: Array<{ id: string }>;
 }, pet: PetDef): string | null {
+  if ((u.ownedPets ?? []).some((p) => p.id === pet.id)) return "Этот тип уже есть.";
   const hasPhone = u.hasPhone === true || (u.ownedPhones ?? []).length > 0;
   if (pet.requiresPhone && !hasPhone) return "Нужен **телефон** (любой).";
 

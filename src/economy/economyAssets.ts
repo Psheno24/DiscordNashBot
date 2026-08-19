@@ -2,12 +2,14 @@ import { randomBytes } from "node:crypto";
 import {
   getApartmentDef,
   getCarDef,
+  getPetDef,
   getPhoneDef,
   migrateCatalogItemId,
   type ApartmentId,
   type CarDef,
   type CarModelId,
   type CatalogOrigin,
+  type PetId,
   type PhoneDef,
   type PhoneModelId,
 } from "./economyCatalog.js";
@@ -39,6 +41,15 @@ export interface OwnedApartmentRecord {
   purchasedAtMs: number;
 }
 
+export interface OwnedPetRecord {
+  uid: string;
+  id: PetId;
+  name: string;
+  pausedNoFunds?: boolean;
+}
+
+export const PET_NAME_MAX = 24;
+
 const UID_RE = /^[a-zA-Z0-9]{2,16}$/;
 
 export function newAssetUid(): string {
@@ -62,6 +73,18 @@ function asCarId(raw: unknown): CarModelId | undefined {
 function asAptId(raw: unknown): ApartmentId | undefined {
   if (typeof raw !== "string") return undefined;
   return getApartmentDef(migrateCatalogItemId(raw))?.id;
+}
+
+function asPetId(raw: unknown): PetId | undefined {
+  if (typeof raw !== "string") return undefined;
+  return getPetDef(raw)?.id;
+}
+
+export function sanitizePetName(raw: string, fallback: string): string {
+  const cleaned = raw.replace(/[\u0000-\u001f]+/g, " ").replace(/\s+/g, " ").trim();
+  const base = cleaned.length > 0 ? cleaned : fallback.trim();
+  const out = (base.length > 0 ? base : "Питомец").slice(0, PET_NAME_MAX);
+  return out;
 }
 
 export function parseStoredPlate(raw: unknown): VehiclePlateParts | undefined {
@@ -129,6 +152,24 @@ function parseApartmentRecords(raw: unknown): OwnedApartmentRecord[] {
   return out;
 }
 
+function parsePetRecords(raw: unknown): OwnedPetRecord[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<PetId>();
+  const out: OwnedPetRecord[] = [];
+  for (let i = 0; i < raw.length; i++) {
+    const rec = raw[i];
+    if (!rec || typeof rec !== "object") continue;
+    const id = asPetId((rec as { id?: unknown }).id);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const def = getPetDef(id);
+    const name = sanitizePetName(String((rec as { name?: unknown }).name ?? ""), def?.label ?? "Питомец");
+    const pausedNoFunds = (rec as { pausedNoFunds?: unknown }).pausedNoFunds === true ? true : undefined;
+    out.push({ uid: asUid((rec as { uid?: unknown }).uid, `legPet${i}`), id, name, pausedNoFunds });
+  }
+  return out;
+}
+
 function plateFromLegacyUser(u: Record<string, unknown>): VehiclePlateParts | undefined {
   const parts: VehiclePlateParts = {
     l1: String(u.vehiclePlateL1 ?? "").toUpperCase(),
@@ -144,6 +185,7 @@ export type NormalizedAssets = {
   ownedCars: OwnedCarRecord[];
   unattachedPlates: UnattachedPlateRecord[];
   ownedApartments: OwnedApartmentRecord[];
+  ownedPets: OwnedPetRecord[];
 };
 
 /** Миграция старых одиночных полей → массивы; повторный вызов идемпотентен. */
@@ -187,11 +229,28 @@ export function normalizeOwnedAssets(raw: unknown): NormalizedAssets {
         return out;
       })();
 
+  const pets: OwnedPetRecord[] = Array.isArray(u.ownedPets)
+    ? parsePetRecords(u.ownedPets)
+    : (() => {
+        const id = asPetId(u.ownedPetId);
+        if (!id) return [];
+        const def = getPetDef(id);
+        return [
+          {
+            uid: "legPet",
+            id,
+            name: def?.label ?? "Питомец",
+            pausedNoFunds: u.petPausedNoFunds === true ? true : undefined,
+          },
+        ];
+      })();
+
   return {
     ownedPhones: phones,
     ownedCars: cars,
     unattachedPlates,
     ownedApartments: apts,
+    ownedPets: pets,
   };
 }
 
@@ -209,6 +268,38 @@ export function listUnattachedPlates(u: EconomyUser): UnattachedPlateRecord[] {
 
 export function listOwnedApartments(u: EconomyUser): OwnedApartmentRecord[] {
   return u.ownedApartments ?? [];
+}
+
+export function listOwnedPets(u: EconomyUser): OwnedPetRecord[] {
+  return u.ownedPets ?? [];
+}
+
+export function findOwnedPet(u: EconomyUser, uid: string): OwnedPetRecord | undefined {
+  return listOwnedPets(u).find((p) => p.uid === uid);
+}
+
+export function userOwnsPetType(u: EconomyUser, petId: string): boolean {
+  return listOwnedPets(u).some((p) => p.id === petId);
+}
+
+export function formatOwnedPetLine(rec: OwnedPetRecord, opts?: { markdown?: boolean }): string {
+  const def = getPetDef(rec.id);
+  const type = def?.label ?? rec.id;
+  const name = rec.name?.trim();
+  const custom = Boolean(name && name !== type);
+  const paused = rec.pausedNoFunds ? (opts?.markdown === false ? " (уход пауза)" : " · уход **приостановлен**") : "";
+  if (opts?.markdown === false) {
+    return `${custom ? `${type} — ${name}` : type}${paused}`;
+  }
+  return `${custom ? `**${type}** — ${name}` : `**${type}**`}${paused}`;
+}
+
+export function shortPetButtonLabel(rec: OwnedPetRecord): string {
+  const def = getPetDef(rec.id);
+  const type = def?.label ?? rec.id;
+  const name = rec.name?.trim();
+  const text = name && name !== type ? `${type} · ${name}` : type;
+  return text.length > 18 ? `${text.slice(0, 16)}…` : text;
 }
 
 export function listOwnedApartmentsByOrigin(u: EconomyUser, origin: CatalogOrigin): OwnedApartmentRecord[] {
