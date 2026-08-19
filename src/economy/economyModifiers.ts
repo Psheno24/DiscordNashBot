@@ -1,15 +1,12 @@
-/** Доля прироста ₽ за смену при log1p(STAT_LOG_REF) очков престижа. */
-const PRESTIGE_SHIFT_BONUS_AT_REF = 0.35;
-/** Доля прироста суточного оклада ИП при log1p(STAT_LOG_REF) престижа (как у смен, иначе престиж сдвигает порог ИП вниз). */
-const PRESTIGE_PASSIVE_BONUS_AT_REF = 0.35;
+import { prestigeIncomeMultFromPoints } from "./prestigeIncome.js";
+
 /** Доля прироста СР с голоса при log1p(STAT_LOG_REF) быта. */
 const DOMESTIC_VOICE_BONUS_AT_REF = 0.45;
 /** Доля прироста СР за смену при log1p(STAT_LOG_REF) быта. */
 const DOMESTIC_SHIFT_BONUS_AT_REF = 0.6;
 
 /**
- * Опорная величина очков в log-формуле: при prestige/domestic = REF бонус ≈ половина от «эталонного» AT_REF.
- * Без потолка по каталогу — новые товары и дорогие покупки усиливают эффект с убывающей отдачей.
+ * Опорная величина в log-формуле быта: при domestic = REF бонус равен константе выше.
  */
 const STAT_LOG_REF = 150_000;
 
@@ -20,14 +17,14 @@ function statLogMultiplier(points: number, ref: number, bonusAtRef: number): num
   return 1 + bonus;
 }
 
-/** Множитель ₽ за смену. При престиже 0 — ровно ×1 (бонуса нет). */
+/** Множитель ₽ за смену и суточный оклад. При престиже 0 — ×1; вершины покупок — ×2. */
 export function prestigeShiftIncomeMult(prestige: number): number {
-  return statLogMultiplier(prestige, STAT_LOG_REF, PRESTIGE_SHIFT_BONUS_AT_REF);
+  return prestigeIncomeMultFromPoints(prestige);
 }
 
-/** Множитель суточного оклада ИП / легального пассива. При престиже 0 — ×1. */
+/** То же, что `prestigeShiftIncomeMult` (оклад офиса / ИП). */
 export function prestigePassiveIncomeMult(prestige: number): number {
-  return statLogMultiplier(prestige, STAT_LOG_REF, PRESTIGE_PASSIVE_BONUS_AT_REF);
+  return prestigeIncomeMultFromPoints(prestige);
 }
 
 /** Множитель СР с голоса. При быте 0 — ×1 (голос даёт базовые СР по зонам минут). */
@@ -40,10 +37,10 @@ export function domesticShiftPsMult(domestic: number): number {
   return statLogMultiplier(domestic, STAT_LOG_REF, DOMESTIC_SHIFT_BONUS_AT_REF);
 }
 
-/** Применить престиж: только при prestige > 0; минусы не усиливаются. */
-export function applyPrestigeToShiftRub(jobTotalRub: number, prestige: number): number {
-  if (jobTotalRub <= 0 || (prestige ?? 0) <= 0) return jobTotalRub;
-  return Math.floor(jobTotalRub * prestigeShiftIncomeMult(prestige));
+/** Применить престиж к ₽: `prestigeIncomeMult` от очков престижа (1 = нет бонуса). */
+export function applyPrestigeToShiftRub(jobTotalRub: number, prestigeIncomeMult: number): number {
+  if (jobTotalRub <= 0 || prestigeIncomeMult <= 1) return jobTotalRub;
+  return Math.floor(jobTotalRub * prestigeIncomeMult);
 }
 
 /** Базовый СР за смену (по тиру работы). */

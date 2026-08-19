@@ -1,4 +1,3 @@
-import { prestigePassiveIncomeMult } from "./economyModifiers.js";
 import { scaleSignedIncome } from "./economyMacro.js";
 import type { EconomyUser, JobId, SkillId } from "./userStore.js";
 import { mskPreviousDayYmd, mskTodayYmd } from "./mskCalendar.js";
@@ -64,12 +63,12 @@ export const JOBS_TIER3: Tier3JobDef[] = [
     baseCooldownMs: 8 * 60 * 60 * 1000,
     basePayoutRub: 0,
     description: [
-      "**ИП** тир-3: доход **суточным окладом** (пассивно) от **баланса бизнеса** (до **500 000 000** ₽). Отдача от капитала **затухает** (не линейный %): около **7 млн** на балансе уже чуть выгоднее полного гринда офиса, дальше сильнее **ранг, престиж и эффективность**.",
+      "**ИП** тир-3: доход **суточным окладом** (пассивно) **только от баланса бизнеса** (до **500 000 000** ₽). Без капитала оклад **0**. Около **7 млн** чуть выгоднее полного гринда офиса. **Престиж** линейно от очков (до **×2** при полном наборе лучших покупок) — тот же множитель, что у офиса.",
       "**Реклама** (риск/доход с баланса бизнеса, лимит суммы растёт с рангом), **персонал** (КД **7 дн.**), **контроль** (КД **сутки**). Пополнение и вывод баланса бизнеса — кнопками **в бизнес** / **на счёт**.",
     ].join("\n"),
     reqSkills: { communication: 55, logistics: 52, discipline: 60 },
     archetype: "ip",
-    passiveBaseRub: 45_000,
+    passiveBaseRub: 0,
   },
 ];
 
@@ -95,13 +94,12 @@ export const SOLE_PROP_CAP_MAX = 500_000_000;
 export const SOLE_PROP_RISK_MIN = -2;
 export const SOLE_PROP_RISK_MAX = 2;
 /**
- * Вклад капитала в суточный оклад: K × ln(1 + cap/REF), не линейный %.
- * Престиж ИП — тот же log-множитель, что у смен (0,35 @ REF), иначе 90к престижа
- * опускали порог «лучше 6 смен офиса» с ~7 млн до ~3,5 млн.
- * При 7,2 млн: чуть выше полного гринда офиса и без престижа, и при ~90к.
+ * Оклад ИП только от капитала: K × ln(1 + cap/REF). Без капитала — 0 (фиксированной базы нет).
+ * REF 2 млн: малый капитал не обгоняет «слегка активный» офис (1–2 смены).
+ * При 7,2 млн сырой оклад ≈ полный гринд офиса ранга 2 (6 смен); престиж множит обе стороны одинаково.
  */
-export const SOLE_PROP_CAPITAL_REF_RUB = 500_000;
-export const SOLE_PROP_CAPITAL_LOG_K = 93_000;
+export const SOLE_PROP_CAPITAL_REF_RUB = 2_000_000;
+export const SOLE_PROP_CAPITAL_LOG_K = 203_000;
 
 export function solePropCapitalDailyRub(capitalRub: number): number {
   const cap = Math.max(0, Math.min(SOLE_PROP_CAP_MAX, capitalRub));
@@ -149,7 +147,7 @@ function passiveMultFromRank(rank: number): number {
 
 export type Tier3PassiveRubResult = {
   total: number;
-  /** Доп. ₽ в суточном окладе только от престижа (ИП). */
+  /** Доп. ₽ в суточном окладе от престижа (офис и ИП). */
   prestigeRubBonus: number;
 };
 
@@ -161,6 +159,8 @@ export type Tier3PassiveRubInput = {
   solePropCapitalRub: number;
   solePropRiskDial: number;
   prestigePoints?: number;
+  /** Множитель ₽ от очков престижа. По умолчанию ×1. */
+  prestigeIncomeMult?: number;
   solePropPassiveEffMult?: number;
   solePropPassiveTempMult?: number;
 };
@@ -172,14 +172,19 @@ export function computeTier3PassiveRubDetailed(input: Tier3PassiveRubInput): Tie
 
   if (input.def.archetype === "illegal") return { total: 0, prestigeRubBonus: 0 };
 
+  const prestigeMult = input.prestigeIncomeMult ?? 1;
+
   if (input.def.archetype === "legal") {
-    const raw = Math.max(0, Math.floor(input.def.passiveBaseRub * mult));
-    return { total: scaleSignedIncome(input.guildId, raw), prestigeRubBonus: 0 };
+    const rawNoPrestige = Math.max(0, Math.floor(input.def.passiveBaseRub * mult));
+    const rawWithPrestige = Math.max(0, Math.floor(rawNoPrestige * prestigeMult));
+    const total = scaleSignedIncome(input.guildId, rawWithPrestige);
+    const prestigeRubBonus =
+      prestigeMult > 1 ? total - scaleSignedIncome(input.guildId, rawNoPrestige) : 0;
+    return { total, prestigeRubBonus: Math.max(0, prestigeRubBonus) };
   }
 
   const cap = Math.max(0, Math.min(SOLE_PROP_CAP_MAX, input.solePropCapitalRub));
   const dial = Math.min(SOLE_PROP_RISK_MAX, Math.max(SOLE_PROP_RISK_MIN, input.solePropRiskDial));
-  const prestigeMult = prestigePassiveIncomeMult(input.prestigePoints ?? 0);
   const base = input.def.passiveBaseRub + solePropCapitalDailyRub(cap);
   let riskJitter = 1 + dial * 0.06;
   if (dial >= 1) {

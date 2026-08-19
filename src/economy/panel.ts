@@ -113,10 +113,10 @@ import { clearSovietHousingRentPatch } from "./economyHousingUtil.js";
 import { feedNetPrestigeRubBonus, feedPrestigeDomesticBonusSuffix } from "./economyFeedBonus.js";
 import {
   applyPrestigeToShiftRub,
-  prestigePassiveIncomeMult,
   shiftPsApplies,
   shiftPsFromDomestic,
 } from "./economyModifiers.js";
+import { formatPrestigeIncomeSlotsLine, prestigeIncomeMultFromUser } from "./prestigeIncome.js";
 import {
   applyRentPlanPurchase,
   buildShopAnimalsEmbed,
@@ -1214,6 +1214,7 @@ function tier3CareerEmbedLines(guildId: string, u: ReturnType<typeof getEconomyU
       );
     }
     lines.push(`**Множитель ранга к суточному окладу** (пассивно): **×${(1 + 0.08 * rank).toFixed(2)}**`);
+    lines.push(`**Престиж к ₽** (оклад): **${formatPrestigeIncomeSlotsLine(u)}**`);
     return lines;
   }
   if (rank >= TIER3_MAX_PROMOTION_RANK) {
@@ -1227,6 +1228,7 @@ function tier3CareerEmbedLines(guildId: string, u: ReturnType<typeof getEconomyU
   }
   lines.push(`**Множитель ранга к суточному окладу** (пассивно): **×${(1 + 0.08 * rank).toFixed(2)}**`);
   if (jobId === "officeAnalyst") {
+    lines.push(`**Престиж к ₽** (оклад и смены): **${formatPrestigeIncomeSlotsLine(u)}**`);
     lines.push(tier3OfficeShiftBonusLine(guildId));
   } else {
     lines.push("**Положительные исходы смены** усиливаются **рангом** и **стриком** (в разделе **Условия**).");
@@ -2036,7 +2038,7 @@ function tier3StatusLines(guildId: string, u: ReturnType<typeof getEconomyUser>,
       streakDays: u.jobMskDayStreak ?? 0,
       solePropCapitalRub: u.solePropCapitalRub ?? 0,
       solePropRiskDial: u.solePropRiskDial ?? 0,
-      prestigePoints: u.prestigePoints ?? 0,
+      prestigeIncomeMult: prestigeIncomeMultFromUser(u),
       solePropPassiveEffMult: u.solePropPassiveEffMult ?? 1,
       solePropPassiveTempMult: u.solePropPassiveTempMult ?? 1,
     });
@@ -2085,7 +2087,7 @@ function solePropCalculatedIncome(
     streakDays: isCurrentIp ? (u.jobMskDayStreak ?? 0) : 0,
     solePropCapitalRub: capitalRub,
     solePropRiskDial: 0,
-    prestigePoints: u.prestigePoints ?? 0,
+    prestigeIncomeMult: prestigeIncomeMultFromUser(u),
     solePropPassiveEffMult: isCurrentIp ? (u.solePropPassiveEffMult ?? 1) : 1,
     solePropPassiveTempMult: tempMult,
   }).total;
@@ -2117,8 +2119,8 @@ function buildSolePropCalculatorEmbed(member: GuildMember, capitalRub: number): 
     `Подоходный налог **${fmt(getLegalIncomeTaxPercent(gid))}%**: **−${fmt(result.tax)}** ₽`,
     `**На личный счёт: ${fmt(result.net)} ₽/сут**`,
     "",
-    `Множители: ранг **×${(1 + rank * 0.08).toFixed(2)}** · престиж **×${prestigePassiveIncomeMult(u.prestigePoints ?? 0).toFixed(3)}** · эффективность **×${efficiency.toFixed(2)}** · временный **×${tempMult.toFixed(2)}**.`,
-    "Отдача капитала **затухает**: около **7 млн** оклад догоняет полный гринд офиса, дальше сильнее ранг, престиж и опыт.",
+    `Множители: ранг **×${(1 + rank * 0.08).toFixed(2)}** · престиж **${formatPrestigeIncomeSlotsLine(u)}** · эффективность **×${efficiency.toFixed(2)}** · временный **×${tempMult.toFixed(2)}**.`,
+    "Оклад **только от капитала** (без капитала — **0**). Около **7 млн** догоняет полный гринд офиса. Престиж к ₽ линейно от очков: полный набор лучших покупок → **×2**.",
     `К текущему капиталу: **${delta >= 0 ? "+" : "−"}${fmt(Math.abs(delta))}** ₽/сут.`,
     "",
     "Прогноз использует риск **0**: случайный риск-джиттер не применяется. Баланс не меняется.",
@@ -2992,11 +2994,11 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     }
   }
 
-  const prestige = u.prestigePoints ?? 0;
+  const prestigeMult = prestigeIncomeMultFromUser(u);
   let prestigeRubBonus = 0;
   if (jobTotal > 0) {
     const beforePrestige = jobTotal;
-    jobTotal = applyPrestigeToShiftRub(jobTotal, prestige);
+    jobTotal = applyPrestigeToShiftRub(jobTotal, prestigeMult);
     if (jobTotal > beforePrestige) {
       prestigeRubBonus = jobTotal - beforePrestige;
       notes.push(`в том числе за престиж: **+${fmt(prestigeRubBonus)}** ₽`);

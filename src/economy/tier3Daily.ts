@@ -12,6 +12,7 @@ import {
 import { isMskMonday, msUntilNextMskMidnight, mskTodayYmd } from "./mskCalendar.js";
 import { addToTreasury, getSolePropWeeklyCapitalTaxPercent, withholdLegalIncomeTax } from "./taxTreasury.js";
 import { getEconomyUser, listEconomyUsers, patchEconomyUser } from "./userStore.js";
+import { prestigeIncomeMultFromUser } from "./prestigeIncome.js";
 import { listOwnedPets } from "./economyAssets.js";
 import { solePropMidnightPatch } from "./tier3SolePropMsk.js";
 import {
@@ -90,7 +91,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
         streakDays: streakOut.nextStreak,
         solePropCapitalRub: u.solePropCapitalRub ?? 0,
         solePropRiskDial: u.solePropRiskDial ?? 0,
-        prestigePoints: u.prestigePoints ?? 0,
+        prestigeIncomeMult: prestigeIncomeMultFromUser(u),
         solePropPassiveEffMult: u.solePropPassiveEffMult,
         solePropPassiveTempMult: u.solePropPassiveTempMult,
       });
