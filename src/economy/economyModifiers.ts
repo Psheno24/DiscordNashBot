@@ -1,7 +1,7 @@
 /** Доля прироста ₽ за смену при log1p(STAT_LOG_REF) очков престижа. */
 const PRESTIGE_SHIFT_BONUS_AT_REF = 0.35;
-/** Доля прироста суточного оклада ИП при log1p(STAT_LOG_REF) престижа. */
-const PRESTIGE_PASSIVE_BONUS_AT_REF = 0.55;
+/** Доля прироста суточного оклада ИП при log1p(STAT_LOG_REF) престижа (как у смен, иначе престиж сдвигает порог ИП вниз). */
+const PRESTIGE_PASSIVE_BONUS_AT_REF = 0.35;
 /** Доля прироста СР с голоса при log1p(STAT_LOG_REF) быта. */
 const DOMESTIC_VOICE_BONUS_AT_REF = 0.45;
 /** Доля прироста СР за смену при log1p(STAT_LOG_REF) быта. */
