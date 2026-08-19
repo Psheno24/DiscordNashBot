@@ -1,24 +1,27 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  APARTMENT_MODELS,
-  CAR_MODELS,
-  PHONE_MODELS,
-  getApartmentDef,
-  getCarDef,
-  getPhoneDef,
   housingRentPlanPeriodMs,
   housingRentPlanPriceRub,
-  migrateCatalogItemId,
   type HousingRentPlan,
 } from "./economyCatalog.js";
-import { isValidVehiclePlateParts } from "./economyLicensePlate.js";
-import { computePlatePrestige } from "./economyPlatePrestige.js";
+import {
+  assetHousingMirrors,
+  assetPhoneCarMirrors,
+  normalizeOwnedAssets,
+  statsFromOwnedAssets,
+  type OwnedApartmentRecord,
+  type OwnedCarRecord,
+  type OwnedPhoneRecord,
+  type UnattachedPlateRecord,
+} from "./economyAssets.js";
 import { migrateLegacySim5ToParts, parseSimNumberParts } from "./economySimNumber.js";
 import { computeSimPrestige } from "./economySimPrestige.js";
 import { nextHousingUtilityDueMs } from "./economyMacro.js";
 import { SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS } from "./shiftPayCoeff.js";
 import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+
+export type { OwnedApartmentRecord, OwnedCarRecord, OwnedPhoneRecord, UnattachedPlateRecord };
 
 export type JobId =
   | "courier"
@@ -46,10 +49,6 @@ export type SkillId = "communication" | "logistics" | "discipline";
 
 /** Потолок уровня навыка; тир-3 можно строить на комбо в духе 40+/60+/80+ при том же счётчике. */
 export const ECONOMY_SKILL_MAX = 99;
-
-const VALID_PHONE_ID = new Set<string>(PHONE_MODELS.map((p) => p.id));
-const VALID_CAR_ID = new Set<string>(CAR_MODELS.map((c) => c.id));
-const VALID_APT_ID = new Set<string>(APARTMENT_MODELS.map((a) => a.id));
 
 /** Макс. капитал ИП в обороте (₽), синхронно с `SOLE_PROP_CAP_MAX` в tier3Jobs). */
 export const ECONOMY_SOLE_PROP_CAP_RUB = 500_000_000;
@@ -84,22 +83,28 @@ export interface EconomyUser {
     atMs: number;
   };
 
-  /** Куплен телефон в магазине (нужен на доставке). */
+  /** Куплен телефон в магазине (нужен на доставке). Зеркало `ownedPhones`. */
   hasPhone?: boolean;
-  /** Модель телефона (влияет на престиж при покупке/апгрейде). */
+  /** Модель «основного» телефона (зеркало первого в `ownedPhones`). */
   phoneModelId?: string;
+  /** Все купленные телефоны. */
+  ownedPhones?: OwnedPhoneRecord[];
   /** Накопленный престиж (заморские покупки). */
   prestigePoints?: number;
   /** Быт (советские покупки). */
   domesticPoints?: number;
-  /** Купленный автомобиль — снимает аренду вела с UI и укорачивает КД смены доставки. */
+  /** Основное авто (зеркало лучшего для доставки из `ownedCars`). */
   ownedCarId?: string;
-  /** Госномер (формат «А 123 ВС | 77 RUS»). */
+  /** Все купленные автомобили (номер — на конкретной машине). */
+  ownedCars?: OwnedCarRecord[];
+  /** Госномера без авто. Престижа не дают. */
+  unattachedPlates?: UnattachedPlateRecord[];
+  /** Госномер (формат «А 123 ВС | 77 RUS») — зеркало первого прикреплённого. */
   vehiclePlateL1?: string;
   vehiclePlateDigits?: string;
   vehiclePlateL2?: string;
   vehiclePlateRegion?: string;
-  /** Престиж, уже учтённый в prestigePoints от текущего госномера. */
+  /** Суммарный престиж прикреплённых госномеров. */
   vehiclePlatePrestige?: number;
 
   /** Советское жильё: нет / аренда / своя квартира. */
@@ -118,10 +123,12 @@ export interface EconomyUser {
   housingRentChainStartedAtMs?: number;
   /** Сумма всех оплат по текущей цепочке аренды (₽). */
   housingRentTotalPaidRub?: number;
-  /** Купленная советская квартира (если housingKind === "owned"). */
+  /** Купленная советская квартира (зеркало лучшей из `ownedApartments`). */
   ownedApartmentId?: string;
   /** Когда куплена текущая советская квартира (unix ms) — для выкупа при переезде. */
   ownedApartmentPurchasedAtMs?: number;
+  /** Все купленные квартиры (советские и заморские). */
+  ownedApartments?: OwnedApartmentRecord[];
   /** Следующее списание ЖКХ советского жилья — полночь 1-го числа месяца (МСК), unix ms. */
   housingUtilityNextDueMs?: number;
   /** Последняя обработка советского жилья по суточному тику (YYYY-MM-DD). */
@@ -272,43 +279,6 @@ export function lastWorkAtForJob(u: EconomyUser, jobId: JobId): number {
   return Number.isFinite(t) && (t as number) > 0 ? Math.floor(t as number) : 0;
 }
 
-function recomputePrestigeDomesticFromOwnership(parts: {
-  phoneModelId?: string;
-  ownedCarId?: string;
-  housingKind?: HousingKind;
-  ownedApartmentId?: string;
-  housingForeignKind?: "owned";
-  ownedForeignApartmentId?: string;
-}): { prestigePoints: number; domesticPoints: number } {
-  let prestigePoints = 0;
-  let domesticPoints = 0;
-  const phone = getPhoneDef(parts.phoneModelId);
-  if (phone) {
-    prestigePoints += phone.prestigeDelta;
-    domesticPoints += phone.domesticDelta;
-  }
-  const car = getCarDef(parts.ownedCarId);
-  if (car) {
-    prestigePoints += car.prestigeDelta;
-    domesticPoints += car.domesticDelta;
-  }
-  if (parts.housingKind === "owned" && parts.ownedApartmentId) {
-    const apt = getApartmentDef(parts.ownedApartmentId);
-    if (apt) {
-      prestigePoints += apt.prestigeDelta;
-      domesticPoints += apt.domesticDelta;
-    }
-  }
-  if (parts.housingForeignKind === "owned" && parts.ownedForeignApartmentId) {
-    const aptF = getApartmentDef(parts.ownedForeignApartmentId);
-    if (aptF) {
-      prestigePoints += aptF.prestigeDelta;
-      domesticPoints += aptF.domesticDelta;
-    }
-  }
-  return { prestigePoints, domesticPoints };
-}
-
 function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?: string): EconomyUser {
   const rawSkills = u?.skills ?? {};
   const skills: Partial<Record<SkillId, number>> = {};
@@ -410,12 +380,21 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   const legacySimShifts = Number.isFinite((u as any)?.courierSimShiftsLeft) ? Math.max(0, Math.floor((u as any).courierSimShiftsLeft)) : 0;
   const legacyBikeShifts = Number.isFinite((u as any)?.courierBikeShiftsLeft) ? Math.max(0, Math.floor((u as any).courierBikeShiftsLeft)) : 0;
 
-  let hasPhone = (u as any)?.hasPhone === true ? true : undefined;
-  let phoneModelIdRaw = typeof (u as any)?.phoneModelId === "string" ? migrateCatalogItemId((u as any).phoneModelId) : undefined;
-  let phoneModelId =
-    phoneModelIdRaw && VALID_PHONE_ID.has(phoneModelIdRaw) ? (phoneModelIdRaw as (typeof PHONE_MODELS)[number]["id"]) : undefined;
-  let ownedCarIdRaw = typeof (u as any)?.ownedCarId === "string" ? migrateCatalogItemId((u as any).ownedCarId) : undefined;
-  let ownedCarId = ownedCarIdRaw && VALID_CAR_ID.has(ownedCarIdRaw) ? (ownedCarIdRaw as (typeof CAR_MODELS)[number]["id"]) : undefined;
+  const rawForAssets = { ...(u as any) };
+  if (rawForAssets.hasPhone !== true && (legacySimShifts > 0 || legacyBikeShifts > 0)) rawForAssets.hasPhone = true;
+  if (!rawForAssets.phoneModelId && rawForAssets.hasPhone === true) rawForAssets.phoneModelId = "phone_sov_elta";
+  const assets = normalizeOwnedAssets(rawForAssets);
+  const phoneCarMirrors = assetPhoneCarMirrors(assets);
+  const aptMirrors = assetHousingMirrors(assets);
+  let hasPhone = phoneCarMirrors.hasPhone;
+  let phoneModelId = phoneCarMirrors.phoneModelId;
+  let ownedCarId = phoneCarMirrors.ownedCarId;
+  let vehiclePlateL1 = phoneCarMirrors.vehiclePlateL1;
+  let vehiclePlateDigits = phoneCarMirrors.vehiclePlateDigits;
+  let vehiclePlateL2 = phoneCarMirrors.vehiclePlateL2;
+  let vehiclePlateRegion = phoneCarMirrors.vehiclePlateRegion;
+  let vehiclePlatePrestige = phoneCarMirrors.vehiclePlatePrestige;
+
   let housingKind = normalizeHousingKind((u as any)?.housingKind) ?? "none";
   const housingRentNextDueMs = Number.isFinite((u as any)?.housingRentNextDueMs)
     ? Math.max(0, Math.floor((u as any).housingRentNextDueMs))
@@ -434,24 +413,13 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   let housingRentTotalPaidRub = Number.isFinite((u as any)?.housingRentTotalPaidRub)
     ? Math.max(0, Math.floor((u as any).housingRentTotalPaidRub))
     : undefined;
-  let ownedApartmentIdRaw =
-    typeof (u as any)?.ownedApartmentId === "string" ? migrateCatalogItemId((u as any).ownedApartmentId) : undefined;
-  let ownedApartmentId =
-    ownedApartmentIdRaw && VALID_APT_ID.has(ownedApartmentIdRaw)
-      ? (ownedApartmentIdRaw as (typeof APARTMENT_MODELS)[number]["id"])
-      : undefined;
-  let ownedForeignApartmentIdRaw =
-    typeof (u as any)?.ownedForeignApartmentId === "string"
-      ? migrateCatalogItemId((u as any).ownedForeignApartmentId)
-      : undefined;
-  let ownedForeignApartmentId =
-    ownedForeignApartmentIdRaw && VALID_APT_ID.has(ownedForeignApartmentIdRaw)
-      ? (ownedForeignApartmentIdRaw as (typeof APARTMENT_MODELS)[number]["id"])
-      : undefined;
-  let housingForeignKind = (u as any)?.housingForeignKind === "owned" ? ("owned" as const) : undefined;
-  let ownedApartmentPurchasedAtMs = Number.isFinite((u as any)?.ownedApartmentPurchasedAtMs)
-    ? Math.max(0, Math.floor((u as any).ownedApartmentPurchasedAtMs))
-    : undefined;
+  let ownedApartmentId = aptMirrors.ownedApartmentId;
+  let ownedApartmentPurchasedAtMs = aptMirrors.ownedApartmentPurchasedAtMs;
+  let ownedForeignApartmentId = aptMirrors.ownedForeignApartmentId;
+  const ownedForeignApartmentPurchasedAtMs = aptMirrors.ownedForeignApartmentPurchasedAtMs;
+  let housingForeignKind = aptMirrors.housingForeignKind;
+  if (ownedApartmentId) housingKind = "owned";
+  else if (housingKind === "owned") housingKind = "none";
   let housingUtilityNextDueMs = Number.isFinite((u as any)?.housingUtilityNextDueMs)
     ? Math.max(0, Math.floor((u as any).housingUtilityNextDueMs))
     : undefined;
@@ -493,9 +461,6 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     ? Math.max(0, Math.floor((u as any).courierBikeUntilMs))
     : undefined;
 
-  // Одноразовая логика поверх старых полей «смен сим/вела» (без записи в JSON до следующего patch).
-  if (!hasPhone && (legacySimShifts > 0 || legacyBikeShifts > 0)) hasPhone = true;
-  if (!phoneModelId && hasPhone) phoneModelId = "phone_sov_elta";
   if (!simParts && legacySimShifts > 0) {
     const legacy5 = stableLegacySimDigits(userIdForMigration ?? "legacy");
     simParts = migrateLegacySim5ToParts(legacy5, userIdForMigration ?? "legacy");
@@ -510,73 +475,10 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   if (!courierPhonePaidUntilMs && legacySimShifts > 0) courierPhonePaidUntilMs = Date.now() + 24 * 60 * 60 * 1000;
   if (!courierBikeUntilMs && legacyBikeShifts > 0) courierBikeUntilMs = Date.now() + legacyBikeShifts * 3 * 60 * 60 * 1000;
 
-  if (ownedCarId) {
+  if (ownedCarId || assets.ownedCars.length > 0) {
     courierBikeUntilMs = undefined;
   }
 
-  let vehiclePlateL1 =
-    typeof (u as any)?.vehiclePlateL1 === "string" ? String((u as any).vehiclePlateL1).toUpperCase() : undefined;
-  let vehiclePlateDigits =
-    typeof (u as any)?.vehiclePlateDigits === "string" ? String((u as any).vehiclePlateDigits) : undefined;
-  let vehiclePlateL2 =
-    typeof (u as any)?.vehiclePlateL2 === "string" ? String((u as any).vehiclePlateL2).toUpperCase() : undefined;
-  let vehiclePlateRegion =
-    typeof (u as any)?.vehiclePlateRegion === "string" ? String((u as any).vehiclePlateRegion) : undefined;
-  let vehiclePlatePrestige = Number.isFinite((u as any)?.vehiclePlatePrestige)
-    ? Math.max(0, Math.floor((u as any).vehiclePlatePrestige))
-    : undefined;
-  if (!ownedCarId) {
-    vehiclePlateL1 = undefined;
-    vehiclePlateDigits = undefined;
-    vehiclePlateL2 = undefined;
-    vehiclePlateRegion = undefined;
-    vehiclePlatePrestige = undefined;
-  } else if (vehiclePlateL1 && vehiclePlateDigits && vehiclePlateL2 && vehiclePlateRegion) {
-    if (
-      !isValidVehiclePlateParts({
-        l1: vehiclePlateL1,
-        digits: vehiclePlateDigits,
-        l2: vehiclePlateL2,
-        region: vehiclePlateRegion,
-      })
-    ) {
-      vehiclePlateL1 = undefined;
-      vehiclePlateDigits = undefined;
-      vehiclePlateL2 = undefined;
-      vehiclePlateRegion = undefined;
-      vehiclePlatePrestige = undefined;
-    }
-  } else {
-    vehiclePlateL1 = undefined;
-    vehiclePlateDigits = undefined;
-    vehiclePlateL2 = undefined;
-    vehiclePlateRegion = undefined;
-    vehiclePlatePrestige = undefined;
-  }
-
-  if (ownedApartmentId) {
-    const aptO = getApartmentDef(ownedApartmentId);
-    if (aptO?.origin === "foreign") {
-      ownedForeignApartmentId = ownedApartmentId;
-      housingForeignKind = "owned";
-      ownedApartmentId = undefined;
-      if (housingKind === "owned") housingKind = "none";
-    }
-  }
-
-  if (ownedApartmentId && housingKind !== "owned") {
-    housingKind = "owned";
-  }
-  if (housingKind === "owned" && !ownedApartmentId) {
-    housingKind = "none";
-  }
-  if (housingForeignKind === "owned" && !ownedForeignApartmentId) {
-    housingForeignKind = undefined;
-  }
-
-  const ownedForeignApartmentPurchasedAtMs = Number.isFinite((u as any)?.ownedForeignApartmentPurchasedAtMs)
-    ? Math.max(0, Math.floor((u as any).ownedForeignApartmentPurchasedAtMs))
-    : undefined;
   let housingForeignUtilityNextDueMs = Number.isFinite((u as any)?.housingForeignUtilityNextDueMs)
     ? Math.max(0, Math.floor((u as any).housingForeignUtilityNextDueMs))
     : undefined;
@@ -601,28 +503,9 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
       : undefined;
   const petPausedNoFunds = (u as any)?.petPausedNoFunds === true ? true : undefined;
 
-  const stats = recomputePrestigeDomesticFromOwnership({
-    phoneModelId,
-    ownedCarId,
-    housingKind,
-    ownedApartmentId,
-    housingForeignKind,
-    ownedForeignApartmentId,
-  });
+  const stats = statsFromOwnedAssets(assets);
   let prestigePoints = stats.prestigePoints;
   const domesticPoints = stats.domesticPoints;
-
-  if (vehiclePlateL1 && vehiclePlateDigits && vehiclePlateL2 && vehiclePlateRegion) {
-    vehiclePlatePrestige = computePlatePrestige({
-      l1: vehiclePlateL1,
-      digits: vehiclePlateDigits,
-      l2: vehiclePlateL2,
-      region: vehiclePlateRegion,
-    }).total;
-    prestigePoints += vehiclePlatePrestige;
-  } else {
-    vehiclePlatePrestige = undefined;
-  }
 
   let courierSimPrestige: number | undefined;
   if (simParts) {
@@ -657,9 +540,12 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     lastWorkAtByJob,
     hasPhone,
     phoneModelId,
+    ownedPhones: assets.ownedPhones,
     prestigePoints,
     domesticPoints,
     ownedCarId,
+    ownedCars: assets.ownedCars,
+    unattachedPlates: assets.unattachedPlates,
     vehiclePlateL1,
     vehiclePlateDigits,
     vehiclePlateL2,
@@ -675,6 +561,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     housingRentTotalPaidRub,
     ownedApartmentId,
     ownedApartmentPurchasedAtMs,
+    ownedApartments: assets.ownedApartments,
     housingUtilityNextDueMs,
     housingLastMskYmd,
     housingForeignKind,

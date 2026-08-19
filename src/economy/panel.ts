@@ -42,6 +42,15 @@ import {
   type SkillId,
 } from "./userStore.js";
 import {
+  bestCourierCar,
+  carPlateParts,
+  decodePlateKey,
+  findOwnedApartment,
+  listOwnedApartmentsByOrigin,
+  listOwnedCars,
+  listOwnedPhones,
+} from "./economyAssets.js";
+import {
   computeTier3PassiveRub,
   computeTier3PassiveRubDetailed,
   getTier3JobDef,
@@ -122,10 +131,17 @@ import {
   ECON_SHOP_ANIMALS,
   ECON_SHOP_ANIMALS_DETAILS,
   ECON_SHOP_APT_BUY_PREFIX,
+  ECON_SHOP_APT_FULL_PREFIX,
+  ECON_SHOP_APT_TRADE_PREFIX,
+  ECON_SHOP_APT_TRADE_OK_PREFIX,
   ECON_SHOP_APT_SELL_FOREIGN,
   ECON_SHOP_APT_SELL_SOVIET,
+  ECON_SHOP_APT_SELL_UID_PREFIX,
   ECON_SHOP_CAR,
   ECON_SHOP_CAR_BUY_PREFIX,
+  ECON_SHOP_CAR_FULL_PREFIX,
+  ECON_SHOP_CAR_TRADE_PREFIX,
+  ECON_SHOP_CAR_TRADE_OK_PREFIX,
   ECON_SHOP_CAR_ORIGIN_PREFIX,
   ECON_SHOP_CAR_DETAILS_PREFIX,
   ECON_SHOP_HOUSE,
@@ -140,25 +156,56 @@ import {
   ECON_SHOP_PET_BUY_PREFIX,
   ECON_SHOP_PHONE,
   ECON_SHOP_PHONE_BUY_PREFIX,
+  ECON_SHOP_PHONE_FULL_PREFIX,
+  ECON_SHOP_PHONE_TRADE_PREFIX,
+  ECON_SHOP_PHONE_TRADE_OK_PREFIX,
   ECON_SHOP_PHONE_BUY_CONFIRM_PREFIX,
   ECON_SHOP_PHONE_BUY_CANCEL_PREFIX,
   ECON_SHOP_PHONE_SELL,
+  ECON_SHOP_PHONE_SELL_UID_PREFIX,
   ECON_SHOP_PHONE_SELL_CONFIRM,
   ECON_SHOP_PHONE_SELL_CANCEL,
   ECON_SHOP_PHONE_ORIGIN_PREFIX,
   ECON_SHOP_PHONE_DETAILS_PREFIX,
   parseOriginFromSuffix,
   purchaseApartment,
+  purchaseApartmentFull,
+  purchaseApartmentTrade,
   purchaseCar,
+  purchaseCarFull,
+  purchaseCarTrade,
   purchasePet,
   purchasePhone,
+  purchasePhoneFull,
+  purchasePhoneTrade,
   sellForeignApartment,
   sellSovietApartment,
+  sellOwnedApartment,
   sellOwnedCar,
   sellOwnedPhone,
   buildShopPlateEmbed,
   buildShopPlateDetailsEmbed,
   buildShopPlateRows,
+  buildShopPlateCarEmbed,
+  buildShopPlateCarRows,
+  buildShopPlateAttachEmbed,
+  buildShopPlateAttachRows,
+  buildShopPlateAttachConfirmEmbed,
+  buildShopPlateAttachConfirmRows,
+  buildShopPlateDetachConfirmEmbed,
+  buildShopPlateDetachConfirmRows,
+  buildShopPhoneTradePickEmbed,
+  buildShopPhoneTradePickRows,
+  buildShopCarTradePickEmbed,
+  buildShopCarTradePickRows,
+  buildShopAptTradePickEmbed,
+  buildShopAptTradePickRows,
+  buildShopPhoneSellPickEmbed,
+  buildShopPhoneSellPickRows,
+  buildShopCarSellPickEmbed,
+  buildShopCarSellPickRows,
+  buildShopAptSellPickEmbed,
+  buildShopAptSellPickRows,
   buildShopCarSellConfirmEmbed,
   buildShopCarSellConfirmRows,
   buildShopPhoneBuyConfirmEmbed,
@@ -182,16 +229,33 @@ import {
   ECON_SHOP_APT_SELL_FOREIGN_CANCEL,
   syncVehiclePlatePrestige,
   registerVehiclePlate,
+  registerVehiclePlateForCar,
   changeVehiclePlateDigits,
   changeVehiclePlateLetters,
   changeVehiclePlateRegion,
+  changeVehiclePlateDigitsForCar,
+  changeVehiclePlateLettersForCar,
+  changeVehiclePlateRegionForCar,
+  attachVehiclePlateToCar,
+  detachVehiclePlateFromCar,
   ECON_SHOP_PLATE,
   ECON_SHOP_PLATE_REGISTER,
   ECON_SHOP_PLATE_DIGITS,
   ECON_SHOP_PLATE_LETTERS,
   ECON_SHOP_PLATE_REGION,
   ECON_SHOP_PLATE_DETAILS,
+  ECON_SHOP_PLATE_CAR_PREFIX,
+  ECON_SHOP_PLATE_DIG_PREFIX,
+  ECON_SHOP_PLATE_LET_PREFIX,
+  ECON_SHOP_PLATE_RGN_PREFIX,
+  ECON_SHOP_PLATE_NEW_PREFIX,
+  ECON_SHOP_PLATE_DET_PREFIX,
+  ECON_SHOP_PLATE_DET_OK_PREFIX,
+  ECON_SHOP_PLATE_ATT_PREFIX,
+  ECON_SHOP_PLATE_ATT_PICK_PREFIX,
+  ECON_SHOP_PLATE_ATT_OK_PREFIX,
   ECON_SHOP_CAR_SELL,
+  ECON_SHOP_CAR_SELL_UID_PREFIX,
   ECON_SHOP_CAR_SELL_CONFIRM,
   ECON_SHOP_CAR_SELL_CANCEL,
   ECON_SHOP_APPEARANCE,
@@ -219,7 +283,8 @@ import {
 import {
   applyUnregisteredVehiclePenalty,
   economyCarDisplayLine,
-  formatVehiclePlateFromUser,
+  formatVehiclePlate,
+  unregisteredVehiclePenaltyApplies,
 } from "./economyLicensePlate.js";
 import {
   buildShopAppearanceEmbed,
@@ -529,28 +594,31 @@ function ownedApartmentProfileBlockLine(
 
 function buildProfilePurchasesBlock(guildId: string, u: ReturnType<typeof getEconomyUser>): string[] {
   const lines: string[] = [];
-  if (!u.hasPhone) {
+  const phones = listOwnedPhones(u);
+  if (phones.length === 0) {
     lines.push("Телефон: **нет**");
   } else {
-    const pl = getPhoneDef(u.phoneModelId)?.label ?? "есть";
+    const phonePart = phones.map((p) => `**${getPhoneDef(p.id)?.label ?? p.id}**`).join(", ");
     if (!userHasSimNumber(u)) {
-      lines.push(`Телефон: **${pl}** (сим **нет**)`);
+      lines.push(`Телефон: ${phonePart} (сим **нет**)`);
     } else {
       const simFmt = formatSimNumberFromUser(u) ?? "—";
-      lines.push(`Телефон: **${pl}** (сим **${simFmt}**, баланс **${fmt(u.simBalanceRub ?? 0)}** ₽)`);
+      lines.push(`Телефон: ${phonePart} (сим **${simFmt}**, баланс **${fmt(u.simBalanceRub ?? 0)}** ₽)`);
     }
   }
   lines.push(economyCarDisplayLine(u));
   const hk = u.housingKind ?? "none";
+  const sov = listOwnedApartmentsByOrigin(u, "soviet");
+  const frn = listOwnedApartmentsByOrigin(u, "foreign");
   const homeSov =
     hk === "rent"
       ? "**аренда** (советское жильё)"
-      : hk === "owned"
-        ? ownedApartmentProfileBlockLine(guildId, u.ownedApartmentId, u.ownedApartmentPurchasedAtMs)
+      : sov.length > 0
+        ? sov.map((a) => ownedApartmentProfileBlockLine(guildId, a.id, a.purchasedAtMs)).join("; ")
         : "**нет** (сов.)";
   const homeFor =
-    u.housingForeignKind === "owned"
-      ? ownedApartmentProfileBlockLine(guildId, u.ownedForeignApartmentId, u.ownedForeignApartmentPurchasedAtMs)
+    frn.length > 0
+      ? frn.map((a) => ownedApartmentProfileBlockLine(guildId, a.id, a.purchasedAtMs)).join("; ")
       : "**нет** (зам.)";
   lines.push(`Жильё: ${homeSov} · ${homeFor}`);
   lines.push(`Престиж: **${fmt(u.prestigePoints ?? 0)}** · Быт: **${fmt(u.domesticPoints ?? 0)}**`);
@@ -1284,16 +1352,22 @@ function hasActiveBikeRental(u: ReturnType<typeof getEconomyUser>, now: number):
 }
 
 function hasOwnedCourierCar(u: ReturnType<typeof getEconomyUser>): boolean {
-  return Boolean(u.ownedCarId && getCarDef(u.ownedCarId));
+  return Boolean(bestCourierCar(u));
 }
 
 /** Транспорт доставки: личное авто или аренда электровела. Без привязки к jobId — только состояние игрока. */
 function courierTransportExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
-  const car = getCarDef(u.ownedCarId);
-  if (car) {
-    const plate = formatVehiclePlateFromUser(u);
-    const platePart = plate ? ` · ${plate}` : " · **без номера** (−10%)";
-    return [`**Авто:** **${car.label}** · КД **${(car.courierShiftCdMs / 3600000).toFixed(1).replace(/\.0$/, "")}** ч${platePart}`];
+  const best = bestCourierCar(u);
+  if (best) {
+    const plate = carPlateParts(best.rec);
+    const plateFmt = plate ? formatVehiclePlate(plate) : undefined;
+    const penalty = unregisteredVehiclePenaltyApplies(u);
+    const platePart = plateFmt
+      ? ` · ${plateFmt}`
+      : penalty
+        ? " · **без номера** (−10%)"
+        : " · без номера";
+    return [`**Авто:** **${best.def.label}** · КД **${(best.def.courierShiftCdMs / 3600000).toFixed(1).replace(/\.0$/, "")}** ч${platePart}`];
   }
   if (hasActiveBikeRental(u, now)) {
     const t = Math.floor((u.courierBikeUntilMs ?? 0) / 1000);
@@ -1585,16 +1659,16 @@ function getJobExp(u: ReturnType<typeof getEconomyUser>, jobId: JobId): number {
 
 function effectiveCourierCooldownMs(u: ReturnType<typeof getEconomyUser>, now: number = Date.now()): number {
   const def = getJobDef("courier");
-  const car = getCarDef(u.ownedCarId);
-  if (car) return car.courierShiftCdMs;
+  const best = bestCourierCar(u);
+  if (best) return best.def.courierShiftCdMs;
   if (hasActiveBikeRental(u, now)) return 2 * 60 * 60 * 1000;
   return def.baseCooldownMs;
 }
 
 /** Склад: без личного авто — **3** ч; с авто из магазина — КД по классу машины. */
 function effectiveAssemblerCooldownMs(u: ReturnType<typeof getEconomyUser>, _now?: number): number {
-  const car = getCarDef(u.ownedCarId);
-  if (car) return car.courierShiftCdMs;
+  const best = bestCourierCar(u);
+  if (best) return best.def.courierShiftCdMs;
   return ASSEMBLER_BASE_CD_MS;
 }
 
@@ -1616,9 +1690,9 @@ export function canWorkNow(u: ReturnType<typeof getEconomyUser>, jobId: JobId, n
 function assemblerWorkExtrasLines(u: ReturnType<typeof getEconomyUser>, now: number): string[] {
   const cdMs = effectiveAssemblerCooldownMs(u, now);
   const h = cdHoursLabel(cdMs);
-  const car = getCarDef(u.ownedCarId);
-  if (car) {
-    return [`**Склад:** с авто **${car.label}** — КД смены **${h}** ч.`];
+  const best = bestCourierCar(u);
+  if (best) {
+    return [`**Склад:** с авто **${best.def.label}** — КД смены **${h}** ч.`];
   }
   return [
     "**Склад:** без личного авто — КД смены **3** ч.",
@@ -2006,6 +2080,7 @@ function buildSolePropCalculatorEmbed(member: GuildMember, capitalRub: number): 
     `**На личный счёт: ${fmt(result.net)} ₽/сут**`,
     "",
     `Множители: ранг **×${(1 + rank * 0.08).toFixed(2)}** · престиж **×${prestigePassiveIncomeMult(u.prestigePoints ?? 0).toFixed(3)}** · эффективность **×${efficiency.toFixed(2)}** · временный **×${tempMult.toFixed(2)}**.`,
+    "Отдача капитала **затухает**: рост с 7 до 12 млн небольшой, дальше сильнее ранг, престиж и опыт.",
     `К текущему капиталу: **${delta >= 0 ? "+" : "−"}${fmt(Math.abs(delta))}** ₽/сут.`,
     "",
     "Прогноз использует риск **0**: случайный риск-джиттер не применяется. Баланс не меняется.",
@@ -3369,7 +3444,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_PHONE) {
     await replyOrUpdate(interaction, {
       embeds: [buildShopOriginPickEmbed("Телефон", member, "phone")],
-      components: buildShopOriginPickRows("phone", ECON_SHOP_HUB),
+      components: buildShopOriginPickRows(member, "phone", ECON_SHOP_HUB),
     });
     return true;
   }
@@ -3386,12 +3461,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id.startsWith(ECON_SHOP_PHONE_ORIGIN_PREFIX)) {
     const origin = parseOriginFromSuffix(id.slice(ECON_SHOP_PHONE_ORIGIN_PREFIX.length));
-    if (!origin) return true;
-    await replyOrUpdate(interaction, {
-      embeds: [buildShopPhoneListEmbed(member, origin)],
-      components: buildShopPhoneListRows(member, origin),
-    });
-    return true;
+    if (origin) {
+      await replyOrUpdate(interaction, {
+        embeds: [buildShopPhoneListEmbed(member, origin)],
+        components: buildShopPhoneListRows(member, origin),
+      });
+      return true;
+    }
   }
 
   if (id.startsWith(ECON_SHOP_PHONE_BUY_PREFIX)) {
@@ -3408,7 +3484,76 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     await replyOrUpdate(interaction, {
       embeds: [emb],
-      components: buildShopPhoneBuyConfirmRows(pid, defP.origin),
+      components: buildShopPhoneBuyConfirmRows(member, pid, defP.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PHONE_FULL_PREFIX)) {
+    const pid = id.slice(ECON_SHOP_PHONE_FULL_PREFIX.length);
+    const defP = getPhoneDef(pid);
+    if (!defP) {
+      await interaction.reply({ content: "Неизвестная модель телефона.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const r = purchasePhoneFull(member, pid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPhoneListEmbed(member, defP.origin)],
+      components: buildShopPhoneListRows(member, defP.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PHONE_TRADE_OK_PREFIX)) {
+    const rest = id.slice(ECON_SHOP_PHONE_TRADE_OK_PREFIX.length);
+    const sep = rest.lastIndexOf(":");
+    const pid = rest.slice(0, sep);
+    const uid = rest.slice(sep + 1);
+    const defP = getPhoneDef(pid);
+    if (!defP) {
+      await interaction.reply({ content: "Неизвестная модель телефона.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const r = purchasePhoneTrade(member, pid, uid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPhoneListEmbed(member, defP.origin)],
+      components: buildShopPhoneListRows(member, defP.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PHONE_TRADE_PREFIX)) {
+    const pid = id.slice(ECON_SHOP_PHONE_TRADE_PREFIX.length);
+    const defP = getPhoneDef(pid);
+    const emb = buildShopPhoneTradePickEmbed(member, pid);
+    if (!defP || !emb) {
+      await interaction.reply({ content: "Неизвестная модель телефона.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const owned = listOwnedPhones(getEconomyUser(member.guild.id, member.id)).filter((p) => getPhoneDef(p.id)?.origin === defP.origin);
+    if (owned.length === 1) {
+      const r = purchasePhoneTrade(member, pid, owned[0]!.uid);
+      if (!r.ok) {
+        await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await replyOrUpdate(interaction, {
+        embeds: [buildShopPhoneListEmbed(member, defP.origin)],
+        components: buildShopPhoneListRows(member, defP.origin),
+      });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [emb],
+      components: buildShopPhoneTradePickRows(member, pid),
     });
     return true;
   }
@@ -3444,15 +3589,29 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_SHOP_PHONE_SELL) {
     const u = getEconomyUser(member.guild.id, member.id);
-    const cur = getPhoneDef(u.phoneModelId);
-    if (!u.hasPhone || !cur) {
+    if (listOwnedPhones(u).length === 0) {
       await interaction.reply({ content: "Нет **телефона** для продажи.", flags: MessageFlags.Ephemeral });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPhoneSellConfirmEmbed(member)],
-      components: buildShopPhoneSellConfirmRows(cur.origin),
+      embeds: [buildShopPhoneSellPickEmbed(member)],
+      components: buildShopPhoneSellPickRows(member),
     });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PHONE_SELL_UID_PREFIX)) {
+    const uid = id.slice(ECON_SHOP_PHONE_SELL_UID_PREFIX.length);
+    const r = sellOwnedPhone(member, uid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopOriginPickEmbed("Телефон", member, "phone")],
+      components: buildShopOriginPickRows(member, "phone", ECON_SHOP_HUB),
+    });
+    await interaction.followUp({ content: `Телефон продан: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -3477,7 +3636,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     await replyOrUpdate(interaction, {
       embeds: [buildShopOriginPickEmbed("Телефон", member, "phone")],
-      components: buildShopOriginPickRows("phone", ECON_SHOP_HUB),
+      components: buildShopOriginPickRows(member, "phone", ECON_SHOP_HUB),
     });
     await interaction.followUp({ content: `Телефон продан: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
     return true;
@@ -3486,7 +3645,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
   if (id === ECON_SHOP_CAR) {
     await replyOrUpdate(interaction, {
       embeds: [buildShopOriginPickEmbed("Авто", member, "car")],
-      components: buildShopOriginPickRows("car", ECON_SHOP_HUB),
+      components: buildShopOriginPickRows(member, "car", ECON_SHOP_HUB),
     });
     return true;
   }
@@ -3503,12 +3662,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id.startsWith(ECON_SHOP_CAR_ORIGIN_PREFIX)) {
     const origin = parseOriginFromSuffix(id.slice(ECON_SHOP_CAR_ORIGIN_PREFIX.length));
-    if (!origin) return true;
-    await replyOrUpdate(interaction, {
-      embeds: [buildShopCarListEmbed(member, origin)],
-      components: buildShopCarListRows(member, origin),
-    });
-    return true;
+    if (origin) {
+      await replyOrUpdate(interaction, {
+        embeds: [buildShopCarListEmbed(member, origin)],
+        components: buildShopCarListRows(member, origin),
+      });
+      return true;
+    }
   }
 
   if (id.startsWith(ECON_SHOP_CAR_BUY_PREFIX)) {
@@ -3525,7 +3685,76 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     await replyOrUpdate(interaction, {
       embeds: [emb],
-      components: buildShopCarBuyConfirmRows(cid, defC.origin),
+      components: buildShopCarBuyConfirmRows(member, cid, defC.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_CAR_FULL_PREFIX)) {
+    const cid = id.slice(ECON_SHOP_CAR_FULL_PREFIX.length);
+    const defC = getCarDef(cid);
+    if (!defC) {
+      await interaction.reply({ content: "Неизвестная модель авто.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const r = purchaseCarFull(member, cid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopCarListEmbed(member, defC.origin)],
+      components: buildShopCarListRows(member, defC.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_CAR_TRADE_OK_PREFIX)) {
+    const rest = id.slice(ECON_SHOP_CAR_TRADE_OK_PREFIX.length);
+    const sep = rest.lastIndexOf(":");
+    const cid = rest.slice(0, sep);
+    const uid = rest.slice(sep + 1);
+    const defC = getCarDef(cid);
+    if (!defC) {
+      await interaction.reply({ content: "Неизвестная модель авто.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const r = purchaseCarTrade(member, cid, uid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopCarListEmbed(member, defC.origin)],
+      components: buildShopCarListRows(member, defC.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_CAR_TRADE_PREFIX)) {
+    const cid = id.slice(ECON_SHOP_CAR_TRADE_PREFIX.length);
+    const defC = getCarDef(cid);
+    const emb = buildShopCarTradePickEmbed(member, cid);
+    if (!defC || !emb) {
+      await interaction.reply({ content: "Неизвестная модель авто.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const owned = listOwnedCars(getEconomyUser(member.guild.id, member.id)).filter((c) => getCarDef(c.id)?.origin === defC.origin);
+    if (owned.length === 1) {
+      const r = purchaseCarTrade(member, cid, owned[0]!.uid);
+      if (!r.ok) {
+        await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await replyOrUpdate(interaction, {
+        embeds: [buildShopCarListEmbed(member, defC.origin)],
+        components: buildShopCarListRows(member, defC.origin),
+      });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [emb],
+      components: buildShopCarTradePickRows(member, cid),
     });
     return true;
   }
@@ -3568,54 +3797,156 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
-  if (id === ECON_SHOP_PLATE_REGISTER) {
-    const r = registerVehiclePlate(member);
-    if (!r.ok) {
-      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+  if (id.startsWith(ECON_SHOP_PLATE_CAR_PREFIX)) {
+    const carUid = id.slice(ECON_SHOP_PLATE_CAR_PREFIX.length);
+    const emb = buildShopPlateCarEmbed(member, carUid);
+    if (!emb) {
+      await interaction.reply({ content: "Авто не найдено.", flags: MessageFlags.Ephemeral });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPlateEmbed(member, r.lastRoll)],
-      components: buildShopPlateRows(member),
+      embeds: [emb],
+      components: buildShopPlateCarRows(member, carUid),
     });
     return true;
   }
 
-  if (id === ECON_SHOP_PLATE_DIGITS) {
-    const r = changeVehiclePlateDigits(member);
+  if (id.startsWith(ECON_SHOP_PLATE_NEW_PREFIX)) {
+    const carUid = id.slice(ECON_SHOP_PLATE_NEW_PREFIX.length);
+    const r = registerVehiclePlateForCar(member, carUid);
     if (!r.ok) {
       await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPlateEmbed(member, r.lastRoll)],
-      components: buildShopPlateRows(member),
+      embeds: [buildShopPlateCarEmbed(member, carUid, r.lastRoll)!],
+      components: buildShopPlateCarRows(member, carUid),
     });
     return true;
   }
 
-  if (id === ECON_SHOP_PLATE_LETTERS) {
-    const r = changeVehiclePlateLetters(member);
+  if (id.startsWith(ECON_SHOP_PLATE_DIG_PREFIX)) {
+    const carUid = id.slice(ECON_SHOP_PLATE_DIG_PREFIX.length);
+    const r = changeVehiclePlateDigitsForCar(member, carUid);
     if (!r.ok) {
       await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPlateEmbed(member, r.lastRoll)],
-      components: buildShopPlateRows(member),
+      embeds: [buildShopPlateCarEmbed(member, carUid, r.lastRoll)!],
+      components: buildShopPlateCarRows(member, carUid),
     });
     return true;
   }
 
-  if (id === ECON_SHOP_PLATE_REGION) {
-    const r = changeVehiclePlateRegion(member);
+  if (id.startsWith(ECON_SHOP_PLATE_LET_PREFIX)) {
+    const carUid = id.slice(ECON_SHOP_PLATE_LET_PREFIX.length);
+    const r = changeVehiclePlateLettersForCar(member, carUid);
     if (!r.ok) {
       await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPlateEmbed(member, r.lastRoll)],
-      components: buildShopPlateRows(member),
+      embeds: [buildShopPlateCarEmbed(member, carUid, r.lastRoll)!],
+      components: buildShopPlateCarRows(member, carUid),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PLATE_RGN_PREFIX)) {
+    const carUid = id.slice(ECON_SHOP_PLATE_RGN_PREFIX.length);
+    const r = changeVehiclePlateRegionForCar(member, carUid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPlateCarEmbed(member, carUid, r.lastRoll)!],
+      components: buildShopPlateCarRows(member, carUid),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PLATE_DET_OK_PREFIX)) {
+    const carUid = id.slice(ECON_SHOP_PLATE_DET_OK_PREFIX.length);
+    const r = detachVehiclePlateFromCar(member, carUid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPlateCarEmbed(member, carUid)!],
+      components: buildShopPlateCarRows(member, carUid),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PLATE_DET_PREFIX)) {
+    const carUid = id.slice(ECON_SHOP_PLATE_DET_PREFIX.length);
+    const emb = buildShopPlateDetachConfirmEmbed(member, carUid);
+    if (!emb) {
+      await interaction.reply({ content: "На этом авто нет госномера.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [emb],
+      components: buildShopPlateDetachConfirmRows(carUid),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PLATE_ATT_OK_PREFIX)) {
+    const rest = id.slice(ECON_SHOP_PLATE_ATT_OK_PREFIX.length);
+    const sep = rest.indexOf(":");
+    const carUid = rest.slice(0, sep);
+    const parts = decodePlateKey(rest.slice(sep + 1));
+    if (!parts) {
+      await interaction.reply({ content: "Некорректный госномер.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const r = attachVehiclePlateToCar(member, carUid, parts);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopPlateCarEmbed(member, carUid)!],
+      components: buildShopPlateCarRows(member, carUid),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PLATE_ATT_PICK_PREFIX)) {
+    const rest = id.slice(ECON_SHOP_PLATE_ATT_PICK_PREFIX.length);
+    const sep = rest.indexOf(":");
+    const carUid = rest.slice(0, sep);
+    const parts = decodePlateKey(rest.slice(sep + 1));
+    if (!parts) {
+      await interaction.reply({ content: "Некорректный госномер.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const emb = buildShopPlateAttachConfirmEmbed(member, carUid, parts);
+    if (!emb) {
+      await interaction.reply({ content: "Авто не найдено.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [emb],
+      components: buildShopPlateAttachConfirmRows(carUid, parts),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_PLATE_ATT_PREFIX)) {
+    const carUid = id.slice(ECON_SHOP_PLATE_ATT_PREFIX.length);
+    const emb = buildShopPlateAttachEmbed(member, carUid);
+    if (!emb) {
+      await interaction.reply({ content: "Авто не найдено.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [emb],
+      components: buildShopPlateAttachRows(member, carUid),
     });
     return true;
   }
@@ -3630,14 +3961,29 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_SHOP_CAR_SELL) {
     const u = getEconomyUser(member.guild.id, member.id);
-    if (!getCarDef(u.ownedCarId)) {
+    if (listOwnedCars(u).length === 0) {
       await interaction.reply({ content: "Нет **авто** для продажи.", flags: MessageFlags.Ephemeral });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopCarSellConfirmEmbed(member)],
-      components: buildShopCarSellConfirmRows(),
+      embeds: [buildShopCarSellPickEmbed(member)],
+      components: buildShopCarSellPickRows(member),
     });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_CAR_SELL_UID_PREFIX)) {
+    const uid = id.slice(ECON_SHOP_CAR_SELL_UID_PREFIX.length);
+    const r = sellOwnedCar(member, uid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopOriginPickEmbed("Авто", member, "car")],
+      components: buildShopOriginPickRows(member, "car", ECON_SHOP_HUB),
+    });
+    await interaction.followUp({ content: `Авто продано: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
     return true;
   }
 
@@ -3663,7 +4009,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     await replyOrUpdate(interaction, {
       embeds: [buildShopOriginPickEmbed("Авто", member, "car")],
-      components: buildShopOriginPickRows("car", ECON_SHOP_HUB),
+      components: buildShopOriginPickRows(member, "car", ECON_SHOP_HUB),
     });
     await interaction.followUp({ content: `Авто продано: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
     return true;
@@ -3890,7 +4236,86 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     await replyOrUpdate(interaction, {
       embeds: [emb],
-      components: buildShopApartmentBuyConfirmRows(aid, defA.origin),
+      components: buildShopApartmentBuyConfirmRows(member, aid, defA.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_APT_FULL_PREFIX)) {
+    const aid = id.slice(ECON_SHOP_APT_FULL_PREFIX.length);
+    const defA = getApartmentDef(aid);
+    if (!defA) {
+      await interaction.reply({ content: "Неизвестная квартира.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const r = purchaseApartmentFull(member, aid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    if (r.refund > 0) {
+      appendFeedEvent({
+        ts: Date.now(),
+        guildId: member.guild.id,
+        type: "job:passive",
+        actorUserId: member.id,
+        text: `${member.toString()} купил **${defA.label}**: возврат с аренды **+${fmt(r.refund)}** ₽.`,
+      });
+      await ensureEconomyFeedPanel(interaction.client);
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopHouseListEmbed(member, defA.origin)],
+      components: buildShopHouseListRows(member, defA.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_APT_TRADE_OK_PREFIX)) {
+    const rest = id.slice(ECON_SHOP_APT_TRADE_OK_PREFIX.length);
+    const sep = rest.lastIndexOf(":");
+    const aid = rest.slice(0, sep);
+    const uid = rest.slice(sep + 1);
+    const defA = getApartmentDef(aid);
+    if (!defA) {
+      await interaction.reply({ content: "Неизвестная квартира.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const r = purchaseApartmentTrade(member, aid, uid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopHouseListEmbed(member, defA.origin)],
+      components: buildShopHouseListRows(member, defA.origin),
+    });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_APT_TRADE_PREFIX)) {
+    const aid = id.slice(ECON_SHOP_APT_TRADE_PREFIX.length);
+    const defA = getApartmentDef(aid);
+    const emb = buildShopAptTradePickEmbed(member, aid);
+    if (!defA || !emb) {
+      await interaction.reply({ content: "Неизвестная квартира.", flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    const owned = listOwnedApartmentsByOrigin(getEconomyUser(member.guild.id, member.id), defA.origin);
+    if (owned.length === 1) {
+      const r = purchaseApartmentTrade(member, aid, owned[0]!.uid);
+      if (!r.ok) {
+        await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+        return true;
+      }
+      await replyOrUpdate(interaction, {
+        embeds: [buildShopHouseListEmbed(member, defA.origin)],
+        components: buildShopHouseListRows(member, defA.origin),
+      });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [emb],
+      components: buildShopAptTradePickRows(member, aid),
     });
     return true;
   }
@@ -3936,13 +4361,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_SHOP_APT_SELL_SOVIET) {
     const u = getEconomyUser(member.guild.id, member.id);
-    if ((u.housingKind ?? "none") !== "owned" || !getApartmentDef(u.ownedApartmentId)) {
+    if (listOwnedApartmentsByOrigin(u, "soviet").length === 0) {
       await interaction.reply({ content: "Нет **советского** жилья для продажи.", flags: MessageFlags.Ephemeral });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopApartmentSellConfirmEmbed(member, "soviet")],
-      components: buildShopApartmentSellSovietConfirmRows(),
+      embeds: [buildShopAptSellPickEmbed(member, "soviet")],
+      components: buildShopAptSellPickRows(member, "soviet"),
     });
     return true;
   }
@@ -3971,13 +4396,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
 
   if (id === ECON_SHOP_APT_SELL_FOREIGN) {
     const u = getEconomyUser(member.guild.id, member.id);
-    if (u.housingForeignKind !== "owned" || !getApartmentDef(u.ownedForeignApartmentId)) {
+    if (listOwnedApartmentsByOrigin(u, "foreign").length === 0) {
       await interaction.reply({ content: "Нет **заморского** жилья для продажи.", flags: MessageFlags.Ephemeral });
       return true;
     }
     await replyOrUpdate(interaction, {
-      embeds: [buildShopApartmentSellConfirmEmbed(member, "foreign")],
-      components: buildShopApartmentSellForeignConfirmRows(),
+      embeds: [buildShopAptSellPickEmbed(member, "foreign")],
+      components: buildShopAptSellPickRows(member, "foreign"),
     });
     return true;
   }
@@ -3999,6 +4424,23 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     await replyOrUpdate(interaction, {
       embeds: [buildShopHouseListEmbed(member, "foreign")],
       components: buildShopHouseListRows(member, "foreign"),
+    });
+    await interaction.followUp({ content: `Жильё продано: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_APT_SELL_UID_PREFIX)) {
+    const uid = id.slice(ECON_SHOP_APT_SELL_UID_PREFIX.length);
+    const rec = findOwnedApartment(getEconomyUser(member.guild.id, member.id), uid);
+    const origin = getApartmentDef(rec?.id)?.origin ?? "soviet";
+    const r = sellOwnedApartment(member, uid);
+    if (!r.ok) {
+      await interaction.reply({ content: r.reply, flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    await replyOrUpdate(interaction, {
+      embeds: [buildShopHouseListEmbed(member, origin)],
+      components: buildShopHouseListRows(member, origin),
     });
     await interaction.followUp({ content: `Жильё продано: **+${fmt(r.refund)}** ₽ на счёт.`, flags: MessageFlags.Ephemeral });
     return true;

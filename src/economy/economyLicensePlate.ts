@@ -380,6 +380,8 @@ export function formatVehiclePlate(parts: VehiclePlateParts): string {
 }
 
 export function parseVehiclePlateParts(u: EconomyUser): VehiclePlateParts | undefined {
+  const fromCar = (u.ownedCars ?? []).map((c) => c.plate).find((p) => p && isValidVehiclePlateParts(p));
+  if (fromCar) return fromCar;
   const l1 = u.vehiclePlateL1;
   const digits = u.vehiclePlateDigits;
   const l2 = u.vehiclePlateL2;
@@ -427,15 +429,22 @@ export function formatVehiclePlateFromUser(u: EconomyUser): string | undefined {
 }
 
 export function userHasOwnedCar(u: EconomyUser): boolean {
+  if ((u.ownedCars ?? []).some((c) => Boolean(getCarDef(c.id)))) return true;
   return Boolean(u.ownedCarId && getCarDef(u.ownedCarId));
 }
 
 export function userHasVehiclePlate(u: EconomyUser): boolean {
+  if ((u.ownedCars ?? []).some((c) => c.plate && isValidVehiclePlateParts(c.plate))) return true;
+  if ((u.unattachedPlates ?? []).some((p) => isValidVehiclePlateParts(p))) return true;
   return parseVehiclePlateParts(u) !== undefined;
 }
 
 export function unregisteredVehiclePenaltyApplies(u: EconomyUser): boolean {
-  return userHasOwnedCar(u) && !userHasVehiclePlate(u);
+  const cars = (u.ownedCars ?? []).filter((c) => Boolean(getCarDef(c.id)));
+  if (cars.length > 0) {
+    return cars.every((c) => !(c.plate && isValidVehiclePlateParts(c.plate)));
+  }
+  return userHasOwnedCar(u) && !parseVehiclePlateParts(u);
 }
 
 /** Уменьшает положительный заработок на 10%, если есть авто без госномера. */
@@ -445,16 +454,27 @@ export function applyUnregisteredVehiclePenalty(u: EconomyUser, amount: number):
 }
 
 export const SHOP_CAR_PLATE_HINT_LINES = [
-  "Без **госномера** — **−10%** к заработку. Оформите в **Гос.номер** (при апгрейде авто номер сохраняется).",
+  "Без **госномера** на авто — **−10%** к заработку. Оформите или прикрепите номер в **Госномер**. Неприкрепленные номера престижа **не** дают.",
 ];
 
 export function economyCarDisplayLine(u: EconomyUser, opts?: { markdown?: boolean }): string {
-  const car = getCarDef(u.ownedCarId);
   const md = opts?.markdown !== false;
-  if (!car) return md ? "Авто: **нет**" : "Авто: нет";
-  const plate = formatVehiclePlateFromUser(u);
-  const label = md ? `**${car.label}**` : car.label;
-  if (!plate) return md ? `Авто: ${label} (госномер **нет**)` : `Авто: ${car.label} (госномер нет)`;
-  const plateFmt = md ? `**${plate}**` : plate;
-  return md ? `Авто: ${label} · ${plateFmt}` : `Авто: ${car.label} · ${plate}`;
+  const cars = (u.ownedCars ?? []).filter((c) => Boolean(getCarDef(c.id)));
+  if (cars.length === 0) {
+    const car = getCarDef(u.ownedCarId);
+    if (!car) return md ? "Авто: **нет**" : "Авто: нет";
+    const plate = formatVehiclePlateFromUser(u);
+    const label = md ? `**${car.label}**` : car.label;
+    if (!plate) return md ? `Авто: ${label} (госномер **нет**)` : `Авто: ${car.label} (госномер нет)`;
+    const plateFmt = md ? `**${plate}**` : plate;
+    return md ? `Авто: ${label} · ${plateFmt}` : `Авто: ${car.label} · ${plate}`;
+  }
+  const parts = cars.map((c) => {
+    const def = getCarDef(c.id)!;
+    const name = md ? `**${def.label}**` : def.label;
+    const plate = c.plate && isValidVehiclePlateParts(c.plate) ? formatVehiclePlate(c.plate) : undefined;
+    if (!plate) return md ? `${name} (госномер **нет**)` : `${name} (госномер нет)`;
+    return md ? `${name} · **${plate}**` : `${name} · ${plate}`;
+  });
+  return `Авто: ${parts.join("; ")}`;
 }

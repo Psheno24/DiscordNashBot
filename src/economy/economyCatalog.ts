@@ -689,16 +689,25 @@ export function petRequirementsLine(pet: PetDef): string {
 
 export function petOwnershipBlockReason(u: {
   hasPhone?: boolean;
+  ownedPhones?: Array<{ id: string }>;
   housingKind?: string;
   ownedApartmentId?: string;
   ownedForeignApartmentId?: string;
   housingForeignKind?: string;
+  ownedApartments?: Array<{ id: string }>;
 }, pet: PetDef): string | null {
-  if (pet.requiresPhone && !u.hasPhone) return "Нужен **телефон** (любой).";
-  const sovIdx = sovietAptTierIndex(u.ownedApartmentId);
-  const forIdx = foreignAptTierIndex(u.ownedForeignApartmentId);
-  const hasSov = u.housingKind === "owned" && sovIdx >= 0;
-  const hasFor = u.housingForeignKind === "owned" && forIdx >= 0;
+  const hasPhone = u.hasPhone === true || (u.ownedPhones ?? []).length > 0;
+  if (pet.requiresPhone && !hasPhone) return "Нужен **телефон** (любой).";
+
+  let sovIdx = sovietAptTierIndex(u.ownedApartmentId);
+  let forIdx = foreignAptTierIndex(u.ownedForeignApartmentId);
+  for (const rec of u.ownedApartments ?? []) {
+    const def = getApartmentDef(rec.id);
+    if (def?.origin === "soviet") sovIdx = Math.max(sovIdx, sovietAptTierIndex(rec.id));
+    if (def?.origin === "foreign") forIdx = Math.max(forIdx, foreignAptTierIndex(rec.id));
+  }
+  const hasSov = sovIdx >= 0;
+  const hasFor = forIdx >= 0;
 
   if (pet.id === "pet_lion") {
     if (hasSov && sovIdx >= pet.minSovietAptIndex) return null;

@@ -1,6 +1,7 @@
 import { inflatedApartmentUtilityRub, inflatedHousingRentPrice, nextHousingUtilityDueMs } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
 import {
+  getApartmentDef,
   housingRentPlanPeriodMs,
   housingRentPlanPriceRub,
   type HousingRentPlan,
@@ -51,6 +52,7 @@ export function jobRequiresHousingForEmployment(jobId: string | undefined): bool
 
 export function userHasActiveHousing(u: EconomyUser, nowMs: number = Date.now()): boolean {
   if (u.housingKind === "rent" && u.housingRentNextDueMs != null && nowMs < u.housingRentNextDueMs) return true;
+  if ((u.ownedApartments ?? []).some((a) => Boolean(getApartmentDef(a.id)))) return true;
   if (u.housingKind === "owned" && u.ownedApartmentId) return true;
   if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId) return true;
   return false;
@@ -68,6 +70,20 @@ export function economyUserClearTier2PlusJobPatch(u: EconomyUser): Partial<Econo
   };
 }
 
+function sumUtilityForOrigin(guildId: string, u: EconomyUser, origin: "soviet" | "foreign"): number {
+  const fromArr = (u.ownedApartments ?? [])
+    .map((a) => getApartmentDef(a.id))
+    .filter((d): d is NonNullable<typeof d> => Boolean(d && d.origin === origin))
+    .reduce((n, d) => n + inflatedApartmentUtilityRub(guildId, d.id), 0);
+  if (fromArr > 0) return fromArr;
+  if (origin === "soviet" && u.housingKind === "owned" && u.ownedApartmentId) {
+    return inflatedApartmentUtilityRub(guildId, u.ownedApartmentId);
+  }
+  if (origin === "foreign" && u.housingForeignKind === "owned" && u.ownedForeignApartmentId) {
+    return inflatedApartmentUtilityRub(guildId, u.ownedForeignApartmentId);
+  }
+  return 0;
+}
 function processForeignUtility(
   guildId: string,
   userId: string,
@@ -75,7 +91,8 @@ function processForeignUtility(
   todayYmd: string,
   nowMs: number,
 ): void {
-  if (u.housingForeignKind !== "owned" || !u.ownedForeignApartmentId) return;
+  const util = sumUtilityForOrigin(guildId, u, "foreign");
+  if (util <= 0 && u.housingForeignKind !== "owned") return;
   if (u.housingForeignLastMskYmd === todayYmd) return;
 
   const mark = { housingForeignLastMskYmd: todayYmd };
@@ -84,7 +101,6 @@ function processForeignUtility(
     u.housingForeignUtilityNextDueMs != null &&
     nowMs >= u.housingForeignUtilityNextDueMs
   ) {
-    const util = inflatedApartmentUtilityRub(guildId, u.ownedForeignApartmentId);
     if (util > 0 && u.rubles >= util) {
       updateEconomyUser(guildId, userId, (cur) => ({
         ...cur,
@@ -93,8 +109,6 @@ function processForeignUtility(
         ...mark,
       }));
       remitShopPurchaseVatToTreasury(guildId, util);
-    } else if (util > 0) {
-      patchEconomyUser(guildId, userId, { ...mark });
     } else {
       patchEconomyUser(guildId, userId, { ...mark });
     }
@@ -173,7 +187,7 @@ export function processHousingMskMidnightForUser(guildId: string, userId: string
     u.housingUtilityNextDueMs != null &&
     nowMs >= u.housingUtilityNextDueMs
   ) {
-    const util = inflatedApartmentUtilityRub(guildId, u.ownedApartmentId);
+    const util = sumUtilityForOrigin(guildId, u, "soviet");
     if (util > 0 && u.rubles >= util) {
       updateEconomyUser(guildId, userId, (cur) => ({
         ...cur,

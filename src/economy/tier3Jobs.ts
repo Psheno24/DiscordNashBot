@@ -64,7 +64,7 @@ export const JOBS_TIER3: Tier3JobDef[] = [
     baseCooldownMs: 8 * 60 * 60 * 1000,
     basePayoutRub: 0,
     description: [
-      "**ИП** тир-3: доход **суточным окладом** (пассивно) от **баланса бизнеса** (до **500 000 000** ₽); **престиж** усиливает оклад; оборот на бизнесе даёт **ощутимый** прирост.",
+      "**ИП** тир-3: доход **суточным окладом** (пассивно) от **баланса бизнеса** (до **500 000 000** ₽). Отдача от капитала **затухает** (не линейный %): на сумме накопления в офисе за 3–4 недели уже выгоднее офиса, дальше сильнее влияют **ранг, престиж и эффективность**.",
       "**Реклама** (риск/доход с баланса бизнеса, лимит суммы растёт с рангом), **персонал** (КД **7 дн.**), **контроль** (КД **сутки**). Пополнение и вывод баланса бизнеса — кнопками **в бизнес** / **на счёт**.",
     ].join("\n"),
     reqSkills: { communication: 55, logistics: 52, discipline: 60 },
@@ -94,6 +94,19 @@ export const SOLE_PROP_CONTROL_CD_MS = 24 * 60 * 60 * 1000;
 export const SOLE_PROP_CAP_MAX = 500_000_000;
 export const SOLE_PROP_RISK_MIN = -2;
 export const SOLE_PROP_RISK_MAX = 2;
+/**
+ * Вклад капитала в суточный оклад: K × ln(1 + cap/REF), не линейный %.
+ * Офис ~287,5k/сут → накопление за ~25 суток ≈ 7,2 млн.
+ * При 7,2 млн: 45k + ~287k ≈ 332k/сут (чуть выше офиса).
+ * При 10–12 млн: ~365–383k (линейные 4% давали 445–525k и разгонялись реинвестом).
+ */
+export const SOLE_PROP_CAPITAL_REF_RUB = 500_000;
+export const SOLE_PROP_CAPITAL_LOG_K = 105_000;
+
+export function solePropCapitalDailyRub(capitalRub: number): number {
+  const cap = Math.max(0, Math.min(SOLE_PROP_CAP_MAX, capitalRub));
+  return Math.floor(SOLE_PROP_CAPITAL_LOG_K * Math.log1p(cap / SOLE_PROP_CAPITAL_REF_RUB));
+}
 
 export function randInt(min: number, max: number): number {
   const a = Math.ceil(min);
@@ -167,8 +180,7 @@ export function computeTier3PassiveRubDetailed(input: Tier3PassiveRubInput): Tie
   const cap = Math.max(0, Math.min(SOLE_PROP_CAP_MAX, input.solePropCapitalRub));
   const dial = Math.min(SOLE_PROP_RISK_MAX, Math.max(SOLE_PROP_RISK_MIN, input.solePropRiskDial));
   const prestigeMult = prestigePassiveIncomeMult(input.prestigePoints ?? 0);
-  const solePropCapPerRubNight = 0.0045;
-  const base = input.def.passiveBaseRub + cap * solePropCapPerRubNight;
+  const base = input.def.passiveBaseRub + solePropCapitalDailyRub(cap);
   let riskJitter = 1 + dial * 0.06;
   if (dial >= 1) {
     riskJitter += (randInt(-10, 10) / 100) * dial;

@@ -1,4 +1,5 @@
 import { getApartmentDef, getPetDef, getPhoneDef } from "./economyCatalog.js";
+import { listOwnedApartmentsByOrigin, listOwnedPhones } from "./economyAssets.js";
 import { economyCarDisplayLine } from "./economyLicensePlate.js";
 import { formatSimNumberFromUser } from "./economySimNumber.js";
 import { economyJobTitle } from "./jobTitles.js";
@@ -34,24 +35,25 @@ function housingOwnedDaysSuffix(purchasedAtMs: number | undefined): string {
 function housingLine(u: EconomyUser): string {
   const hk = u.housingKind ?? "none";
   const parts: string[] = [];
+  const sov = listOwnedApartmentsByOrigin(u, "soviet");
+  const frn = listOwnedApartmentsByOrigin(u, "foreign");
   if (hk === "rent") parts.push("Аренда");
-  else if (hk === "owned") {
-    parts.push(`${apartmentLabel(u.ownedApartmentId)}${housingOwnedDaysSuffix(u.ownedApartmentPurchasedAtMs)}`);
+  for (const a of sov) {
+    parts.push(`${apartmentLabel(a.id)}${housingOwnedDaysSuffix(a.purchasedAtMs)}`);
   }
-  if (u.housingForeignKind === "owned") {
-    parts.push(
-      `${apartmentLabel(u.ownedForeignApartmentId)}${housingOwnedDaysSuffix(u.ownedForeignApartmentPurchasedAtMs)}`,
-    );
+  for (const a of frn) {
+    parts.push(`${apartmentLabel(a.id)}${housingOwnedDaysSuffix(a.purchasedAtMs)}`);
   }
   return `Жильё: ${parts.length > 0 ? parts.join(" · ") : "нет"}`;
 }
 
 function phoneLine(u: EconomyUser): string {
-  if (!u.hasPhone) return "Телефон: нет";
-  const pl = getPhoneDef(u.phoneModelId)?.label ?? "есть";
+  const phones = listOwnedPhones(u);
+  if (phones.length === 0) return "Телефон: нет";
+  const labels = phones.map((p) => getPhoneDef(p.id)?.label ?? "есть").join(", ");
   const sim = formatSimNumberFromUser(u);
-  if (!sim) return `Телефон: ${pl} (сим нет)`;
-  return `Телефон: ${pl} · ${sim}`;
+  if (!sim) return `Телефон: ${labels} (сим нет)`;
+  return `Телефон: ${labels} · ${sim}`;
 }
 
 export function buildProfileCardContent(

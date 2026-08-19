@@ -44,8 +44,6 @@ function jobShiftPayCoeffDetailLine(jobId: JobId): string {
 export const ASSEMBLER_7TH_BONUS_BASE_RUB = 22_000;
 const OFFICE_SHIFT_RANK_BONUS_BASE_RUB = 1_000;
 const OFFICE_SHIFT_STREAK_BONUS_MAX_BASE_RUB = 500;
-const SOLE_PROP_DAILY_BASE_RUB = 45_000;
-const SOLE_PROP_CAPITAL_RATE = 0.0045;
 
 function locFmt(n: number): string {
   if (!Number.isFinite(n)) return "—";
@@ -243,10 +241,11 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
       ].join("\n\n");
       break;
     case "soleProp": {
-      const base = fmtJobIncome(guildId, SOLE_PROP_DAILY_BASE_RUB);
+      const base = fmtJobIncome(guildId, getTier3JobDef("soleProp").passiveBaseRub);
       main = [
         "**Суточный оклад** от **баланса бизнеса** (потолок **500 млн** ₽).",
-        `База **${base}** ₽/сут + **${SOLE_PROP_CAPITAL_RATE * 100}%** от капитала × ранг × престиж × риск.`,
+        `База **${base}** ₽/сут + **затухающая** отдача от капитала (не линейный %) × ранг × престиж × риск.`,
+        "Каждый следующий миллион на балансе даёт **меньше**, чем предыдущий: реинвест не разгоняет оклад. Дальше сильнее **ранг, престиж и эффективность** (персонал).",
         "**Реклама / персонал / контроль** — в панели ИП.",
         "**Навыки:** коммуникация **55+**, логистика **52+**, дисциплина **60+** · **жильё**.",
       ].join("\n\n");

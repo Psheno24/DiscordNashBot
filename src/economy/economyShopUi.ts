@@ -32,9 +32,6 @@ import {
   petPurchaseCostRub,
   petRequirementsLine,
   phonesByOrigin,
-  shopApartmentPurchaseCostRub,
-  shopCarPurchaseCostRub,
-  shopPhonePurchaseCostRub,
   statDeltasOnReplace,
   type CatalogOrigin,
   type HousingRentPlan,
@@ -45,22 +42,11 @@ import {
   SHOP_PLATE_CHANGE_LETTERS_BASE_RUB,
   SHOP_PLATE_CHANGE_REGION_BASE_RUB,
   SHOP_PLATE_REGISTER_BASE_RUB,
-  clearVehiclePlatePatch,
   formatVehiclePlate,
   formatVehiclePlateFromUser,
-  parseVehiclePlateParts,
-  rollUniqueVehiclePlateDigits,
-  rollUniqueVehiclePlateLetters,
-  rollUniqueVehiclePlateParts,
-  rollUniqueVehiclePlateRegion,
-  vehiclePlateKey,
   type VehiclePlateParts,
-  userHasOwnedCar,
-  userHasVehiclePlate,
-  vehiclePlatePartsToPatch,
 } from "./economyLicensePlate.js";
 import {
-  buildPlateUpgradeTips,
   computePlatePrestige,
   platePrestigeRulesTableLines,
   formatPlateRollEmbedFooter,
@@ -92,25 +78,61 @@ import {
   SIM_SHOP_PRESTIGE_HINT_LINES,
   type SimShopLastRoll,
 } from "./economySimPrestige.js";
-import { cancelRentAndBikeOnAssetPurchase } from "./economyHousingUtil.js";
-import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub, userHasActiveHousing } from "./economyHousing.js";
+import { housingRentUnusedRefundRub } from "./economyHousing.js";
 import {
-  inflatedApartmentPurchaseCost,
+  carPlateParts,
+  encodePlateKey,
+  findOwnedCar,
+  formatCarWithPlateLine,
+  listAttachedPlates,
+  listOwnedApartmentsByOrigin,
+  listOwnedCars,
+  listOwnedCarsByOrigin,
+  listOwnedPhones,
+  listOwnedPhonesByOrigin,
+  listUnattachedPlates,
+  shortCarLabel,
+  userCanOpenPlateShop,
+} from "./economyAssets.js";
+import {
   inflatedApartmentUtilityRub,
-  inflatedCarPurchaseCost,
   inflatedCatalogApartmentPrice,
   inflatedCatalogCarPrice,
   inflatedCatalogPhonePrice,
   inflatedHousingRentPrice,
-  inflatedPhonePurchaseCost,
-  nextHousingUtilityDueMs,
   scaledEconomyExpense,
   scaledEconomyPsIncome,
   scaledShopPrice,
 } from "./economyMacro.js";
-import { appendFeedEvent } from "./feedStore.js";
 import { remitShopPurchaseVatToTreasury } from "./taxTreasury.js";
 import { getEconomyUser, listEconomyUsers, patchEconomyUser, updateEconomyUser, type EconomyUser } from "./userStore.js";
+export {
+  attachVehiclePlateToCar,
+  changeVehiclePlateDigits,
+  changeVehiclePlateDigitsForCar,
+  changeVehiclePlateLetters,
+  changeVehiclePlateLettersForCar,
+  changeVehiclePlateRegion,
+  changeVehiclePlateRegionForCar,
+  detachVehiclePlateFromCar,
+  purchaseApartment,
+  purchaseApartmentFull,
+  purchaseApartmentTrade,
+  purchaseCar,
+  purchaseCarFull,
+  purchaseCarTrade,
+  purchasePhone,
+  purchasePhoneFull,
+  purchasePhoneTrade,
+  registerVehiclePlate,
+  registerVehiclePlateForCar,
+  sellForeignApartment,
+  sellOwnedApartment,
+  sellOwnedCar,
+  sellOwnedPhone,
+  sellSovietApartment,
+  syncVehiclePlatePrestige,
+} from "./economyShopActions.js";
 
 const PANEL_COLOR = 0x2b2d31;
 
@@ -141,15 +163,22 @@ export const ECON_SHOP_HUB = "econ:shop:hub";
 export const ECON_SHOP_PHONE = "econ:shop:phone";
 export const ECON_SHOP_PHONE_ORIGIN_PREFIX = "econ:shop:phone:";
 export const ECON_SHOP_PHONE_BUY_PREFIX = "econ:shop:phoneBuy:";
+export const ECON_SHOP_PHONE_FULL_PREFIX = "econ:shop:phoneFull:";
+export const ECON_SHOP_PHONE_TRADE_PREFIX = "econ:shop:phoneTr:";
+export const ECON_SHOP_PHONE_TRADE_OK_PREFIX = "econ:shop:phoneTrOk:";
 export const ECON_SHOP_PHONE_BUY_CONFIRM_PREFIX = "econ:shop:phoneBuyOk:";
 export const ECON_SHOP_PHONE_BUY_CANCEL_PREFIX = "econ:shop:phoneBuyCan:";
 export const ECON_SHOP_PHONE_SELL = "econ:shop:phone:sell";
+export const ECON_SHOP_PHONE_SELL_UID_PREFIX = "econ:shop:phoneSellU:";
 export const ECON_SHOP_PHONE_SELL_CONFIRM = "econ:shop:phone:sell:ok";
 export const ECON_SHOP_PHONE_SELL_CANCEL = "econ:shop:phone:sell:cancel";
 export const ECON_SHOP_PHONE_DETAILS_PREFIX = "econ:shop:phoneCatalog:";
 export const ECON_SHOP_CAR = "econ:shop:car";
 export const ECON_SHOP_CAR_ORIGIN_PREFIX = "econ:shop:car:";
 export const ECON_SHOP_CAR_BUY_PREFIX = "econ:shop:carBuy:";
+export const ECON_SHOP_CAR_FULL_PREFIX = "econ:shop:carFull:";
+export const ECON_SHOP_CAR_TRADE_PREFIX = "econ:shop:carTr:";
+export const ECON_SHOP_CAR_TRADE_OK_PREFIX = "econ:shop:carTrOk:";
 export const ECON_SHOP_CAR_BUY_CONFIRM_PREFIX = "econ:shop:carBuyOk:";
 export const ECON_SHOP_CAR_BUY_CANCEL_PREFIX = "econ:shop:carBuyCan:";
 export const ECON_SHOP_CAR_DETAILS_PREFIX = "econ:shop:carCatalog:";
@@ -159,7 +188,18 @@ export const ECON_SHOP_PLATE_DIGITS = "econ:shop:plate:dig";
 export const ECON_SHOP_PLATE_LETTERS = "econ:shop:plate:let";
 export const ECON_SHOP_PLATE_REGION = "econ:shop:plate:regio";
 export const ECON_SHOP_PLATE_DETAILS = "econ:shop:plate:details";
+export const ECON_SHOP_PLATE_CAR_PREFIX = "econ:shop:plateCar:";
+export const ECON_SHOP_PLATE_DIG_PREFIX = "econ:shop:plateDig:";
+export const ECON_SHOP_PLATE_LET_PREFIX = "econ:shop:plateLet:";
+export const ECON_SHOP_PLATE_RGN_PREFIX = "econ:shop:plateRgn:";
+export const ECON_SHOP_PLATE_NEW_PREFIX = "econ:shop:plateNew:";
+export const ECON_SHOP_PLATE_DET_PREFIX = "econ:shop:plateDet:";
+export const ECON_SHOP_PLATE_DET_OK_PREFIX = "econ:shop:plateDetY:";
+export const ECON_SHOP_PLATE_ATT_PREFIX = "econ:shop:plateAtt:";
+export const ECON_SHOP_PLATE_ATT_PICK_PREFIX = "econ:shop:plateAtP:";
+export const ECON_SHOP_PLATE_ATT_OK_PREFIX = "econ:shop:plateAtY:";
 export const ECON_SHOP_CAR_SELL = "econ:shop:car:sell";
+export const ECON_SHOP_CAR_SELL_UID_PREFIX = "econ:shop:carSellU:";
 export const ECON_SHOP_CAR_SELL_CONFIRM = "econ:shop:car:sell:ok";
 export const ECON_SHOP_CAR_SELL_CANCEL = "econ:shop:car:sell:cancel";
 export const ECON_SHOP_HOUSE = "econ:shop:house";
@@ -172,9 +212,13 @@ export const ECON_SHOP_HOUSE_RENT_7D = "econ:shop:house:rent:7d";
 export const ECON_SHOP_HOUSE_RENT_30D = "econ:shop:house:rent:30d";
 export const ECON_SHOP_HOUSE_LEAVE = "econ:shop:house:leave";
 export const ECON_SHOP_APT_BUY_PREFIX = "econ:shop:aptBuy:";
+export const ECON_SHOP_APT_FULL_PREFIX = "econ:shop:aptFull:";
+export const ECON_SHOP_APT_TRADE_PREFIX = "econ:shop:aptTr:";
+export const ECON_SHOP_APT_TRADE_OK_PREFIX = "econ:shop:aptTrOk:";
 export const ECON_SHOP_APT_BUY_CONFIRM_PREFIX = "econ:shop:aptBuyOk:";
 export const ECON_SHOP_APT_BUY_CANCEL_PREFIX = "econ:shop:aptBuyCan:";
 export const ECON_SHOP_APT_SELL_SOVIET = "econ:shop:apt:sell:sov";
+export const ECON_SHOP_APT_SELL_UID_PREFIX = "econ:shop:aptSellU:";
 export const ECON_SHOP_APT_SELL_SOVIET_CONFIRM = "econ:shop:apt:sell:sov:ok";
 export const ECON_SHOP_APT_SELL_SOVIET_CANCEL = "econ:shop:apt:sell:sov:cancel";
 export const ECON_SHOP_APT_SELL_FOREIGN = "econ:shop:apt:sell:for";
@@ -213,7 +257,7 @@ function tradeInPctLabel(rate: number): string {
   return `${Math.round(rate * 100)}%`;
 }
 
-/** Пояснение зачёта при покупке лучшего в той же ветке (цены на кнопках уже с учётом зачёта). */
+/** Пояснение зачёта при обмене своей вещи. На кнопках каталога всегда полная цена. */
 function shopUpgradeTradeInLine(rate: number): string {
   return `Апгрейд: зачёт **${tradeInPctLabel(rate)}** цены текущего.`;
 }
@@ -242,51 +286,65 @@ function housingOwnedDaysLabel(purchasedAtMs: number | undefined, nowMs: number 
 
 const SHOP_BRANCH_NONE = "**нет**";
 
-function shopBranchOwnershipBlock(u: EconomyUser, kind: "phone" | "car" | "house"): string[] {
-  let soviet = SHOP_BRANCH_NONE;
-  let foreign = SHOP_BRANCH_NONE;
+function catalogStatGainLabel(item: { prestigeDelta: number; domesticDelta: number }): string {
+  const parts: string[] = [];
+  if (item.domesticDelta > 0) parts.push(`+${fmt(item.domesticDelta)} быта`);
+  if (item.prestigeDelta > 0) parts.push(`+${fmt(item.prestigeDelta)} престижа`);
+  if (item.domesticDelta < 0) parts.push(`${signedStat(item.domesticDelta)} быта`);
+  if (item.prestigeDelta < 0) parts.push(`${signedStat(item.prestigeDelta)} престижа`);
+  return parts.join(" · ") || "без статов";
+}
 
+function netSpendLabel(net: number): string {
+  if (net > 0) return `спишется **${fmt(net)}** ₽`;
+  if (net < 0) return `вернётся **${fmt(-net)}** ₽`;
+  return "без доплаты";
+}
+
+function formatOwnedList(
+  items: string[],
+  fallback: string = SHOP_BRANCH_NONE,
+): string {
+  if (items.length === 0) return fallback;
+  return items.map((s) => `**${s}**`).join(", ");
+}
+
+function shopBranchOwnershipBlock(u: EconomyUser, kind: "phone" | "car" | "house"): string[] {
   if (kind === "phone") {
-    if (u.hasPhone) {
-      const cur = getPhoneDef(u.phoneModelId);
-      if (cur) {
-        const label = `**${cur.label}**`;
-        if (cur.origin === "soviet") soviet = label;
-        else foreign = label;
-      }
-    }
-  } else if (kind === "car") {
-    const cur = getCarDef(u.ownedCarId);
-    if (cur) {
-      const label = `**${cur.label}**`;
-      if (cur.origin === "soviet") soviet = label;
-      else foreign = label;
-    }
-    const plate = formatVehiclePlateFromUser(u);
+    const sov = listOwnedPhonesByOrigin(u, "soviet").map((p) => getPhoneDef(p.id)?.label ?? p.id);
+    const frn = listOwnedPhonesByOrigin(u, "foreign").map((p) => getPhoneDef(p.id)?.label ?? p.id);
+    return ["**У вас:**", `• **Советское:** ${formatOwnedList(sov)}`, `• **Заморское:** ${formatOwnedList(frn)}`];
+  }
+  if (kind === "car") {
+    const sov = listOwnedCarsByOrigin(u, "soviet");
+    const frn = listOwnedCarsByOrigin(u, "foreign");
+    const unattached = listUnattachedPlates(u);
     return [
       "**У вас:**",
-      `• **Советское:** ${soviet}`,
-      `• **Заморское:** ${foreign}`,
-      `• **Госномер:** ${plate ? `**${plate}**` : SHOP_BRANCH_NONE}`,
+      `• **Советское:** ${sov.length ? sov.map((c) => formatCarWithPlateLine(c)).join("; ") : SHOP_BRANCH_NONE}`,
+      `• **Заморское:** ${frn.length ? frn.map((c) => formatCarWithPlateLine(c)).join("; ") : SHOP_BRANCH_NONE}`,
+      `• **Неприкрепленные номера:** ${
+        unattached.length ? unattached.map((p) => `**${formatVehiclePlate(p)}**`).join(", ") : SHOP_BRANCH_NONE
+      }`,
     ];
-  } else {
-    const hk = u.housingKind ?? "none";
-    const now = Date.now();
-    if (hk === "owned" && u.ownedApartmentId) {
-      const label = getApartmentDef(u.ownedApartmentId)?.label ?? "—";
-      const owned = housingOwnedDaysLabel(u.ownedApartmentPurchasedAtMs, now);
-      soviet = owned ? `**${label}** (${owned})` : `**${label}**`;
-    } else if (hk === "rent" && u.housingRentNextDueMs) {
-      soviet = `аренда до <t:${Math.floor(u.housingRentNextDueMs / 1000)}:R>`;
-    }
-    if (u.housingForeignKind === "owned" && u.ownedForeignApartmentId) {
-      const label = getApartmentDef(u.ownedForeignApartmentId)?.label ?? "—";
-      const owned = housingOwnedDaysLabel(u.ownedForeignApartmentPurchasedAtMs, now);
-      foreign = owned ? `**${label}** (${owned})` : `**${label}**`;
-    }
   }
-
-  return ["**У вас:**", `• **Советское:** ${soviet}`, `• **Заморское:** ${foreign}`];
+  const now = Date.now();
+  const hk = u.housingKind ?? "none";
+  const sovApts = listOwnedApartmentsByOrigin(u, "soviet").map((a) => {
+    const label = getApartmentDef(a.id)?.label ?? a.id;
+    const owned = housingOwnedDaysLabel(a.purchasedAtMs, now);
+    return owned ? `${label} (${owned})` : label;
+  });
+  const frnApts = listOwnedApartmentsByOrigin(u, "foreign").map((a) => {
+    const label = getApartmentDef(a.id)?.label ?? a.id;
+    const owned = housingOwnedDaysLabel(a.purchasedAtMs, now);
+    return owned ? `${label} (${owned})` : label;
+  });
+  let soviet = formatOwnedList(sovApts);
+  if (sovApts.length === 0 && hk === "rent" && u.housingRentNextDueMs) {
+    soviet = `аренда до <t:${Math.floor(u.housingRentNextDueMs / 1000)}:R>`;
+  }
+  return ["**У вас:**", `• **Советское:** ${soviet}`, `• **Заморское:** ${formatOwnedList(frnApts)}`];
 }
 
 export function shopItemButtonLabel(short: string, cost: number): string {
@@ -352,7 +410,11 @@ export function buildShopOriginPickEmbed(
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle(title).setDescription(lines.join("\n"));
 }
 
-export function buildShopOriginPickRows(kind: "phone" | "car", backId: string): ActionRowBuilder<ButtonBuilder>[] {
+export function buildShopOriginPickRows(
+  member: GuildMember,
+  kind: "phone" | "car",
+  backId: string,
+): ActionRowBuilder<ButtonBuilder>[] {
   const prefix = kind === "phone" ? ECON_SHOP_PHONE_ORIGIN_PREFIX : ECON_SHOP_CAR_ORIGIN_PREFIX;
   const rows: ActionRowBuilder<ButtonBuilder>[] = [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -368,9 +430,14 @@ export function buildShopOriginPickRows(kind: "phone" | "car", backId: string): 
     );
   }
   if (kind === "car") {
+    const u = getEconomyUser(member.guild.id, member.id);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_SHOP_PLATE).setLabel("Госномер").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder()
+          .setCustomId(ECON_SHOP_PLATE)
+          .setLabel("Госномер")
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(!userCanOpenPlateShop(u)),
       ),
     );
   }
@@ -384,86 +451,150 @@ function inflatedPlateShopPrice(guildId: string, baseRub: number): number {
 
 export function buildShopPlateEmbed(member: GuildMember, lastRoll?: PlateShopLastRoll): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const plate = formatVehiclePlateFromUser(u);
-  const plateParts = parseVehiclePlateParts(u);
-  const platePrestige = plateParts ? computePlatePrestige(plateParts) : undefined;
+  const cars = listOwnedCars(u);
+  const unattached = listUnattachedPlates(u);
   const lines = [
     `Баланс: **${fmt(u.rubles)}** ₽`,
     "",
-    plate ? `Госномер: **${plate}**` : "Госномер: **не оформлен**",
-    "Престиж = серия + цифры + регион + визуал + множители сочетаний.",
+    "**Ваши авто:**",
+    cars.length ? cars.map((c) => `• ${formatCarWithPlateLine(c)}`).join("\n") : "• нет",
+    "",
+    "**Неприкрепленные:**",
+    unattached.length ? unattached.map((p) => `• **${formatVehiclePlate(p)}**`).join("\n") : "• нет",
+    "",
+    "Неприкрепленные номера престижа **не** дают. Престиж = серия + цифры + регион + визуал + множители сочетаний.",
   ];
   if (!lastRoll) {
     lines.push("", ...PLATE_SHOP_PRESTIGE_HINT_LINES);
   }
-  if (platePrestige && platePrestige.total > 0) {
-    lines.push(`Престиж: **${fmt(platePrestige.total)}**`);
-  } else if (plate) {
-    lines.push("Престиж: **0**");
-  }
+  const attachedPrestige = (u.vehiclePlatePrestige ?? 0);
+  if (attachedPrestige > 0) lines.push(`Престиж с авто: **${fmt(attachedPrestige)}**`);
   if (lastRoll) lines.push(...formatPlateRollEmbedFooter(lastRoll));
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Госномер").setDescription(lines.join("\n"));
 }
 
 export function buildShopPlateDetailsEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const plateParts = parseVehiclePlateParts(u);
+  const attached = listAttachedPlates(u);
+  const unattached = listUnattachedPlates(u);
   const lines = [...platePrestigeRulesTableLines()];
-  if (plateParts) {
-    const b = computePlatePrestige(plateParts);
-    lines.push("", `Ваш текущий номер даёт: **${fmt(b.total)}** престижа.`);
+  if (attached.length > 0) {
+    lines.push("", "**Прикрепленные (дают престиж):**");
+    for (const p of attached) {
+      lines.push(`• **${formatVehiclePlate(p)}** — **${fmt(computePlatePrestige(p).total)}** престижа`);
+    }
+  }
+  if (unattached.length > 0) {
+    lines.push("", "**Неприкрепленные (престижа нет):**");
+    for (const p of unattached) {
+      lines.push(`• **${formatVehiclePlate(p)}**`);
+    }
   }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Госномер · условия").setDescription(lines.join("\n"));
 }
 
 export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
-  const gid = member.guild.id;
-  const hasCar = userHasOwnedCar(u);
-  const hasPlate = userHasVehiclePlate(u);
-  const regCost = inflatedPlateShopPrice(gid, SHOP_PLATE_REGISTER_BASE_RUB);
-  const digCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
-  const letCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
-  const regioCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
-
-  const digitsBtn = new ButtonBuilder()
-    .setCustomId(ECON_SHOP_PLATE_DIGITS)
-    .setLabel(`Цифры · ${fmt(digCost)} ₽`)
-    .setStyle(ButtonStyle.Secondary)
-    .setDisabled(!hasPlate || u.rubles < digCost);
-  const lettersBtn = new ButtonBuilder()
-    .setCustomId(ECON_SHOP_PLATE_LETTERS)
-    .setLabel(`Буквы · ${fmt(letCost)} ₽`)
-    .setStyle(ButtonStyle.Secondary)
-    .setDisabled(!hasPlate || u.rubles < letCost);
-  const regionBtn = new ButtonBuilder()
-    .setCustomId(ECON_SHOP_PLATE_REGION)
-    .setLabel(`Регион · ${fmt(regioCost)} ₽`)
-    .setStyle(ButtonStyle.Secondary)
-    .setDisabled(!hasPlate || u.rubles < regioCost);
-
-  const mainRow = new ActionRowBuilder<ButtonBuilder>();
-  if (!hasPlate) {
-    mainRow.addComponents(
-      new ButtonBuilder()
-        .setCustomId(ECON_SHOP_PLATE_REGISTER)
-        .setLabel(`Оформить · ${fmt(regCost)} ₽`)
-        .setStyle(ButtonStyle.Success)
-        .setDisabled(!hasCar || u.rubles < regCost),
-      ButtonBuilder.from(digitsBtn).setDisabled(true),
-      ButtonBuilder.from(lettersBtn).setDisabled(true),
-      ButtonBuilder.from(regionBtn).setDisabled(true),
+  const cars = listOwnedCars(u).filter((c) => Boolean(getCarDef(c.id)));
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < Math.min(cars.length, 12); i += 4) {
+    const slice = cars.slice(i, i + 4);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((c) =>
+          new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_PLATE_CAR_PREFIX}${c.uid}`)
+            .setLabel(shortCarLabel(c))
+            .setStyle(ButtonStyle.Secondary),
+        ),
+      ),
     );
-  } else {
-    mainRow.addComponents(digitsBtn, lettersBtn, regionBtn);
   }
-
-  return [
-    mainRow,
+  rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(ECON_SHOP_PLATE_DETAILS).setLabel("Условия").setStyle(ButtonStyle.Secondary),
     ),
-    shopNavBottomRow(ECON_SHOP_CAR),
+  );
+  rows.push(shopNavBottomRow(ECON_SHOP_CAR));
+  return rows;
+}
+
+export function buildShopPlateCarEmbed(member: GuildMember, carUid: string, lastRoll?: PlateShopLastRoll): EmbedBuilder | undefined {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const car = findOwnedCar(u, carUid);
+  if (!car) return undefined;
+  const plate = carPlateParts(car);
+  const platePrestige = plate ? computePlatePrestige(plate) : undefined;
+  const lines = [
+    `Баланс: **${fmt(u.rubles)}** ₽`,
+    `Авто: ${formatCarWithPlateLine(car)}`,
+    plate ? `Госномер: **${formatVehiclePlate(plate)}**` : "Госномер: **нет** (можно оформить или прикрепить из запаса).",
+  ];
+  if (platePrestige) lines.push(`Престиж этого номера: **${fmt(platePrestige.total)}**`);
+  if (!lastRoll) lines.push("", ...PLATE_SHOP_PRESTIGE_HINT_LINES);
+  if (lastRoll) lines.push(...formatPlateRollEmbedFooter(lastRoll));
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Госномер · авто").setDescription(lines.join("\n"));
+}
+
+export function buildShopPlateCarRows(member: GuildMember, carUid: string): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const car = findOwnedCar(u, carUid);
+  const hasPlate = Boolean(car && carPlateParts(car));
+  const unattached = listUnattachedPlates(u);
+  const digCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
+  const letCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
+  const regioCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
+  const regCost = inflatedPlateShopPrice(gid, SHOP_PLATE_REGISTER_BASE_RUB);
+
+  const changeRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${ECON_SHOP_PLATE_DIG_PREFIX}${carUid}`)
+      .setLabel(`Цифры · ${fmt(digCost)} ₽`)
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!hasPlate || u.rubles < digCost),
+    new ButtonBuilder()
+      .setCustomId(`${ECON_SHOP_PLATE_LET_PREFIX}${carUid}`)
+      .setLabel(`Буквы · ${fmt(letCost)} ₽`)
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!hasPlate || u.rubles < letCost),
+    new ButtonBuilder()
+      .setCustomId(`${ECON_SHOP_PLATE_RGN_PREFIX}${carUid}`)
+      .setLabel(`Регион · ${fmt(regioCost)} ₽`)
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(!hasPlate || u.rubles < regioCost),
+  );
+
+  const actionRow = new ActionRowBuilder<ButtonBuilder>();
+  if (hasPlate) {
+    actionRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_PLATE_DET_PREFIX}${carUid}`)
+        .setLabel("Снять номер")
+        .setStyle(ButtonStyle.Danger),
+    );
+  } else {
+    actionRow.addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_PLATE_NEW_PREFIX}${carUid}`)
+        .setLabel(`Оформить · ${fmt(regCost)} ₽`)
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(u.rubles < regCost),
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_PLATE_ATT_PREFIX}${carUid}`)
+        .setLabel("Прикрепить номер")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(unattached.length === 0),
+    );
+  }
+
+  return [
+    changeRow,
+    actionRow,
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(ECON_SHOP_PLATE_DETAILS).setLabel("Условия").setStyle(ButtonStyle.Secondary),
+    ),
+    shopNavBottomRow(ECON_SHOP_PLATE),
   ];
 }
 
@@ -513,54 +644,99 @@ export function buildShopPhoneBuyConfirmEmbed(member: GuildMember, pid: string):
   const defP = getPhoneDef(pid);
   if (!defP) return undefined;
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPhoneDef(u.phoneModelId);
-  const cost = inflatedPhonePurchaseCost(member.guild.id, cur, defP, Boolean(u.hasPhone));
+  const gid = member.guild.id;
+  const full = inflatedCatalogPhonePrice(gid, defP.id);
+  const owned = listOwnedPhonesByOrigin(u, defP.origin);
   const lines = [
-    `Купить **${defP.label}**?`,
-    `Спишется **${fmt(cost)}** ₽ с личного счёта.`,
-    `Статы после замены: **${statChangeLabel(cur, defP)}**`,
+    `**${defP.label}**`,
+    `Полная цена: **${fmt(full)}** ₽ — ${netSpendLabel(full)} · статы: **${catalogStatGainLabel(defP)}**`,
   ];
-  if (cur && cur.origin === defP.origin && u.hasPhone) {
-    const credit = Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_TRADE_IN_RATE);
-    lines.push("", `Зачёт за **${cur.label}**: **−${fmt(credit)}** ₽ (**${tradeInPctLabel(PHONE_TRADE_IN_RATE)}** каталожной цены).`);
+  if (owned.length === 0) {
+    lines.push("", "Обменять пока **нечего** — можно только купить за полную стоимость.");
+  } else {
+    lines.push("", `Обмен своей (зачёт **${tradeInPctLabel(PHONE_TRADE_IN_RATE)}**):`);
+    for (const rec of owned) {
+      const cur = getPhoneDef(rec.id);
+      if (!cur) continue;
+      const credit = Math.floor(inflatedCatalogPhonePrice(gid, cur.id) * PHONE_TRADE_IN_RATE);
+      const net = full - credit;
+      const delta = statDeltasOnReplace(cur, defP);
+      lines.push(`• **${cur.label}**: ${netSpendLabel(net)} · ${statChangeLabel(cur, defP)}`);
+      void delta;
+    }
   }
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Подтверждение покупки").setDescription(lines.join("\n"));
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Покупка телефона").setDescription(lines.join("\n"));
 }
 
-export function buildShopPhoneBuyConfirmRows(pid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
-  return buildShopConfirmRows(
-    `${ECON_SHOP_PHONE_BUY_CONFIRM_PREFIX}${pid}`,
-    "Купить",
-    ButtonStyle.Success,
-    `${ECON_SHOP_PHONE_BUY_CANCEL_PREFIX}${origin}`,
-  );
+export function buildShopPhoneBuyConfirmRows(member: GuildMember, pid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const defP = getPhoneDef(pid);
+  const full = defP ? inflatedCatalogPhonePrice(gid, defP.id) : 0;
+  const canTrade = listOwnedPhonesByOrigin(u, origin).length > 0;
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_PHONE_FULL_PREFIX}${pid}`)
+        .setLabel("Купить за полную стоимость")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(u.rubles < full),
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_PHONE_TRADE_PREFIX}${pid}`)
+        .setLabel("Обменять свою")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(!canTrade),
+    ),
+    shopNavBottomRow(`${ECON_SHOP_PHONE_BUY_CANCEL_PREFIX}${origin}`, "Назад"),
+  ];
 }
 
 export function buildShopCarBuyConfirmEmbed(member: GuildMember, cid: string): EmbedBuilder | undefined {
   const defC = getCarDef(cid);
   if (!defC) return undefined;
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getCarDef(u.ownedCarId);
-  const cost = inflatedCarPurchaseCost(member.guild.id, cur, defC);
+  const gid = member.guild.id;
+  const full = inflatedCatalogCarPrice(gid, defC.id);
+  const owned = listOwnedCarsByOrigin(u, defC.origin);
   const lines = [
-    `Купить **${defC.label}**?`,
-    `Спишется **${fmt(cost)}** ₽ с личного счёта.`,
-    `Статы после замены: **${statChangeLabel(cur, defC)}**`,
+    `**${defC.label}**`,
+    `Полная цена: **${fmt(full)}** ₽ — ${netSpendLabel(full)} · статы: **${catalogStatGainLabel(defC)}**`,
   ];
-  if (cur && cur.origin === defC.origin) {
-    const credit = Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_TRADE_IN_RATE);
-    lines.push("", `Зачёт за **${cur.label}**: **−${fmt(credit)}** ₽ (**${tradeInPctLabel(CAR_TRADE_IN_RATE)}** каталожной цены).`);
+  if (owned.length === 0) {
+    lines.push("", "Обменять пока **нечего** — можно только купить за полную стоимость.");
+  } else {
+    lines.push("", `Обмен своей (зачёт **${tradeInPctLabel(CAR_TRADE_IN_RATE)}**). Госномер с обмениваемой машины уйдёт в неприкрепленные.`);
+    for (const rec of owned) {
+      const cur = getCarDef(rec.id);
+      if (!cur) continue;
+      const credit = Math.floor(inflatedCatalogCarPrice(gid, cur.id) * CAR_TRADE_IN_RATE);
+      lines.push(`• **${cur.label}**: ${netSpendLabel(full - credit)} · ${statChangeLabel(cur, defC)}`);
+    }
   }
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Подтверждение покупки").setDescription(lines.join("\n"));
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Покупка авто").setDescription(lines.join("\n"));
 }
 
-export function buildShopCarBuyConfirmRows(cid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
-  return buildShopConfirmRows(
-    `${ECON_SHOP_CAR_BUY_CONFIRM_PREFIX}${cid}`,
-    "Купить",
-    ButtonStyle.Success,
-    `${ECON_SHOP_CAR_BUY_CANCEL_PREFIX}${origin}`,
-  );
+export function buildShopCarBuyConfirmRows(member: GuildMember, cid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const defC = getCarDef(cid);
+  const full = defC ? inflatedCatalogCarPrice(gid, defC.id) : 0;
+  const canTrade = listOwnedCarsByOrigin(u, origin).length > 0;
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_CAR_FULL_PREFIX}${cid}`)
+        .setLabel("Купить за полную стоимость")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(u.rubles < full),
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_CAR_TRADE_PREFIX}${cid}`)
+        .setLabel("Обменять свою")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(!canTrade),
+    ),
+    shopNavBottomRow(`${ECON_SHOP_CAR_BUY_CANCEL_PREFIX}${origin}`, "Назад"),
+  ];
 }
 
 export function buildShopApartmentBuyConfirmEmbed(member: GuildMember, aid: string): EmbedBuilder | undefined {
@@ -569,58 +745,387 @@ export function buildShopApartmentBuyConfirmEmbed(member: GuildMember, aid: stri
   const u = getEconomyUser(member.guild.id, member.id);
   const now = Date.now();
   const gid = member.guild.id;
-  const curA =
-    defA.origin === "soviet" && (u.housingKind ?? "none") === "owned"
-      ? getApartmentDef(u.ownedApartmentId)
-      : undefined;
-  const curF = defA.origin === "foreign" && u.housingForeignKind === "owned" ? getApartmentDef(u.ownedForeignApartmentId) : undefined;
-  const cur = curA ?? curF;
-  const cost =
-    cur && ((defA.origin === "soviet" && (u.housingKind ?? "none") === "owned") || (defA.origin === "foreign" && u.housingForeignKind === "owned"))
-      ? inflatedApartmentPurchaseCost(
-          gid,
-          cur,
-          defA,
-          defA.origin === "soviet" ? u.ownedApartmentPurchasedAtMs : u.ownedForeignApartmentPurchasedAtMs,
-          now,
-        )
-      : inflatedCatalogApartmentPrice(gid, defA.id);
+  const full = inflatedCatalogApartmentPrice(gid, defA.id);
   const util = inflatedApartmentUtilityRub(gid, defA.id);
+  const owned = listOwnedApartmentsByOrigin(u, defA.origin);
   const lines = [
-    `Купить **${defA.label}**?`,
-    `Спишется **${fmt(cost)}** ₽ с личного счёта.`,
-    `Статы после замены: **${statChangeLabel(cur, defA)}**`,
+    `**${defA.label}**`,
+    `Полная цена: **${fmt(full)}** ₽ — ${netSpendLabel(full)} · статы: **${catalogStatGainLabel(defA)}**`,
     `ЖКХ: **${fmt(util)}** ₽/мес.`,
   ];
   if (defA.origin === "soviet" && (u.housingKind ?? "none") === "rent") {
     const rentRefund = housingRentUnusedRefundRub(u, now, gid);
-    if (rentRefund > 0) {
-      lines.push("", `Возврат неиспользованной аренды: **+${fmt(rentRefund)}** ₽.`);
+    if (rentRefund > 0) lines.push(`При покупке вернётся неиспользованная аренда: **+${fmt(rentRefund)}** ₽.`);
+  }
+  if (owned.length === 0) {
+    lines.push("", "Обменять пока **нечего** — можно только купить за полную стоимость.");
+  } else {
+    lines.push("", "Обмен своей (зачёт зависит от срока владения):");
+    for (const rec of owned) {
+      const cur = getApartmentDef(rec.id);
+      if (!cur) continue;
+      const rate = apartmentTradeInRate(rec.purchasedAtMs, now);
+      const credit = Math.floor(inflatedCatalogApartmentPrice(gid, cur.id) * rate);
+      lines.push(`• **${cur.label}**: ${netSpendLabel(full - credit)} · ${statChangeLabel(cur, defA)} · зачёт **${tradeInPctLabel(rate)}**`);
     }
   }
-  if (cur && cur.origin === defA.origin) {
-    const rate =
-      defA.origin === "soviet"
-        ? (u.ownedApartmentPurchasedAtMs != null && now - u.ownedApartmentPurchasedAtMs >= HOUSING_CALENDAR_MONTH_MS
-            ? APARTMENT_TRADE_IN_RATE_AFTER_MONTH
-            : APARTMENT_TRADE_IN_RATE)
-        : u.ownedForeignApartmentPurchasedAtMs != null &&
-            now - u.ownedForeignApartmentPurchasedAtMs >= HOUSING_CALENDAR_MONTH_MS
-          ? APARTMENT_TRADE_IN_RATE_AFTER_MONTH
-          : APARTMENT_TRADE_IN_RATE;
-    const credit = Math.floor(inflatedCatalogApartmentPrice(gid, cur.id) * rate);
-    lines.push("", `Зачёт за **${cur.label}**: **−${fmt(credit)}** ₽ (**${tradeInPctLabel(rate)}** каталожной цены).`);
-  }
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Подтверждение покупки").setDescription(lines.join("\n"));
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Покупка жилья").setDescription(lines.join("\n"));
 }
 
-export function buildShopApartmentBuyConfirmRows(aid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
-  return buildShopConfirmRows(
-    `${ECON_SHOP_APT_BUY_CONFIRM_PREFIX}${aid}`,
-    "Купить",
-    ButtonStyle.Success,
-    `${ECON_SHOP_APT_BUY_CANCEL_PREFIX}${origin}`,
-  );
+export function buildShopApartmentBuyConfirmRows(member: GuildMember, aid: string, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const defA = getApartmentDef(aid);
+  const full = defA ? inflatedCatalogApartmentPrice(gid, defA.id) : 0;
+  const rentRefund =
+    defA?.origin === "soviet" && (u.housingKind ?? "none") === "rent" ? housingRentUnusedRefundRub(u, Date.now(), gid) : 0;
+  const canTrade = listOwnedApartmentsByOrigin(u, origin).length > 0;
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_APT_FULL_PREFIX}${aid}`)
+        .setLabel("Купить за полную стоимость")
+        .setStyle(ButtonStyle.Success)
+        .setDisabled(u.rubles + rentRefund < full),
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_APT_TRADE_PREFIX}${aid}`)
+        .setLabel("Обменять свою")
+        .setStyle(ButtonStyle.Primary)
+        .setDisabled(!canTrade),
+    ),
+    shopNavBottomRow(`${ECON_SHOP_APT_BUY_CANCEL_PREFIX}${origin}`, "Назад"),
+  ];
+}
+
+export function buildShopPhoneTradePickEmbed(member: GuildMember, pid: string): EmbedBuilder | undefined {
+  const defP = getPhoneDef(pid);
+  if (!defP) return undefined;
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const full = inflatedCatalogPhonePrice(gid, defP.id);
+  const owned = listOwnedPhonesByOrigin(u, defP.origin);
+  const lines = [`Обменять на **${defP.label}** (полная цена **${fmt(full)}** ₽). Выберите свой телефон:`, ""];
+  for (const rec of owned) {
+    const cur = getPhoneDef(rec.id);
+    if (!cur) continue;
+    const credit = Math.floor(inflatedCatalogPhonePrice(gid, cur.id) * PHONE_TRADE_IN_RATE);
+    lines.push(`• **${cur.label}**: ${netSpendLabel(full - credit)}`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Обмен телефона").setDescription(lines.join("\n"));
+}
+
+export function buildShopPhoneTradePickRows(member: GuildMember, pid: string): ActionRowBuilder<ButtonBuilder>[] {
+  const defP = getPhoneDef(pid);
+  const u = getEconomyUser(member.guild.id, member.id);
+  const owned = defP ? listOwnedPhonesByOrigin(u, defP.origin) : [];
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
+    const slice = owned.slice(i, i + 2);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((rec) => {
+          const cur = getPhoneDef(rec.id);
+          const full = defP ? inflatedCatalogPhonePrice(member.guild.id, defP.id) : 0;
+          const credit = cur ? Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_TRADE_IN_RATE) : 0;
+          const net = full - credit;
+          return new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_PHONE_TRADE_OK_PREFIX}${pid}:${rec.uid}`)
+            .setLabel(shopItemButtonLabel(cur?.label ?? "телефон", Math.max(0, net)))
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(net > 0 && u.rubles < net);
+        }),
+      ),
+    );
+  }
+  rows.push(shopNavBottomRow(`${ECON_SHOP_PHONE_BUY_PREFIX}${pid}`, "Назад"));
+  return rows;
+}
+
+export function buildShopCarTradePickEmbed(member: GuildMember, cid: string): EmbedBuilder | undefined {
+  const defC = getCarDef(cid);
+  if (!defC) return undefined;
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const full = inflatedCatalogCarPrice(gid, defC.id);
+  const owned = listOwnedCarsByOrigin(u, defC.origin);
+  const lines = [
+    `Обменять на **${defC.label}** (полная цена **${fmt(full)}** ₽).`,
+    "Госномер с обмениваемой машины уйдёт в неприкрепленные.",
+    "",
+  ];
+  for (const rec of owned) {
+    const cur = getCarDef(rec.id);
+    if (!cur) continue;
+    const credit = Math.floor(inflatedCatalogCarPrice(gid, cur.id) * CAR_TRADE_IN_RATE);
+    lines.push(`• **${cur.label}**: ${netSpendLabel(full - credit)}`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Обмен авто").setDescription(lines.join("\n"));
+}
+
+export function buildShopCarTradePickRows(member: GuildMember, cid: string): ActionRowBuilder<ButtonBuilder>[] {
+  const defC = getCarDef(cid);
+  const u = getEconomyUser(member.guild.id, member.id);
+  const owned = defC ? listOwnedCarsByOrigin(u, defC.origin) : [];
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
+    const slice = owned.slice(i, i + 2);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((rec) => {
+          const cur = getCarDef(rec.id);
+          const full = defC ? inflatedCatalogCarPrice(member.guild.id, defC.id) : 0;
+          const credit = cur ? Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_TRADE_IN_RATE) : 0;
+          const net = full - credit;
+          return new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_CAR_TRADE_OK_PREFIX}${cid}:${rec.uid}`)
+            .setLabel(shopItemButtonLabel(cur?.label ?? "авто", Math.max(0, net)))
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(net > 0 && u.rubles < net);
+        }),
+      ),
+    );
+  }
+  rows.push(shopNavBottomRow(`${ECON_SHOP_CAR_BUY_PREFIX}${cid}`, "Назад"));
+  return rows;
+}
+
+export function buildShopAptTradePickEmbed(member: GuildMember, aid: string): EmbedBuilder | undefined {
+  const defA = getApartmentDef(aid);
+  if (!defA) return undefined;
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const now = Date.now();
+  const full = inflatedCatalogApartmentPrice(gid, defA.id);
+  const owned = listOwnedApartmentsByOrigin(u, defA.origin);
+  const lines = [`Обменять на **${defA.label}** (полная цена **${fmt(full)}** ₽).`, ""];
+  for (const rec of owned) {
+    const cur = getApartmentDef(rec.id);
+    if (!cur) continue;
+    const rate = apartmentTradeInRate(rec.purchasedAtMs, now);
+    const credit = Math.floor(inflatedCatalogApartmentPrice(gid, cur.id) * rate);
+    lines.push(`• **${cur.label}**: ${netSpendLabel(full - credit)} · зачёт **${tradeInPctLabel(rate)}**`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Обмен жилья").setDescription(lines.join("\n"));
+}
+
+export function buildShopAptTradePickRows(member: GuildMember, aid: string): ActionRowBuilder<ButtonBuilder>[] {
+  const defA = getApartmentDef(aid);
+  const u = getEconomyUser(member.guild.id, member.id);
+  const now = Date.now();
+  const owned = defA ? listOwnedApartmentsByOrigin(u, defA.origin) : [];
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
+    const slice = owned.slice(i, i + 2);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((rec) => {
+          const cur = getApartmentDef(rec.id);
+          const full = defA ? inflatedCatalogApartmentPrice(member.guild.id, defA.id) : 0;
+          const rate = apartmentTradeInRate(rec.purchasedAtMs, now);
+          const credit = cur ? Math.floor(inflatedCatalogApartmentPrice(member.guild.id, cur.id) * rate) : 0;
+          const net = full - credit;
+          return new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_APT_TRADE_OK_PREFIX}${aid}:${rec.uid}`)
+            .setLabel(shopItemButtonLabel(apartmentShopShortLabel(cur?.label ?? "жильё"), Math.max(0, net)))
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(net > 0 && u.rubles < net);
+        }),
+      ),
+    );
+  }
+  rows.push(shopNavBottomRow(`${ECON_SHOP_APT_BUY_PREFIX}${aid}`, "Назад"));
+  return rows;
+}
+
+export function buildShopPhoneSellPickEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const lines = ["Выберите телефон для продажи:", ""];
+  for (const rec of listOwnedPhones(u)) {
+    const cur = getPhoneDef(rec.id);
+    if (!cur) continue;
+    const refund = Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_SELL_REFUND_RATE);
+    lines.push(`• **${cur.label}**: вернётся **${fmt(refund)}** ₽`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Продажа телефона").setDescription(lines.join("\n"));
+}
+
+export function buildShopPhoneSellPickRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const owned = listOwnedPhones(u);
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
+    const slice = owned.slice(i, i + 2);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((rec) => {
+          const cur = getPhoneDef(rec.id);
+          const refund = cur ? Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_SELL_REFUND_RATE) : 0;
+          return new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_PHONE_SELL_UID_PREFIX}${rec.uid}`)
+            .setLabel(shopItemButtonLabel(cur?.label ?? "телефон", refund))
+            .setStyle(ButtonStyle.Danger);
+        }),
+      ),
+    );
+  }
+  rows.push(shopNavBottomRow(ECON_SHOP_PHONE));
+  return rows;
+}
+
+export function buildShopCarSellPickEmbed(member: GuildMember): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const lines = ["Выберите авто для продажи. Госномер уйдёт в неприкрепленные.", ""];
+  for (const rec of listOwnedCars(u)) {
+    const cur = getCarDef(rec.id);
+    if (!cur) continue;
+    const refund = Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_SELL_REFUND_RATE);
+    lines.push(`• ${formatCarWithPlateLine(rec)}: вернётся **${fmt(refund)}** ₽`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Продажа авто").setDescription(lines.join("\n"));
+}
+
+export function buildShopCarSellPickRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const owned = listOwnedCars(u);
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
+    const slice = owned.slice(i, i + 2);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((rec) => {
+          const cur = getCarDef(rec.id);
+          const refund = cur ? Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_SELL_REFUND_RATE) : 0;
+          return new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_CAR_SELL_UID_PREFIX}${rec.uid}`)
+            .setLabel(shopItemButtonLabel(cur?.label ?? "авто", refund))
+            .setStyle(ButtonStyle.Danger);
+        }),
+      ),
+    );
+  }
+  rows.push(shopNavBottomRow(ECON_SHOP_CAR));
+  return rows;
+}
+
+export function buildShopAptSellPickEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const lines = ["Выберите жильё для продажи:", ""];
+  for (const rec of listOwnedApartmentsByOrigin(u, origin)) {
+    const cur = getApartmentDef(rec.id);
+    if (!cur) continue;
+    const refund = Math.floor(inflatedCatalogApartmentPrice(member.guild.id, cur.id) * APARTMENT_SELL_REFUND_RATE);
+    lines.push(`• **${cur.label}**: вернётся **${fmt(refund)}** ₽`);
+  }
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Продажа жилья").setDescription(lines.join("\n"));
+}
+
+export function buildShopAptSellPickRows(member: GuildMember, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const owned = listOwnedApartmentsByOrigin(u, origin);
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < Math.min(owned.length, 12); i += 2) {
+    const slice = owned.slice(i, i + 2);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((rec) => {
+          const cur = getApartmentDef(rec.id);
+          const refund = cur ? Math.floor(inflatedCatalogApartmentPrice(member.guild.id, cur.id) * APARTMENT_SELL_REFUND_RATE) : 0;
+          return new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_APT_SELL_UID_PREFIX}${rec.uid}`)
+            .setLabel(shopItemButtonLabel(apartmentShopShortLabel(cur?.label ?? "жильё"), refund))
+            .setStyle(ButtonStyle.Danger);
+        }),
+      ),
+    );
+  }
+  rows.push(shopNavBottomRow(`${ECON_SHOP_HOUSE_ORIGIN_PREFIX}${origin}`));
+  return rows;
+}
+
+export function buildShopPlateAttachEmbed(member: GuildMember, carUid: string): EmbedBuilder | undefined {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const car = findOwnedCar(u, carUid);
+  if (!car) return undefined;
+  const unattached = listUnattachedPlates(u);
+  const lines = [
+    `Авто: ${formatCarWithPlateLine(car)}`,
+    "",
+    "Выберите неприкрепленный номер:",
+    unattached.length ? unattached.map((p) => `• **${formatVehiclePlate(p)}**`).join("\n") : "• нет",
+  ];
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Прикрепить госномер").setDescription(lines.join("\n"));
+}
+
+export function buildShopPlateAttachRows(member: GuildMember, carUid: string): ActionRowBuilder<ButtonBuilder>[] {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const unattached = listUnattachedPlates(u);
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < Math.min(unattached.length, 12); i += 2) {
+    const slice = unattached.slice(i, i + 2);
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...slice.map((p) =>
+          new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_PLATE_ATT_PICK_PREFIX}${carUid}:${encodePlateKey(p)}`)
+            .setLabel(formatVehiclePlate(p).slice(0, 80))
+            .setStyle(ButtonStyle.Secondary),
+        ),
+      ),
+    );
+  }
+  rows.push(shopNavBottomRow(`${ECON_SHOP_PLATE_CAR_PREFIX}${carUid}`));
+  return rows;
+}
+
+export function buildShopPlateAttachConfirmEmbed(member: GuildMember, carUid: string, parts: VehiclePlateParts): EmbedBuilder | undefined {
+  const car = findOwnedCar(getEconomyUser(member.guild.id, member.id), carUid);
+  if (!car) return undefined;
+  const prestige = computePlatePrestige(parts).total;
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Подтверждение")
+    .setDescription(
+      [
+        `Прикрепить **${formatVehiclePlate(parts)}** к **${getCarDef(car.id)?.label ?? "авто"}**?`,
+        `Престиж номера: **${fmt(prestige)}** (начнёт действовать после крепления).`,
+      ].join("\n"),
+    );
+}
+
+export function buildShopPlateAttachConfirmRows(carUid: string, parts: VehiclePlateParts): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`${ECON_SHOP_PLATE_ATT_OK_PREFIX}${carUid}:${encodePlateKey(parts)}`)
+        .setLabel("Прикрепить")
+        .setStyle(ButtonStyle.Success),
+    ),
+    shopNavBottomRow(`${ECON_SHOP_PLATE_ATT_PREFIX}${carUid}`, "Отменить"),
+  ];
+}
+
+export function buildShopPlateDetachConfirmEmbed(member: GuildMember, carUid: string): EmbedBuilder | undefined {
+  const car = findOwnedCar(getEconomyUser(member.guild.id, member.id), carUid);
+  const plate = car ? carPlateParts(car) : undefined;
+  if (!car || !plate) return undefined;
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle("Снять госномер")
+    .setDescription(
+      [
+        `Снять **${formatVehiclePlate(plate)}** с **${getCarDef(car.id)?.label ?? "авто"}**?`,
+        "Номер уйдёт в неприкрепленные и **перестанет** давать престиж, пока снова не будет на авто.",
+      ].join("\n"),
+    );
+}
+
+export function buildShopPlateDetachConfirmRows(carUid: string): ActionRowBuilder<ButtonBuilder>[] {
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`${ECON_SHOP_PLATE_DET_OK_PREFIX}${carUid}`).setLabel("Снять").setStyle(ButtonStyle.Danger),
+    ),
+    shopNavBottomRow(`${ECON_SHOP_PLATE_CAR_PREFIX}${carUid}`, "Отменить"),
+  ];
 }
 
 export function buildShopPhoneSellConfirmEmbed(member: GuildMember): EmbedBuilder {
@@ -697,7 +1202,7 @@ export function buildShopHousePickEmbed(member: GuildMember): EmbedBuilder {
     "",
     ...shopBranchOwnershipBlock(u, "house"),
     "",
-    "Можно владеть **советским** и **заморским** жильём. **Аренда** — только советская, для профессий **ур. 2+**.",
+    "Можно купить **несколько** квартир любого типа. **Аренда** — только советская, для профессий **ур. 2+**.",
   ];
   if (hk === "owned" && u.ownedApartmentId) {
     lines.push("Своя квартира — аренда **недоступна**.");
@@ -781,44 +1286,42 @@ export function parseOriginFromSuffix(suffix: string): CatalogOrigin | undefined
 
 export function buildShopPhoneListEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPhoneDef(u.phoneModelId);
+  const owned = listOwnedPhonesByOrigin(u, origin);
+  const catalogLines = phonesByOrigin(origin).map((p) => {
+    const price = inflatedCatalogPhonePrice(member.guild.id, p.id);
+    return `• **${p.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(p)}`;
+  });
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle(`Телефон · ${originTitle(origin)}`)
     .setDescription(
       [
         `Баланс: **${fmt(u.rubles)}** ₽`,
-        cur && cur.origin === origin ? `Сейчас: **${cur.label}**` : "Сейчас: **нет**",
+        owned.length ? `Сейчас: ${owned.map((p) => `**${getPhoneDef(p.id)?.label ?? p.id}**`).join(", ")}` : "Сейчас: **нет**",
         shopUpgradeTradeInLine(PHONE_TRADE_IN_RATE),
         shopPlainSellLine(PHONE_SELL_REFUND_RATE),
+        "На кнопках — **полная** цена. После нажатия можно купить ещё одну или обменять свою.",
+        "",
+        ...catalogLines,
       ].join("\n"),
     );
 }
 
 export function buildShopPhoneDetailsEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPhoneDef(u.phoneModelId);
   const lines = phonesByOrigin(origin).map((p) => {
-    const cost = inflatedPhonePurchaseCost(member.guild.id, cur, p, Boolean(u.hasPhone));
-    return `• **${p.label}** — **${fmt(cost)}** ₽ · ${statChangeLabel(cur, p)}`;
+    const price = inflatedCatalogPhonePrice(member.guild.id, p.id);
+    return `• **${p.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(p)}`;
   });
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle(`Телефон · ${originTitle(origin)} · каталог`)
-    .setDescription(
-      [
-        "Цена указана с вашим зачётом; статы — фактическое изменение после замены.",
-        "",
-        ...lines,
-      ].join("\n"),
-    );
+    .setDescription(["Полная цена модели и статы от покупки (без зачёта).", "", ...lines].join("\n"));
 }
 
 export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPhoneDef(u.phoneModelId);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  if (u.hasPhone && cur?.origin === origin) {
+  if (listOwnedPhonesByOrigin(u, origin).length > 0) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(ECON_SHOP_PHONE_SELL).setLabel("Продать телефон").setStyle(ButtonStyle.Danger),
@@ -831,17 +1334,11 @@ export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigi
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((p) => {
-          const cost = inflatedPhonePurchaseCost(member.guild.id, cur, p, Boolean(u.hasPhone));
-          const downgrade =
-            cur &&
-            cur.origin === origin &&
-            inflatedCatalogPhonePrice(member.guild.id, p.id) < inflatedCatalogPhonePrice(member.guild.id, cur.id);
-          const disabled = downgrade || u.rubles < cost || (cur?.id === p.id && Boolean(u.hasPhone));
+          const price = inflatedCatalogPhonePrice(member.guild.id, p.id);
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_PHONE_BUY_PREFIX}${p.id}`)
-            .setLabel(shopItemButtonLabel(p.label, cost))
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(disabled);
+            .setLabel(shopItemButtonLabel(p.label, price))
+            .setStyle(ButtonStyle.Secondary);
         }),
       ),
     );
@@ -852,47 +1349,44 @@ export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigi
 
 export function buildShopCarListEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getCarDef(u.ownedCarId);
-  const plateLine = formatVehiclePlateFromUser(u);
+  const owned = listOwnedCarsByOrigin(u, origin);
+  const catalogLines = carsByOrigin(origin).map((c) => {
+    const price = inflatedCatalogCarPrice(member.guild.id, c.id);
+    const cd = (c.courierShiftCdMs / 3600000).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
+    return `• **${c.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(c)} · доставка КД **${cd} ч**`;
+  });
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle(`Авто · ${originTitle(origin)}`)
     .setDescription(
       [
         `Баланс: **${fmt(u.rubles)}** ₽`,
-        cur && cur.origin === origin ? `Сейчас: **${cur.label}**` : "Сейчас: **нет**",
-        plateLine ? `Госномер: **${plateLine}**` : "Госномер: **нет**",
+        owned.length ? owned.map((c) => `• ${formatCarWithPlateLine(c)}`).join("\n") : "Сейчас: **нет**",
         shopUpgradeTradeInLine(CAR_TRADE_IN_RATE),
         shopPlainSellLine(CAR_SELL_REFUND_RATE),
+        "На кнопках — **полная** цена. После нажатия можно купить ещё одну или обменять свою.",
+        "",
+        ...catalogLines,
       ].join("\n"),
     );
 }
 
 export function buildShopCarDetailsEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getCarDef(u.ownedCarId);
   const lines = carsByOrigin(origin).map((c) => {
-    const cost = inflatedCarPurchaseCost(member.guild.id, cur, c);
+    const price = inflatedCatalogCarPrice(member.guild.id, c.id);
     const cd = (c.courierShiftCdMs / 3600000).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
-    return `• **${c.label}** — **${fmt(cost)}** ₽ · ${statChangeLabel(cur, c)} · доставка КД **${cd} ч**`;
+    return `• **${c.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(c)} · доставка КД **${cd} ч**`;
   });
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle(`Авто · ${originTitle(origin)} · каталог`)
-    .setDescription(
-      [
-        "Цена указана с вашим зачётом; статы — фактическое изменение. Госномер при апгрейде сохраняется.",
-        "",
-        ...lines,
-      ].join("\n"),
-    );
+    .setDescription(["Полная цена модели и статы от покупки (без зачёта). Госномер при обмене переходит в неприкрепленные.", "", ...lines].join("\n"));
 }
 
 export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getCarDef(u.ownedCarId);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  if (cur && cur.origin === origin) {
+  if (listOwnedCarsByOrigin(u, origin).length > 0) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(ECON_SHOP_CAR_SELL).setLabel("Продать авто").setStyle(ButtonStyle.Danger),
@@ -905,17 +1399,11 @@ export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin)
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((c) => {
-          const cost = inflatedCarPurchaseCost(member.guild.id, cur, c);
-          const downgrade =
-            cur &&
-            cur.origin === origin &&
-            inflatedCatalogCarPrice(member.guild.id, c.id) < inflatedCatalogCarPrice(member.guild.id, cur.id);
-          const disabled = downgrade || u.rubles < cost || cur?.id === c.id;
+          const price = inflatedCatalogCarPrice(member.guild.id, c.id);
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_CAR_BUY_PREFIX}${c.id}`)
-            .setLabel(shopItemButtonLabel(c.label, cost))
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(disabled);
+            .setLabel(shopItemButtonLabel(c.label, price))
+            .setStyle(ButtonStyle.Secondary);
         }),
       ),
     );
@@ -928,59 +1416,49 @@ export function buildShopHouseListEmbed(member: GuildMember, origin: CatalogOrig
   const u = getEconomyUser(member.guild.id, member.id);
   const gid = member.guild.id;
   const now = Date.now();
+  const owned = listOwnedApartmentsByOrigin(u, origin);
   const lines: string[] = [`Баланс: **${fmt(u.rubles)}** ₽`];
-  const cur =
-    origin === "soviet" && u.housingKind === "owned"
-      ? getApartmentDef(u.ownedApartmentId)
-      : origin === "foreign" && u.housingForeignKind === "owned"
-        ? getApartmentDef(u.ownedForeignApartmentId)
-        : undefined;
-  const purchasedAt =
-    origin === "soviet" ? u.ownedApartmentPurchasedAtMs : u.ownedForeignApartmentPurchasedAtMs;
-
-  if (cur) {
-    const owned = housingOwnedDaysLabel(purchasedAt, now);
-    lines.push(owned ? `Сейчас: **${cur.label}** · владеете **${owned}**` : `Сейчас: **${cur.label}**`);
-    lines.push(`ЖКХ: **${fmt(inflatedApartmentUtilityRub(gid, cur.id))}** ₽/мес.`);
-    const rate = apartmentTradeInRate(purchasedAt, now);
-    lines.push(`Зачёт переезда сейчас: **${tradeInPctLabel(rate)}**`);
+  if (owned.length) {
+    for (const rec of owned) {
+      const def = getApartmentDef(rec.id);
+      const ownedDays = housingOwnedDaysLabel(rec.purchasedAtMs, now);
+      const util = def ? inflatedApartmentUtilityRub(gid, def.id) : 0;
+      const rate = apartmentTradeInRate(rec.purchasedAtMs, now);
+      lines.push(
+        `• **${def?.label ?? rec.id}**${ownedDays ? ` · ${ownedDays}` : ""} · ЖКХ **${fmt(util)}** ₽/мес. · зачёт **${tradeInPctLabel(rate)}**`,
+      );
+    }
   } else if (origin === "soviet" && (u.housingKind ?? "none") === "rent") {
     const due = u.housingRentNextDueMs;
-    lines.push(
-      due != null ? `Сейчас: **аренда** до <t:${Math.floor(due / 1000)}:R>` : "Сейчас: **аренда**",
-    );
+    lines.push(due != null ? `Сейчас: **аренда** до <t:${Math.floor(due / 1000)}:R>` : "Сейчас: **аренда**");
   } else {
     lines.push("Сейчас: **нет**");
   }
   lines.push(...shopApartmentTradeInLines(), shopPlainSellLine(APARTMENT_SELL_REFUND_RATE));
+  lines.push("На кнопках — **полная** цена. После нажатия можно купить ещё одну или обменять свою.");
+  const catalogLines = apartmentsByOrigin(origin).map((a) => {
+    const price = inflatedCatalogApartmentPrice(gid, a.id);
+    const utility = inflatedApartmentUtilityRub(gid, a.id);
+    return `• **${a.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(a)} · ЖКХ **${fmt(utility)}** ₽/мес.`;
+  });
+  lines.push("", ...catalogLines);
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle(`Жильё · ${originTitle(origin)}`).setDescription(lines.join("\n"));
 }
 
 export function buildShopHouseDetailsEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const now = Date.now();
-  const cur =
-    origin === "soviet" && u.housingKind === "owned"
-      ? getApartmentDef(u.ownedApartmentId)
-      : origin === "foreign" && u.housingForeignKind === "owned"
-        ? getApartmentDef(u.ownedForeignApartmentId)
-        : undefined;
-  const purchasedAt =
-    origin === "soviet" ? u.ownedApartmentPurchasedAtMs : u.ownedForeignApartmentPurchasedAtMs;
+  const gid = member.guild.id;
   const lines = apartmentsByOrigin(origin).map((a) => {
-    const cost = cur
-      ? inflatedApartmentPurchaseCost(member.guild.id, cur, a, purchasedAt, now)
-      : inflatedCatalogApartmentPrice(member.guild.id, a.id);
-    const utility = inflatedApartmentUtilityRub(member.guild.id, a.id);
-    return `• **${a.label}** — **${fmt(cost)}** ₽ · ${statChangeLabel(cur, a)} · ЖКХ **${fmt(utility)}** ₽/мес.`;
+    const price = inflatedCatalogApartmentPrice(gid, a.id);
+    const utility = inflatedApartmentUtilityRub(gid, a.id);
+    return `• **${a.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(a)} · ЖКХ **${fmt(utility)}** ₽/мес.`;
   });
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle(`Жильё · ${originTitle(origin)} · каталог`)
     .setDescription(
       [
-        `Переезд: зачёт **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE)}**, после 30 суток — **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE_AFTER_MONTH)}**.`,
-        "Цена указана с вашим зачётом; статы — фактическое изменение.",
+        `Обмен: зачёт **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE)}**, после 30 суток — **${tradeInPctLabel(APARTMENT_TRADE_IN_RATE_AFTER_MONTH)}**.`,
+        "Полная цена модели и статы от покупки (без зачёта).",
         "",
         ...lines,
       ].join("\n"),
@@ -990,64 +1468,31 @@ export function buildShopHouseDetailsEmbed(member: GuildMember, origin: CatalogO
 export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  const now = Date.now();
-
-  if (origin === "soviet" && u.housingKind === "owned" && u.ownedApartmentId) {
+  if (listOwnedApartmentsByOrigin(u, origin).length > 0) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_SHOP_APT_SELL_SOVIET).setLabel("Продать").setStyle(ButtonStyle.Danger),
-      ),
-    );
-  } else if (origin === "foreign" && u.housingForeignKind === "owned" && u.ownedForeignApartmentId) {
-    rows.push(
-      new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_SHOP_APT_SELL_FOREIGN).setLabel("Продать").setStyle(ButtonStyle.Danger),
+        new ButtonBuilder()
+          .setCustomId(origin === "soviet" ? ECON_SHOP_APT_SELL_SOVIET : ECON_SHOP_APT_SELL_FOREIGN)
+          .setLabel("Продать")
+          .setStyle(ButtonStyle.Danger),
       ),
     );
   }
-
-  const curA =
-    origin === "soviet" && u.housingKind === "owned" ? getApartmentDef(u.ownedApartmentId) : undefined;
-  const curF =
-    origin === "foreign" && u.housingForeignKind === "owned" ? getApartmentDef(u.ownedForeignApartmentId) : undefined;
-  const cur = curA ?? curF;
   const list = apartmentsByOrigin(origin);
-
   for (let i = 0; i < list.length; i += 3) {
     const slice = list.slice(i, i + 3);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((a) => {
-          const cost =
-            cur &&
-            ((origin === "soviet" && u.housingKind === "owned") ||
-              (origin === "foreign" && u.housingForeignKind === "owned"))
-              ? inflatedApartmentPurchaseCost(
-                  member.guild.id,
-                  cur,
-                  a,
-                  origin === "soviet" ? u.ownedApartmentPurchasedAtMs : u.ownedForeignApartmentPurchasedAtMs,
-                  now,
-                )
-              : inflatedCatalogApartmentPrice(member.guild.id, a.id);
-          const downgrade =
-            cur &&
-            cur.origin === origin &&
-            inflatedCatalogApartmentPrice(member.guild.id, a.id) <
-              inflatedCatalogApartmentPrice(member.guild.id, cur.id);
-          const ownedSame =
-            (origin === "soviet" && u.housingKind === "owned" && u.ownedApartmentId === a.id) ||
-            (origin === "foreign" && u.housingForeignKind === "owned" && u.ownedForeignApartmentId === a.id);
+          const price = inflatedCatalogApartmentPrice(member.guild.id, a.id);
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_APT_BUY_PREFIX}${a.id}`)
-            .setLabel(shopItemButtonLabel(apartmentShopShortLabel(a.label), cost))
-            .setStyle(ButtonStyle.Secondary)
-            .setDisabled(downgrade || u.rubles < cost || ownedSame);
+            .setLabel(shopItemButtonLabel(apartmentShopShortLabel(a.label), price))
+            .setStyle(ButtonStyle.Secondary);
         }),
       ),
     );
   }
-
   rows.push(shopDetailsNavBottomRow(`${ECON_SHOP_HOUSE_DETAILS_PREFIX}${origin}`, ECON_SHOP_HOUSE));
   return rows;
 }
@@ -1055,6 +1500,11 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
 export function buildShopAnimalsEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = getPetDef(u.ownedPetId);
+  const catalog = PET_MODELS.map((p) => {
+    const cost = scaledShopPrice(member.guild.id, petPurchaseCostRub(cur, p));
+    const ps = scaledEconomyPsIncome(member.guild.id, p.dailyPsRub);
+    return `• **${p.label}** — **${fmt(cost)}** ₽ · **+${fmt(ps)} СР/сут**`;
+  });
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Животные")
@@ -1064,6 +1514,8 @@ export function buildShopAnimalsEmbed(member: GuildMember): EmbedBuilder {
         cur ? `Питомец: **${cur.label}**` : "Питомец: **нет**",
         shopUpgradeTradeInLine(PET_TRADE_IN_RATE),
         "Уход в **00:00 МСК** — ₽ и СР. Нужна **своя** квартира (не аренда).",
+        "",
+        ...catalog,
       ].join("\n"),
     );
 }
@@ -1096,10 +1548,13 @@ export function buildShopAnimalsRows(member: GuildMember): ActionRowBuilder<Butt
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((p) => {
           const cost = scaledShopPrice(member.guild.id, petPurchaseCostRub(cur, p));
+          const ps = scaledEconomyPsIncome(member.guild.id, p.dailyPsRub);
           const block = petOwnershipBlockReason(u, p);
+          const base = shopItemButtonLabel(p.label, cost);
+          const withPs = `${base} · +${fmt(ps)} СР`;
           return new ButtonBuilder()
             .setCustomId(`${ECON_SHOP_PET_BUY_PREFIX}${p.id}`)
-            .setLabel(shopItemButtonLabel(p.label, cost))
+            .setLabel(withPs.length > 80 ? base : withPs)
             .setStyle(ButtonStyle.Secondary)
             .setDisabled(Boolean(block) || u.rubles < cost || cur?.id === p.id);
         }),
@@ -1144,366 +1599,6 @@ export function applyRentPlanPurchase(member: GuildMember, plan: HousingRentPlan
   return { ok: true };
 }
 
-export function purchasePhone(member: GuildMember, pid: string): { ok: true } | { ok: false; reply: string } {
-  const defP = getPhoneDef(pid);
-  if (!defP) return { ok: false, reply: "Неизвестная модель." };
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPhoneDef(u.phoneModelId);
-  const cost = inflatedPhonePurchaseCost(member.guild.id, cur, defP, Boolean(u.hasPhone));
-  if (cur && inflatedCatalogPhonePrice(member.guild.id, defP.id) < inflatedCatalogPhonePrice(member.guild.id, cur.id)) {
-    return { ok: false, reply: "Понижение модели **недоступно**." };
-  }
-  if (u.rubles < cost) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
-  if (cur?.id === defP.id && u.hasPhone) return { ok: false, reply: "У вас уже эта модель." };
-  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, statDeltasOnReplace(cur, defP));
-  let applied = false;
-  updateEconomyUser(member.guild.id, member.id, (curU) => {
-    if (curU.rubles < cost) return curU;
-    applied = true;
-    return {
-      ...curU,
-      rubles: curU.rubles - cost,
-      hasPhone: true,
-      phoneModelId: defP.id,
-      ...stats,
-    };
-  });
-  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
-  remitShopPurchaseVatToTreasury(member.guild.id, cost);
-  return { ok: true };
-}
-
-export function purchaseCar(member: GuildMember, cid: string): { ok: true } | { ok: false; reply: string } {
-  const defC = getCarDef(cid);
-  if (!defC) return { ok: false, reply: "Неизвестное авто." };
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getCarDef(u.ownedCarId);
-  const cost = inflatedCarPurchaseCost(member.guild.id, cur, defC);
-  if (cur && inflatedCatalogCarPrice(member.guild.id, defC.id) < inflatedCatalogCarPrice(member.guild.id, cur.id)) {
-    return { ok: false, reply: "Понижение класса **недоступно**." };
-  }
-  if (u.rubles < cost) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
-  if (cur?.id === defC.id) return { ok: false, reply: "У вас уже это авто." };
-  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, statDeltasOnReplace(cur, defC));
-  let applied = false;
-  updateEconomyUser(member.guild.id, member.id, (curU) => {
-    if (curU.rubles < cost) return curU;
-    applied = true;
-    return {
-      ...curU,
-      rubles: curU.rubles - cost,
-      ownedCarId: defC.id,
-      ...stats,
-      ...cancelRentAndBikeOnAssetPurchase(curU),
-    };
-  });
-  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
-  remitShopPurchaseVatToTreasury(member.guild.id, cost);
-  return { ok: true };
-}
-
-function patchUserPlateWithPrestige(
-  guildId: string,
-  userId: string,
-  parts: VehiclePlateParts,
-  rublesSpend: number,
-): { ok: true; breakdown: ReturnType<typeof computePlatePrestige>; prestigeDelta: number; prestigeAccrued: number } | { ok: false } {
-  const breakdown = computePlatePrestige(parts);
-  let applied = false;
-  let prestigeDelta = 0;
-  updateEconomyUser(guildId, userId, (cur) => {
-    if (cur.rubles < rublesSpend) return cur;
-    applied = true;
-    const oldAccrued = cur.vehiclePlatePrestige ?? 0;
-    prestigeDelta = breakdown.total - oldAccrued;
-    const stats = patchStatsFromShop(cur.prestigePoints ?? 0, cur.domesticPoints ?? 0, {
-      prestigeDelta,
-      domesticDelta: 0,
-    });
-    return {
-      ...cur,
-      rubles: cur.rubles - rublesSpend,
-      ...vehiclePlatePartsToPatch(parts),
-      vehiclePlatePrestige: breakdown.total,
-      ...stats,
-    };
-  });
-  if (!applied) return { ok: false };
-  return { ok: true, breakdown, prestigeDelta, prestigeAccrued: breakdown.total };
-}
-
-/** Однократная синхронизация престижа номера (миграция старых сохранений). */
-export function syncVehiclePlatePrestige(member: GuildMember): void {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const parts = parseVehiclePlateParts(u);
-  if (!parts) return;
-  const total = computePlatePrestige(parts).total;
-  const accrued = u.vehiclePlatePrestige ?? 0;
-  if (total === accrued) return;
-  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
-    prestigeDelta: total - accrued,
-    domesticDelta: 0,
-  });
-  patchEconomyUser(member.guild.id, member.id, { vehiclePlatePrestige: total, ...stats });
-}
-
-function plateLastRoll(
-  action: string,
-  plate: string,
-  breakdown: ReturnType<typeof computePlatePrestige>,
-  prestigeDelta: number,
-  upgradeTips?: string[],
-): PlateShopLastRoll {
-  if (upgradeTips?.length) breakdown.upgradeTips = upgradeTips;
-  return { action, plate, breakdown, prestigeDelta };
-}
-
-/** Полные госномера других игроков на сервере (свой не включается). */
-function guildTakenVehiclePlateKeys(guildId: string, excludeUserId: string): Set<string> {
-  const taken = new Set<string>();
-  for (const { userId, user } of listEconomyUsers(guildId)) {
-    if (userId === excludeUserId) continue;
-    const parts = parseVehiclePlateParts(user);
-    if (parts) taken.add(vehiclePlateKey(parts));
-  }
-  return taken;
-}
-
-export function registerVehiclePlate(
-  member: GuildMember,
-): { ok: true; plate: string; lastRoll: PlateShopLastRoll } | { ok: false; reply: string } {
-  const u = getEconomyUser(member.guild.id, member.id);
-  if (!userHasOwnedCar(u)) return { ok: false, reply: "Сначала купите **авто**." };
-  if (userHasVehiclePlate(u)) return { ok: false, reply: "Госномер **уже оформлен**." };
-  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_REGISTER_BASE_RUB);
-  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  const taken = guildTakenVehiclePlateKeys(member.guild.id, member.id);
-  const parts = rollUniqueVehiclePlateParts(taken);
-  const platePatch = patchUserPlateWithPrestige(
-    member.guild.id,
-    member.id,
-    parts,
-    cost,
-  );
-  if (!platePatch.ok) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  remitShopPurchaseVatToTreasury(member.guild.id, cost);
-  const plate = formatVehiclePlate(parts);
-  const tips = buildPlateUpgradeTips(parts, taken);
-  return {
-    ok: true,
-    plate,
-    lastRoll: plateLastRoll("Оформлен госномер", plate, platePatch.breakdown, platePatch.prestigeDelta, tips),
-  };
-}
-
-export function changeVehiclePlateDigits(
-  member: GuildMember,
-): { ok: true; plate: string; lastRoll: PlateShopLastRoll } | { ok: false; reply: string } {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = parseVehiclePlateParts(u);
-  if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
-  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
-  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  const taken = guildTakenVehiclePlateKeys(member.guild.id, member.id);
-  const next = {
-    ...cur,
-    digits: rollUniqueVehiclePlateDigits(taken, { l1: cur.l1, l2: cur.l2, region: cur.region }),
-  };
-  const platePatch = patchUserPlateWithPrestige(
-    member.guild.id,
-    member.id,
-    next,
-    cost,
-  );
-  if (!platePatch.ok) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  remitShopPurchaseVatToTreasury(member.guild.id, cost);
-  const plate = formatVehiclePlate(next);
-  const tips = buildPlateUpgradeTips(next, taken);
-  return {
-    ok: true,
-    plate,
-    lastRoll: plateLastRoll("Новые цифры", plate, platePatch.breakdown, platePatch.prestigeDelta, tips),
-  };
-}
-
-export function changeVehiclePlateLetters(
-  member: GuildMember,
-): { ok: true; plate: string; lastRoll: PlateShopLastRoll } | { ok: false; reply: string } {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = parseVehiclePlateParts(u);
-  if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
-  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
-  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  const taken = guildTakenVehiclePlateKeys(member.guild.id, member.id);
-  const next = {
-    ...cur,
-    ...rollUniqueVehiclePlateLetters(taken, { digits: cur.digits, region: cur.region }),
-  };
-  const platePatch = patchUserPlateWithPrestige(
-    member.guild.id,
-    member.id,
-    next,
-    cost,
-  );
-  if (!platePatch.ok) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  remitShopPurchaseVatToTreasury(member.guild.id, cost);
-  const plate = formatVehiclePlate(next);
-  const tips = buildPlateUpgradeTips(next, taken);
-  return {
-    ok: true,
-    plate,
-    lastRoll: plateLastRoll("Новые буквы", plate, platePatch.breakdown, platePatch.prestigeDelta, tips),
-  };
-}
-
-export function changeVehiclePlateRegion(
-  member: GuildMember,
-): { ok: true; plate: string; lastRoll: PlateShopLastRoll } | { ok: false; reply: string } {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = parseVehiclePlateParts(u);
-  if (!cur) return { ok: false, reply: "Сначала **оформите** госномер." };
-  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
-  if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  const taken = guildTakenVehiclePlateKeys(member.guild.id, member.id);
-  const next = {
-    ...cur,
-    region: rollUniqueVehiclePlateRegion(taken, { l1: cur.l1, digits: cur.digits, l2: cur.l2 }),
-  };
-  const platePatch = patchUserPlateWithPrestige(
-    member.guild.id,
-    member.id,
-    next,
-    cost,
-  );
-  if (!platePatch.ok) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
-  remitShopPurchaseVatToTreasury(member.guild.id, cost);
-  const plate = formatVehiclePlate(next);
-  const tips = buildPlateUpgradeTips(next, taken);
-  return {
-    ok: true,
-    plate,
-    lastRoll: plateLastRoll("Новый регион", plate, platePatch.breakdown, platePatch.prestigeDelta, tips),
-  };
-}
-
-export function sellOwnedPhone(member: GuildMember): { ok: true; refund: number } | { ok: false; reply: string } {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getPhoneDef(u.phoneModelId);
-  if (!u.hasPhone || !cur) return { ok: false, reply: "Нет **телефона** для продажи." };
-  const refund = Math.floor(inflatedCatalogPhonePrice(member.guild.id, cur.id) * PHONE_SELL_REFUND_RATE);
-  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
-    prestigeDelta: -cur.prestigeDelta,
-    domesticDelta: -cur.domesticDelta,
-  });
-  updateEconomyUser(member.guild.id, member.id, (curU) => ({
-    ...curU,
-    rubles: curU.rubles + refund,
-    hasPhone: false,
-    phoneModelId: undefined,
-    ...stats,
-  }));
-  return { ok: true, refund };
-}
-
-export function sellOwnedCar(member: GuildMember): { ok: true; refund: number } | { ok: false; reply: string } {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const cur = getCarDef(u.ownedCarId);
-  if (!cur) return { ok: false, reply: "Нет **авто** для продажи." };
-  const refund = Math.floor(inflatedCatalogCarPrice(member.guild.id, cur.id) * CAR_SELL_REFUND_RATE);
-  const platePrestige = u.vehiclePlatePrestige ?? 0;
-  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
-    prestigeDelta: -cur.prestigeDelta - platePrestige,
-    domesticDelta: -cur.domesticDelta,
-  });
-  updateEconomyUser(member.guild.id, member.id, (curU) => ({
-    ...curU,
-    rubles: curU.rubles + refund,
-    ownedCarId: undefined,
-    ...clearVehiclePlatePatch(),
-    vehiclePlatePrestige: undefined,
-    ...stats,
-  }));
-  return { ok: true, refund };
-}
-
-export function purchaseApartment(member: GuildMember, aid: string): { ok: true; refund: number } | { ok: false; reply: string } {
-  const defA = getApartmentDef(aid);
-  if (!defA) return { ok: false, reply: "Неизвестная квартира." };
-  const u = getEconomyUser(member.guild.id, member.id);
-  const now = Date.now();
-  const gid = member.guild.id;
-
-  if (defA.origin === "soviet") {
-    const hk = u.housingKind ?? "none";
-    const curA = getApartmentDef(u.ownedApartmentId);
-    const cost =
-      hk === "owned" && curA
-        ? inflatedApartmentPurchaseCost(gid, curA, defA, u.ownedApartmentPurchasedAtMs, now)
-        : inflatedCatalogApartmentPrice(gid, defA.id);
-    if (hk === "owned" && curA && inflatedCatalogApartmentPrice(gid, defA.id) < inflatedCatalogApartmentPrice(gid, curA.id)) {
-      return { ok: false, reply: "Переезд на более дешёвую квартиру **недоступен**." };
-    }
-    const rentRefund = hk === "rent" ? housingRentUnusedRefundRub(u, now, gid) : 0;
-    if (u.rubles + rentRefund < cost) {
-      return { ok: false, reply: `Нужно ещё **${fmt(Math.max(0, cost - rentRefund))}** ₽.` };
-    }
-    if (hk === "owned" && curA?.id === defA.id) return { ok: false, reply: "У вас уже эта квартира." };
-    const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, statDeltasOnReplace(curA, defA));
-    let applied = false;
-    updateEconomyUser(member.guild.id, member.id, (curU) => {
-      if (curU.rubles + rentRefund < cost) return curU;
-      applied = true;
-      return {
-        ...curU,
-        rubles: curU.rubles + rentRefund - cost,
-        ownedApartmentId: defA.id,
-        ownedApartmentPurchasedAtMs: now,
-        housingUtilityNextDueMs: nextHousingUtilityDueMs(now),
-        ...cancelRentAndBikeOnAssetPurchase(curU),
-        ...stats,
-        housingKind: "owned",
-      };
-    });
-    if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(Math.max(0, cost - rentRefund))}** ₽.` };
-    remitShopPurchaseVatToTreasury(gid, cost);
-    return { ok: true, refund: rentRefund };
-  }
-
-  const curF = getApartmentDef(u.ownedForeignApartmentId);
-  const cost =
-    u.housingForeignKind === "owned" && curF
-      ? inflatedApartmentPurchaseCost(gid, curF, defA, u.ownedForeignApartmentPurchasedAtMs, now)
-      : inflatedCatalogApartmentPrice(gid, defA.id);
-  if (
-    u.housingForeignKind === "owned" &&
-    curF &&
-    inflatedCatalogApartmentPrice(gid, defA.id) < inflatedCatalogApartmentPrice(gid, curF.id)
-  ) {
-    return { ok: false, reply: "Переезд на более дешёвое жильё **недоступен**." };
-  }
-  if (u.rubles < cost) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
-  if (u.housingForeignKind === "owned" && curF?.id === defA.id) return { ok: false, reply: "У вас уже это жильё." };
-  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, statDeltasOnReplace(curF, defA));
-  let applied = false;
-  updateEconomyUser(member.guild.id, member.id, (curU) => {
-    if (curU.rubles < cost) return curU;
-    applied = true;
-    return {
-      ...curU,
-      rubles: curU.rubles - cost,
-      housingForeignKind: "owned",
-      ownedForeignApartmentId: defA.id,
-      ownedForeignApartmentPurchasedAtMs: now,
-      housingForeignUtilityNextDueMs: nextHousingUtilityDueMs(now),
-      ...stats,
-      ...cancelRentAndBikeOnAssetPurchase(curU),
-    };
-  });
-  if (!applied) return { ok: false, reply: `Нужно ещё **${fmt(cost)}** ₽.` };
-  remitShopPurchaseVatToTreasury(gid, cost);
-  return { ok: true, refund: 0 };
-}
-
 export function purchasePet(member: GuildMember, petId: string): { ok: true } | { ok: false; reply: string } {
   const def = getPetDef(petId);
   if (!def) return { ok: false, reply: "Неизвестный питомец." };
@@ -1527,58 +1622,6 @@ export function purchasePet(member: GuildMember, petId: string): { ok: true } | 
   if (!applied) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
   return { ok: true };
-}
-
-export function sellSovietApartment(member: GuildMember): { ok: true; refund: number } | { ok: false; reply: string } {
-  const u = getEconomyUser(member.guild.id, member.id);
-  if ((u.housingKind ?? "none") !== "owned") return { ok: false, reply: "Продать можно только **советскую** квартиру." };
-  const curA = getApartmentDef(u.ownedApartmentId);
-  if (!curA) return { ok: false, reply: "Квартира не найдена." };
-  const refund = Math.floor(inflatedCatalogApartmentPrice(member.guild.id, curA.id) * APARTMENT_SELL_REFUND_RATE);
-  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
-    prestigeDelta: -curA.prestigeDelta,
-    domesticDelta: -curA.domesticDelta,
-  });
-  const quitJob = !userHasActiveHousing({ ...u, housingKind: "none", ownedApartmentId: undefined })
-    ? economyUserClearTier2PlusJobPatch(u)
-    : {};
-  updateEconomyUser(member.guild.id, member.id, (curU) => ({
-    ...curU,
-    rubles: curU.rubles + refund,
-    housingKind: "none",
-    ownedApartmentId: undefined,
-    ownedApartmentPurchasedAtMs: undefined,
-    housingUtilityNextDueMs: undefined,
-    ...stats,
-    ...quitJob,
-  }));
-  return { ok: true, refund };
-}
-
-export function sellForeignApartment(member: GuildMember): { ok: true; refund: number } | { ok: false; reply: string } {
-  const u = getEconomyUser(member.guild.id, member.id);
-  if (u.housingForeignKind !== "owned") return { ok: false, reply: "Нет **заморского** жилья." };
-  const curA = getApartmentDef(u.ownedForeignApartmentId);
-  if (!curA) return { ok: false, reply: "Жильё не найдено." };
-  const refund = Math.floor(inflatedCatalogApartmentPrice(member.guild.id, curA.id) * APARTMENT_SELL_REFUND_RATE);
-  const stats = patchStatsFromShop(u.prestigePoints ?? 0, u.domesticPoints ?? 0, {
-    prestigeDelta: -curA.prestigeDelta,
-    domesticDelta: -curA.domesticDelta,
-  });
-  const quitJob = !userHasActiveHousing({ ...u, housingForeignKind: undefined, ownedForeignApartmentId: undefined })
-    ? economyUserClearTier2PlusJobPatch(u)
-    : {};
-  updateEconomyUser(member.guild.id, member.id, (curU) => ({
-    ...curU,
-    rubles: curU.rubles + refund,
-    housingForeignKind: undefined,
-    ownedForeignApartmentId: undefined,
-    ownedForeignApartmentPurchasedAtMs: undefined,
-    housingForeignUtilityNextDueMs: undefined,
-    ...stats,
-    ...quitJob,
-  }));
-  return { ok: true, refund };
 }
 
 function inflatedSimShopPrice(guildId: string, baseRub: number): number {
