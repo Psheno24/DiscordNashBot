@@ -6,7 +6,12 @@ import {
   shiftPayCoeffExemptEmbedLine,
 } from "./shiftPayCoeff.js";
 import { getTier3JobDef } from "./tier3Jobs.js";
+import { formatSkillRankReq, skillName, type JobSkillReq } from "./skills.js";
 import type { JobId } from "./userStore.js";
+
+function formatJobSkillReqText(req: JobSkillReq): string {
+  return `${skillName(req.skill).toLowerCase()} ${formatSkillRankReq(req.minLevel)}`;
+}
 
 const HOUR_MS = 60 * 60 * 1000;
 
@@ -206,21 +211,21 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
       main = [
         "**КД:** **24** ч.",
         `**Оплата:** **${fmtJobIncomeRange(guildId, 26_000, 30_000)}** ₽ · × **ранг** т2.`,
-        "**Навыки:** коммуникация **28+**, дисциплина **20+** · **жильё**.",
+        "**Навыки:** " + formatJobSkillReqText({ skill: "communication", minLevel: 48 }) + " · **жильё**.",
       ].join("\n\n");
       break;
     case "assembler":
       main = [
         "**КД:** **3** ч без авто; с авто — по классу (**~2,5** … **~1** ч).",
         `**Оплата:** **${fmtJobIncomeRange(guildId, 15_000, 18_000)}** ₽ · **7-я** смена: **+${fmtJobIncome(guildId, ASSEMBLER_7TH_BONUS_BASE_RUB)}** ₽.`,
-        "**Навыки:** дисциплина **28+**, логистика **20+** · **жильё**.",
+        "**Навыки:** " + formatJobSkillReqText({ skill: "discipline", minLevel: 48 }) + " · **жильё**.",
       ].join("\n\n");
       break;
     case "expediter":
       main = [
         "**КД:** **6** ч.",
         `**Оплата:** **от ~${fmtJobIncome(guildId, -38_000)}** до **~${fmtJobIncome(guildId, 155_000)}** ₽ (случайно).`,
-        "**Ранг** влияет на шансы. Итог × **ранг** т2. **Навыки:** логистика **28+**, коммуникация **20+** · **жильё**.",
+        "**Ранг** влияет на шансы. Итог × **ранг** т2. **Навыки:** " + formatJobSkillReqText({ skill: "logistics", minLevel: 48 }) + " · **жильё**.",
       ].join("\n\n");
       break;
     case "officeAnalyst": {
@@ -230,7 +235,7 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
         "**КД смены:** **4** ч · **Совещание** — КД **24** ч (влияет на стрик).",
         `**Смена:** **${fmtJobIncomeRange(guildId, 45_000, 55_000)}** ₽ + надбавки, тоже × **престиж**.`,
         "**Престиж к ₽:** линейно от очков престижа (телефон мало, машина больше, жильё сильно больше, номер мало). Vertu + порш + поместье + лучший номер — **×2**.",
-        "**Навыки:** коммуникация **30+**, логистика **28+**, дисциплина **35+** · **жильё**.",
+        "**Навыки:** " + formatJobSkillReqText({ skill: "communication", minLevel: 93 }) + " · **жильё**.",
       ].join("\n\n");
       break;
     }
@@ -238,7 +243,7 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
       main = [
         "**Пассива нет.** КД смены: **12** ч.",
         `**Смена:** **от ${fmtJobIncome(guildId, -150_000)}** до **~${fmtJobIncome(guildId, 1_200_000)}+** ₽ (рандом × **posBoost**).`,
-        "**Связь** и **куратор** — КД **24** ч. **Навыки:** коммуникация **42+**, логистика **38+**, дисциплина **48+** · **жильё**.",
+        "**Связь** и **куратор** — КД **24** ч. **Навыки:** " + formatJobSkillReqText({ skill: "logistics", minLevel: 128 }) + " · **жильё**.",
       ].join("\n\n");
       break;
     case "soleProp": {
@@ -247,7 +252,7 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
         "Затухающая отдача (не линейный %) × ранг × **престиж** × риск. Около **7 млн** чуть выгоднее полного гринда офиса. Престиж линейно от очков, полный набор лучших покупок — **×2**.",
         "Каждый следующий миллион на балансе даёт **меньше**, чем предыдущий. Дальше сильнее **ранг, престиж и эффективность** (персонал).",
         "**Реклама / персонал / контроль** — в панели ИП.",
-        "**Навыки:** коммуникация **55+**, логистика **52+**, дисциплина **60+** · **жильё**.",
+        "**Навыки:** " + formatJobSkillReqText({ skill: "discipline", minLevel: 167 }) + " · **жильё**.",
       ].join("\n\n");
       break;
     }

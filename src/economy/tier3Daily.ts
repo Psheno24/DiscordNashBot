@@ -12,6 +12,7 @@ import {
 import { isMskMonday, msUntilNextMskMidnight, mskTodayYmd } from "./mskCalendar.js";
 import { addToTreasury, getSolePropWeeklyCapitalTaxPercent, withholdLegalIncomeTax } from "./taxTreasury.js";
 import { getEconomyUser, listEconomyUsers, patchEconomyUser } from "./userStore.js";
+import { applySkillIncomeMult, skillIncomeMultFromUser } from "./skills.js";
 import { prestigeIncomeMultFromUser } from "./prestigeIncome.js";
 import { listOwnedPets } from "./economyAssets.js";
 import { solePropMidnightPatch } from "./tier3SolePropMsk.js";
@@ -95,7 +96,12 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
         solePropPassiveEffMult: u.solePropPassiveEffMult,
         solePropPassiveTempMult: u.solePropPassiveTempMult,
       });
-      let passive = applyUnregisteredVehiclePenalty(u, passiveOut.total);
+      let passive = passiveOut.total;
+      const skillMult = skillIncomeMultFromUser(u);
+      if (skillMult > 1 + 1e-9 && passive > 0) {
+        passive = applySkillIncomeMult(passive, skillMult);
+      }
+      passive = applyUnregisteredVehiclePenalty(u, passive);
       const rankAfter = tier3PromotionRank(streakOut.nextStreak);
 
       let creditPassive = passive;
