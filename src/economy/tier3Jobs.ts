@@ -1,5 +1,6 @@
 import { scaleSignedIncome } from "./economyMacro.js";
-import type { EconomyUser, JobId, SkillId } from "./userStore.js";
+import type { JobSkillReq } from "./skills.js";
+import type { EconomyUser, JobId } from "./userStore.js";
 import { mskPreviousDayYmd, mskTodayYmd } from "./mskCalendar.js";
 
 export type Tier3Archetype = "legal" | "illegal" | "ip";
@@ -21,8 +22,8 @@ export type Tier3JobDef = {
   baseCooldownMs: number;
   basePayoutRub: number;
   description: string;
-  /** Все три навыка обязательны. */
-  reqSkills: Record<SkillId, number>;
+  /** Основной навык и суммарный порог (legacy: сумма трёх старых требований). */
+  reqSkill: JobSkillReq;
   archetype: Tier3Archetype;
   /** Базовый суточный пассивный оклад (легал); для нелегала не используется; для ИП — часть формулы. */
   passiveBaseRub: number;
@@ -40,7 +41,7 @@ export const JOBS_TIER3: Tier3JobDef[] = [
       "**Смена:** **45–55k** ₽ плюс надбавки от ранга/стрика; **3%** шанс **служебного штрафа**. Лимит выплаты по накопленному **КД** за сутки — в **Подробнее**.",
       "**Совещание** (КД **24 ч**): случайно **+2…+7** / **без изменений** / **−2…−6** дн. к стрику (без выплат).",
     ].join("\n"),
-    reqSkills: { communication: 30, logistics: 28, discipline: 35 },
+    reqSkill: { skill: "discipline", minLevel: 93 },
     archetype: "legal",
     passiveBaseRub: 70_000,
   },
@@ -53,7 +54,7 @@ export const JOBS_TIER3: Tier3JobDef[] = [
       "**Нелегальный** тир-3: **рандом** по смене (тяжёлый минус возможен, высокий потолок при удаче). КД **12 ч**.",
       "**Ежедневного оклада нет.** **Связь** и **куратор** (КД **24 ч** каждое): мелкий бонус к ₽ и шанс ускорить стаж к **повышению**.",
     ].join("\n"),
-    reqSkills: { communication: 42, logistics: 38, discipline: 48 },
+    reqSkill: { skill: "discipline", minLevel: 128 },
     archetype: "illegal",
     passiveBaseRub: 0,
   },
@@ -66,7 +67,7 @@ export const JOBS_TIER3: Tier3JobDef[] = [
       "**ИП** тир-3: доход **суточным окладом** (пассивно) **только от баланса бизнеса** (до **500 000 000** ₽). Без капитала оклад **0**. Около **7 млн** чуть выгоднее полного гринда офиса. **Престиж** линейно от очков (до **×2** при полном наборе лучших покупок) — тот же множитель, что у офиса.",
       "**Реклама** (риск/доход с баланса бизнеса, лимит суммы растёт с рангом), **персонал** (КД **7 дн.**), **контроль** (КД **сутки**). Пополнение и вывод баланса бизнеса — кнопками **в бизнес** / **на счёт**.",
     ].join("\n"),
-    reqSkills: { communication: 55, logistics: 52, discipline: 60 },
+    reqSkill: { skill: "discipline", minLevel: 167 },
     archetype: "ip",
     passiveBaseRub: 0,
   },

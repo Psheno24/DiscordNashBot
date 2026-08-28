@@ -21,6 +21,9 @@ import { computeSimPrestige } from "./economySimPrestige.js";
 import { nextHousingUtilityDueMs } from "./economyMacro.js";
 import { SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS } from "./shiftPayCoeff.js";
 import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+import { ECONOMY_SKILL_MAX } from "./skills.js";
+
+export { ECONOMY_SKILL_MAX };
 
 export type { OwnedApartmentRecord, OwnedCarRecord, OwnedPetRecord, OwnedPhoneRecord, UnattachedPlateRecord };
 
@@ -47,9 +50,6 @@ const PERSISTED_JOB_IDS: readonly JobId[] = [
   "soleProp",
 ] as const;
 export type SkillId = "communication" | "logistics" | "discipline";
-
-/** Потолок уровня навыка; тир-3 можно строить на комбо в духе 40+/60+/80+ при том же счётчике. */
-export const ECONOMY_SKILL_MAX = 99;
 
 /** Макс. капитал ИП в обороте (₽), синхронно с `SOLE_PROP_CAP_MAX` в tier3Jobs). */
 export const ECONOMY_SOLE_PROP_CAP_RUB = 500_000_000;
@@ -167,8 +167,10 @@ export interface EconomyUser {
   /** До какого момента активна аренда электровела (снижение КД смены; не нужна при наличии авто). */
   courierBikeUntilMs?: number;
 
-  /** Навыки: skillId → уровень (1..ECONOMY_SKILL_MAX). Отсутствует = 0. */
+  /** Навыки: skillId → уровень (0..ECONOMY_SKILL_MAX). Отсутствует = 0. */
   skills?: Partial<Record<SkillId, number>>;
+  /** Грандмастер после 999: skillId → уровень GM (1, 2, …). */
+  skillGrandmaster?: Partial<Record<SkillId, number>>;
   /** Последняя тренировка навыков (unix ms) */
   lastTrainAt?: number;
 
@@ -288,6 +290,13 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   for (const k of ["communication", "logistics", "discipline"] as const) {
     const v = (rawSkills as any)?.[k];
     if (Number.isFinite(v) && v > 0) skills[k] = Math.min(ECONOMY_SKILL_MAX, Math.floor(v));
+  }
+
+  const rawGm = (u as any)?.skillGrandmaster ?? {};
+  const skillGrandmaster: Partial<Record<SkillId, number>> = {};
+  for (const k of ["communication", "logistics", "discipline"] as const) {
+    const v = rawGm[k];
+    if (Number.isFinite(v) && v > 0) skillGrandmaster[k] = Math.max(1, Math.floor(v));
   }
 
   const rawJobExp = (u as any)?.jobExp ?? {};
@@ -585,6 +594,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     courierPhonePaidUntilMs,
     courierBikeUntilMs,
     skills,
+    skillGrandmaster: Object.keys(skillGrandmaster).length ? skillGrandmaster : undefined,
     lastTrainAt: Number.isFinite(u?.lastTrainAt) ? Math.max(0, Math.floor(u!.lastTrainAt!)) : undefined,
     jobExp,
     economyLastMskYmd,

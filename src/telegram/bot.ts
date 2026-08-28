@@ -6,6 +6,8 @@ import {
   economyFormatTelegramJobCardScreen,
   economyFormatTelegramJobListScreen,
   economyFormatTelegramWorkScreen,
+  economyCurrentJobRehireWarning,
+  economyMarkdownToTelegramHtml,
   economyIsWorkJobId,
   economyJobTitle,
   economyQuitJob,
@@ -267,16 +269,20 @@ function screenSkills(member: GuildMember): ScreenPayload {
   return { text: economyFormatSkillsScreen(member), markup: skillsKeyboard(member) };
 }
 
-function screenSwitchConfirm(currentTitle: string, newTitle: string, jobId: JobId): ScreenPayload {
+function screenSwitchConfirm(currentTitle: string, newTitle: string, jobId: JobId, rehireWarning?: string): ScreenPayload {
+  const lines = [
+    "<b>Сменить работу?</b>",
+    "",
+    `Сейчас: <b>${currentTitle}</b>`,
+    `Новая: <b>${newTitle}</b>`,
+    "",
+    "Текущая смена должна быть без КД.",
+  ];
+  if (rehireWarning) {
+    lines.push("", economyMarkdownToTelegramHtml(rehireWarning));
+  }
   return {
-    text: [
-      "<b>Сменить работу?</b>",
-      "",
-      `Сейчас: <b>${currentTitle}</b>`,
-      `Новая: <b>${newTitle}</b>`,
-      "",
-      "Текущая смена должна быть без КД.",
-    ].join("\n"),
+    text: lines.join("\n"),
     markup: switchConfirmKeyboard(jobId),
   };
 }
@@ -342,10 +348,10 @@ function screenAfterShift(member: GuildMember): ScreenPayload {
   return { text: economyFormatTelegramWorkScreen(member), markup: workMenuKeyboard(member) };
 }
 
-function screenAfterTrain(member: GuildMember, skillLabel: string, newLevel: number): ScreenPayload {
+function screenAfterTrain(member: GuildMember, skillLabel: string, rankDisplay: string): ScreenPayload {
   return {
     text: [
-      `<b>${skillLabel}</b> → уровень <b>${newLevel}</b>.`,
+      `<b>${skillLabel}</b> → <b>${rankDisplay}</b>.`,
       "",
       economyFormatSkillsScreen(member),
     ].join("\n"),
@@ -404,12 +410,12 @@ async function handleTrain(
   if (!ctx) return;
   const tr = economyRunTrainSkill(ctx.member, skillId);
   if (!tr.ok) {
-    if (ack) await answerCallback(token, ack.id, tr.kind === "unknown_skill" ? "Неверный навык" : "КД или максимум");
+    if (ack) await answerCallback(token, ack.id, tr.kind === "unknown_skill" ? "Неверный навык" : "КД");
     await presentPanel(tgUserId, token, chatId, screenSkills(ctx.member), { messageId });
     return;
   }
   if (ack) await answerCallback(token, ack.id, "Готово");
-  await presentPanel(tgUserId, token, chatId, screenAfterTrain(ctx.member, tr.skillLabel, tr.newLevel), { messageId });
+  await presentPanel(tgUserId, token, chatId, screenAfterTrain(ctx.member, tr.skillLabel, tr.rankDisplay), { messageId });
 }
 
 async function handleTake(
@@ -450,7 +456,7 @@ async function handleTake(
       return;
     }
     if (r.kind === "confirm_switch") {
-      await presentPanel(tgUserId, token, chatId, screenSwitchConfirm(r.currentTitle, r.newTitle, r.jobId), { messageId, ack });
+      await presentPanel(tgUserId, token, chatId, screenSwitchConfirm(r.currentTitle, r.newTitle, r.jobId, r.rehireWarning), { messageId, ack });
       return;
     }
     return;
@@ -463,11 +469,18 @@ async function handleQuit(client: Client, tgUserId: string, chatId: number, toke
   const ctx = await requireLink(client, tgUserId, chatId, token, ack);
   if (!ctx) return;
   if (!confirm) {
+    const warn = economyCurrentJobRehireWarning(ctx.member);
+    const lines = [
+      "<b>Уволиться?</b>",
+      "",
+      "Нельзя уволиться, пока идёт КД смены на текущей работе.",
+    ];
+    if (warn) lines.push("", economyMarkdownToTelegramHtml(warn));
     await presentPanel(
       tgUserId,
       token,
       chatId,
-      { text: "<b>Уволиться?</b>\n\nНельзя уволиться, пока идёт КД смены на текущей работе.", markup: quitConfirmKeyboard() },
+      { text: lines.join("\n"), markup: quitConfirmKeyboard() },
       { messageId, ack },
     );
     return;

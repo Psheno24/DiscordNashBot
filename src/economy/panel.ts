@@ -42,6 +42,22 @@ import {
   type SkillId,
 } from "./userStore.js";
 import {
+  ALL_SKILL_IDS,
+  applySkillIncomeMult,
+  detectAllSkillsMajorTierCrossing,
+  formatJobRehireWarning,
+  formatJobSkillReqLine,
+  formatSkillRankTraining,
+  getSkillGrandmasterLevel,
+  getSkillLevel,
+  meetsJobSkillReq,
+  skillIncomeMultFromUser,
+  skillIncomeMultLabel,
+  skillName,
+  skillRankFromParts,
+  type JobSkillReq,
+} from "./skills.js";
+import {
   bestCourierCar,
   carPlateParts,
   decodePlateKey,
@@ -1058,7 +1074,7 @@ type JobDef = {
   baseCooldownMs: number;
   basePayoutRub: number;
   description: string;
-  reqSkills?: Partial<Record<SkillId, number>>;
+  reqSkill?: JobSkillReq;
   tier3Archetype?: "legal" | "illegal" | "ip";
   passiveBaseRub?: number;
 };
@@ -1103,7 +1119,7 @@ function jobDefFromTier3(d: Tier3JobDef): JobDef {
     baseCooldownMs: d.baseCooldownMs,
     basePayoutRub: d.basePayoutRub,
     description: d.description,
-    reqSkills: { ...d.reqSkills },
+    reqSkill: { ...d.reqSkill },
     tier3Archetype: d.archetype,
     passiveBaseRub: d.passiveBaseRub,
   };
@@ -1117,7 +1133,7 @@ const JOBS_TIER2: JobDef[] = [
     baseCooldownMs: 24 * 60 * 60 * 1000,
     basePayoutRub: 28_000,
     description: "КД **24** ч · **26–30k** ₽ · жильё",
-    reqSkills: { communication: 28, discipline: 20 },
+    reqSkill: { skill: "communication", minLevel: 48 },
   },
   {
     id: "assembler",
@@ -1125,7 +1141,7 @@ const JOBS_TIER2: JobDef[] = [
     baseCooldownMs: ASSEMBLER_BASE_CD_MS,
     basePayoutRub: 16_500,
     description: "КД **3** ч · **15–18k** ₽ · авто ускоряет · жильё",
-    reqSkills: { discipline: 28, logistics: 20 },
+    reqSkill: { skill: "discipline", minLevel: 48 },
   },
   {
     id: "expediter",
@@ -1133,7 +1149,7 @@ const JOBS_TIER2: JobDef[] = [
     baseCooldownMs: 6 * 60 * 60 * 1000,
     basePayoutRub: 0,
     description: "КД **6** ч · рандом **−38k…155k** ₽ · жильё",
-    reqSkills: { logistics: 28, communication: 20 },
+    reqSkill: { skill: "logistics", minLevel: 48 },
   },
 ];
 
@@ -1151,20 +1167,16 @@ function jobTitle(id: JobId): string {
   return getAnyJobDef(id).title;
 }
 
-function getSkillLevel(u: ReturnType<typeof getEconomyUser>, skill: SkillId): number {
-  return Math.max(0, Math.floor(u.skills?.[skill] ?? 0));
+function meetsJobReq(u: ReturnType<typeof getEconomyUser>, def: JobDef): { ok: boolean; missing: string[] } {
+  return meetsJobSkillReq(u, def.reqSkill);
 }
 
-function meetsJobReq(u: ReturnType<typeof getEconomyUser>, def: JobDef): { ok: boolean; missing: string[] } {
-  const missing: string[] = [];
-  for (const [k, v] of Object.entries(def.reqSkills ?? {})) {
-    const skill = k as SkillId;
-    const need = v ?? 0;
-    if (need <= 0) continue;
-    const have = getSkillLevel(u, skill);
-    if (have < need) missing.push(`${skillName(skill)} ${need}+ (у вас ${have})`);
-  }
-  return { ok: missing.length === 0, missing };
+function currentJobRehireWarning(u: EconomyUser): string | null {
+  if (!u.jobId) return null;
+  const def = getAnyJobDef(u.jobId);
+  const req = meetsJobReq(u, def);
+  if (req.ok) return null;
+  return formatJobRehireWarning(def.title, req.missing);
 }
 
 function randInt(min: number, max: number): number {
@@ -1830,17 +1842,8 @@ function cdHoursLabel(ms: number): string {
 }
 
 function formatJobTierReqLine(def: JobDef): string {
-  const r = def.reqSkills;
-  if (!r || Object.keys(r).length === 0) return "Навыки не требуются.";
-  const parts: string[] = [];
-  for (const k of ["communication", "logistics", "discipline"] as const) {
-    const need = r[k];
-    if (need && need > 0) {
-      const nm = k === "communication" ? "Коммуникация" : k === "logistics" ? "Логистика" : "Дисциплина";
-      parts.push(`${nm} **${need}+**`);
-    }
-  }
-  return parts.join(", ");
+  if (!def.reqSkill) return "Навыки не требуются.";
+  return formatJobSkillReqLine(def.reqSkill);
 }
 
 function buildStarterJobsEmbed(member: GuildMember): EmbedBuilder {
@@ -1972,7 +1975,7 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   }
 
   const req = meetsJobReq(u, def);
-  if ((def.reqSkills ?? {}) && Object.keys(def.reqSkills ?? {}).length > 0) {
+  if (def.reqSkill) {
     body.push("");
     body.push(req.ok ? "Требования: **выполнены**." : `Требования: **не выполнены**.\n- ${req.missing.join("\n- ")}`);
   }
@@ -2217,10 +2220,15 @@ function buildSwitchJobConfirmEmbed(member: GuildMember, newJobId: JobId): Embed
   const u = getEconomyUser(member.guild.id, member.id);
   const oldTitle = u.jobId ? jobTitle(u.jobId) : "—";
   const nextTitle = getAnyJobDef(newJobId).title;
+  const lines = [`Уволиться с **${oldTitle}** и устроиться **${nextTitle}**?`];
+  const warn = currentJobRehireWarning(u);
+  if (warn) {
+    lines.push("", warn);
+  }
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Смена работы")
-    .setDescription(`Уволиться с **${oldTitle}** и устроиться **${nextTitle}**?`)
+    .setDescription(lines.join("\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
@@ -2440,17 +2448,7 @@ function buildCurrentJobRows(member: GuildMember): ActionRowBuilder<ButtonBuilde
   return rows;
 }
 
-function skillName(id: SkillId): string {
-  if (id === "communication") return "Коммуникация";
-  if (id === "logistics") return "Логистика";
-  return "Дисциплина";
-}
-
-const SKILLS: Array<{ id: SkillId; title: string }> = [
-  { id: "communication", title: "Коммуникация" },
-  { id: "logistics", title: "Логистика" },
-  { id: "discipline", title: "Дисциплина" },
-];
+const SKILLS: Array<{ id: SkillId; title: string }> = ALL_SKILL_IDS.map((id) => ({ id, title: skillName(id) }));
 
 const ECON_SKILL_BUTTON_PREFIX = "econ:skill:";
 const ECON_SKILLS_DETAILS = "econ:skills:details";
@@ -2462,30 +2460,30 @@ function buildSkillsEmbed(member: GuildMember): EmbedBuilder {
   const now = Date.now();
   const left = u.lastTrainAt ? Math.max(0, u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS - now) : 0;
   const cdLine = left > 0 ? `Следующая тренировка (любой навык) через **${formatCooldown(left)}**.` : "Тренировка **доступна сейчас**.";
-  const lines = SKILLS.map((s) => `- **${s.title}**: ${getSkillLevel(u, s.id)} / ${ECONOMY_SKILL_MAX}`);
+  const skillMult = skillIncomeMultFromUser(u);
+  const skillMultLine =
+    skillMult > 1 + 1e-9
+      ? `Бонус ко всем выплатам (мин. навык всех трёх): **${skillIncomeMultLabel(skillMult)}**.`
+      : "Бонус **×1.2** и выше — когда **все три** навыка перейдут на **Ученик**, **Любитель** и т.д.";
+  const lines = SKILLS.map((s) => `- **${s.title}**: ${formatSkillRankTraining(u, s.id)}`);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Навыки")
-    .setDescription([cdLine, "", ...lines].join("\n"))
+    .setDescription([cdLine, skillMultLine, "", ...lines].join("\n"))
     .setFooter({ text: `Запросил: ${member.user.tag}` });
 }
 
 function buildSkillsDetailsEmbed(member: GuildMember): EmbedBuilder {
   const reqLines = WORK_JOB_IDS.map((id) => getAnyJobDef(id))
-    .filter((d) => d.reqSkills && Object.keys(d.reqSkills).length > 0)
-    .map((d) => {
-      const req = SKILLS.flatMap((s) => {
-        const level = d.reqSkills?.[s.id];
-        return level == null ? [] : [`${s.title} **${level}**`];
-      });
-      return `• **${d.title}** — ${req.join(" · ")}`;
-    });
+    .filter((d) => d.reqSkill)
+    .map((d) => `• **${d.title}** — ${formatJobSkillReqLine(d.reqSkill!)}`);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Навыки · подробнее")
     .setDescription(
       [
-        `Одна тренировка повышает выбранный навык на **1**. Общий КД — **${formatCooldown(ECONOMY_TRAIN_COOLDOWN_MS)}**, максимум — **${ECONOMY_SKILL_MAX}**.`,
+        `Одна тренировка повышает выбранный навык на **1**. Общий КД — **${formatCooldown(ECONOMY_TRAIN_COOLDOWN_MS)}**, до **${ECONOMY_SKILL_MAX}** — ранги **Новичок…Гуру**, дальше **Грандмастер**.`,
+        "Когда **все три** навыка переходят на новую группу (**Ученик**, **Любитель**…), ко **всем** выплатам добавляется множитель (**×1.2**, **×1.4**…).",
         "",
         "**Требования работ:**",
         ...reqLines,
@@ -2501,12 +2499,11 @@ function buildSkillsRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[]
   const trainRow1 = new ActionRowBuilder<ButtonBuilder>();
   const trainRow2 = new ActionRowBuilder<ButtonBuilder>();
   for (const [idx, s] of SKILLS.entries()) {
-    const atMax = getSkillLevel(u, s.id) >= ECONOMY_SKILL_MAX;
     const btn = new ButtonBuilder()
       .setCustomId(`${ECON_SKILL_BUTTON_PREFIX}${s.id}`)
       .setLabel(s.title)
       .setStyle(ButtonStyle.Primary)
-      .setDisabled(!cooldownReady || atMax);
+      .setDisabled(!cooldownReady);
     if (idx < 2) {
       trainRow1.addComponents(btn);
     } else {
@@ -2853,22 +2850,46 @@ export type EconomyRunWorkShiftResult =
   | { ok: true; walletDeltaRub: number; psGain: number; treasuryRub: number; notes: string[] };
 
 export type EconomyRunTrainSkillResult =
-  | { ok: false; kind: "unknown_skill" | "cooldown_or_max" }
-  | { ok: true; skillLabel: string; newLevel: number };
+  | { ok: false; kind: "unknown_skill" | "cooldown" }
+  | { ok: true; skillLabel: string; rankDisplay: string };
 
 export function economyRunTrainSkill(member: GuildMember, skillId: SkillId): EconomyRunTrainSkillResult {
-  if (!["communication", "logistics", "discipline"].includes(skillId)) return { ok: false, kind: "unknown_skill" };
-  const u = getEconomyUser(member.guild.id, member.id);
+  if (!ALL_SKILL_IDS.includes(skillId)) return { ok: false, kind: "unknown_skill" };
+  const guildId = member.guild.id;
+  const u = getEconomyUser(guildId, member.id);
   const now = Date.now();
-  if (u.lastTrainAt && now < u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS) return { ok: false, kind: "cooldown_or_max" };
+  if (u.lastTrainAt && now < u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS) return { ok: false, kind: "cooldown" };
+
   const curLvl = getSkillLevel(u, skillId);
-  if (curLvl >= ECONOMY_SKILL_MAX) return { ok: false, kind: "cooldown_or_max" };
-  const nextLvl = Math.min(ECONOMY_SKILL_MAX, curLvl + 1);
-  patchEconomyUser(member.guild.id, member.id, {
-    skills: { ...(u.skills ?? {}), [skillId]: nextLvl },
-    lastTrainAt: now,
-  });
-  return { ok: true, skillLabel: skillName(skillId), newLevel: nextLvl };
+  const curGm = getSkillGrandmasterLevel(u, skillId);
+  const patch: Partial<EconomyUser> = { lastTrainAt: now };
+  let rankDisplay: string;
+
+  if (curLvl >= ECONOMY_SKILL_MAX) {
+    const nextGm = curGm + 1;
+    patch.skillGrandmaster = { ...(u.skillGrandmaster ?? {}), [skillId]: nextGm };
+    rankDisplay = `Грандмастер ${nextGm}`;
+  } else {
+    const nextLvl = curLvl + 1;
+    patch.skills = { ...(u.skills ?? {}), [skillId]: nextLvl };
+    rankDisplay = skillRankFromParts(nextLvl, 0).trainingLabel;
+  }
+
+  patchEconomyUser(guildId, member.id, patch);
+  const afterU = getEconomyUser(guildId, member.id);
+  const crossed = detectAllSkillsMajorTierCrossing(u, afterU);
+  if (crossed) {
+    const mult = skillIncomeMultFromUser(afterU);
+    appendFeedEvent({
+      ts: now,
+      guildId,
+      type: "skill:tier",
+      actorUserId: member.id,
+      text: `${member.toString()}: все навыки достигли уровня **${crossed}** — бонус к доходу **${skillIncomeMultLabel(mult)}**.`,
+    });
+  }
+
+  return { ok: true, skillLabel: skillName(skillId), rankDisplay };
 }
 
 /** Общая логика «Выйти на смену» для Discord и Telegram. */
@@ -3002,6 +3023,15 @@ export async function economyRunWorkShift(client: Client, member: GuildMember): 
     if (jobTotal > beforePrestige) {
       prestigeRubBonus = jobTotal - beforePrestige;
       notes.push(`в том числе за престиж: **+${fmt(prestigeRubBonus)}** ₽`);
+    }
+  }
+
+  const skillMult = skillIncomeMultFromUser(u);
+  if (skillMult > 1 + 1e-9 && jobTotal > 0) {
+    const beforeSkill = jobTotal;
+    jobTotal = applySkillIncomeMult(jobTotal, skillMult);
+    if (jobTotal > beforeSkill) {
+      notes.push(`бонус навыков (все три): **${skillIncomeMultLabel(skillMult)}**`);
     }
   }
 
@@ -3179,6 +3209,10 @@ export function economyFormatTelegramJobCardScreen(member: GuildMember, jobId: J
 }
 
 /** Markdown Discord → HTML для Telegram (упрощённо). */
+export function economyCurrentJobRehireWarning(member: GuildMember): string | null {
+  return currentJobRehireWarning(getEconomyUser(member.guild.id, member.id));
+}
+
 export function economyMarkdownToTelegramHtml(text: string): string {
   let s = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   s = s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
@@ -3211,12 +3245,17 @@ export function economyFormatSkillsScreen(member: GuildMember): string {
     left > 0
       ? `Следующая тренировка (любой навык) через <b>${formatCooldown(left)}</b>.`
       : "Тренировка <b>доступна сейчас</b>.";
-  const lines = SKILLS.map((s) => `· <b>${s.title}</b>: ${getSkillLevel(u, s.id)} / ${ECONOMY_SKILL_MAX}`);
-  return ["<b>Навыки</b>", "", cdLine, "", ...lines, "", "Выбери навык ниже."].join("\n");
+  const skillMult = skillIncomeMultFromUser(u);
+  const skillMultLine =
+    skillMult > 1 + 1e-9
+      ? `Бонус ко всем выплатам: <b>${skillIncomeMultLabel(skillMult)}</b>.`
+      : "Бонус <b>×1.2</b>+ — когда все три навыка перейдут на <b>Ученик</b>, <b>Любитель</b>…";
+  const lines = SKILLS.map((s) => `· <b>${s.title}</b>: ${formatSkillRankTraining(u, s.id)}`);
+  return ["<b>Навыки</b>", "", cdLine, skillMultLine, "", ...lines, "", "Выбери навык ниже."].join("\n");
 }
 
 export function economyFormatSkillsNotify(u: ReturnType<typeof getEconomyUser>): string {
-  const lines = SKILLS.map((s) => `· <b>${s.title}</b>: ${getSkillLevel(u, s.id)} / ${ECONOMY_SKILL_MAX}`);
+  const lines = SKILLS.map((s) => `· <b>${s.title}</b>: ${formatSkillRankTraining(u, s.id)}`);
   return ["Можно потренировать <b>навык</b>.", "", ...lines].join("\n");
 }
 
@@ -3247,7 +3286,7 @@ export type EconomyTakeJobResult =
   | { ok: false; kind: "missing_skills"; missing: string[] }
   | { ok: false; kind: "need_housing" }
   | { ok: false; kind: "shift_cooldown"; msLeft: number }
-  | { ok: false; kind: "confirm_switch"; jobId: JobId; currentTitle: string; newTitle: string };
+  | { ok: false; kind: "confirm_switch"; jobId: JobId; currentTitle: string; newTitle: string; rehireWarning?: string };
 
 export function economyTakeJob(
   member: GuildMember,
@@ -3269,12 +3308,14 @@ export function economyTakeJob(
     const st = canWorkNow(cur, cur.jobId, Date.now());
     if (!st.ok) return { ok: false, kind: "shift_cooldown", msLeft: st.msLeft };
     if (!opts?.forceSwitch) {
+      const rehireWarning = currentJobRehireWarning(cur) ?? undefined;
       return {
         ok: false,
         kind: "confirm_switch",
         jobId,
         currentTitle: jobTitle(cur.jobId),
         newTitle: def.title,
+        rehireWarning,
       };
     }
     patchEconomyUser(guildId, member.id, {
@@ -5416,8 +5457,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     }
     const embed = new EmbedBuilder()
       .setColor(PANEL_COLOR)
-      .setTitle("Увольнение")
-      .setDescription(`Вы уверены, что хотите уволиться с работы **${jobTitle(u.jobId)}**?`);
+      .setTitle("Увольнение");
+    const lines = [`Вы уверены, что хотите уволиться с работы **${jobTitle(u.jobId)}**?`];
+    const warn = currentJobRehireWarning(u);
+    if (warn) lines.push("", warn);
+    embed.setDescription(lines.join("\n"));
     await replyOrUpdate(interaction, {
       embeds: [embed],
       components: [

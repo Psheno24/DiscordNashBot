@@ -11,6 +11,7 @@ export type FeedEventType =
   | "job:shift"
   | "job:promotion"
   | "job:passive"
+  | "skill:tier"
   | "admin:budget";
 
 export interface FeedEvent {
