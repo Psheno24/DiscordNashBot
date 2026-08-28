@@ -235,7 +235,7 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
         "**КД смены:** **4** ч · **Совещание** — КД **24** ч (влияет на стрик).",
         `**Смена:** **${fmtJobIncomeRange(guildId, 45_000, 55_000)}** ₽ + надбавки, тоже × **престиж**.`,
         "**Престиж к ₽:** линейно от очков престижа (телефон мало, машина больше, жильё сильно больше, номер мало). Vertu + порш + поместье + лучший номер — **×2**.",
-        "**Навыки:** " + formatJobSkillReqText({ skill: "discipline", minLevel: 93 }) + " · **жильё**.",
+        "**Навыки:** " + formatJobSkillReqText({ skill: "communication", minLevel: 93 }) + " · **жильё**.",
       ].join("\n\n");
       break;
     }
@@ -243,7 +243,7 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
       main = [
         "**Пассива нет.** КД смены: **12** ч.",
         `**Смена:** **от ${fmtJobIncome(guildId, -150_000)}** до **~${fmtJobIncome(guildId, 1_200_000)}+** ₽ (рандом × **posBoost**).`,
-        "**Связь** и **куратор** — КД **24** ч. **Навыки:** " + formatJobSkillReqText({ skill: "discipline", minLevel: 128 }) + " · **жильё**.",
+        "**Связь** и **куратор** — КД **24** ч. **Навыки:** " + formatJobSkillReqText({ skill: "logistics", minLevel: 128 }) + " · **жильё**.",
       ].join("\n\n");
       break;
     case "soleProp": {

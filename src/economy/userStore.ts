@@ -21,7 +21,7 @@ import { computeSimPrestige } from "./economySimPrestige.js";
 import { nextHousingUtilityDueMs } from "./economyMacro.js";
 import { SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS } from "./shiftPayCoeff.js";
 import { writeJsonAtomicSync } from "../storage/atomicJson.js";
-import { ECONOMY_SKILL_MAX } from "./skills.js";
+import { ECONOMY_SKILL_MAX, computeLegacySkillJobEligible } from "./skills.js";
 
 export { ECONOMY_SKILL_MAX };
 
@@ -171,6 +171,13 @@ export interface EconomyUser {
   skills?: Partial<Record<SkillId, number>>;
   /** Грандмастер после 999: skillId → уровень GM (1, 2, …). */
   skillGrandmaster?: Partial<Record<SkillId, number>>;
+  /**
+   * Допуск к работам по старым (трёхнавыковым) требованиям — снимок при миграции rank v2.
+   * Нужен тем, кто качал три навыка параллельно и не добирает новый суммарный порог одного.
+   */
+  legacySkillJobEligible?: Partial<Record<JobId, true>>;
+  /** Флаг: снимок legacy-допуска к работам уже сохранён. */
+  skillsLegacyEligibleSnapshotted?: boolean;
   /** Последняя тренировка навыков (unix ms) */
   lastTrainAt?: number;
 
@@ -297,6 +304,29 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
   for (const k of ["communication", "logistics", "discipline"] as const) {
     const v = rawGm[k];
     if (Number.isFinite(v) && v > 0) skillGrandmaster[k] = Math.max(1, Math.floor(v));
+  }
+
+  let legacySkillJobEligible: Partial<Record<JobId, true>> | undefined;
+  const rawLegacy = (u as any)?.legacySkillJobEligible;
+  if (rawLegacy && typeof rawLegacy === "object") {
+    legacySkillJobEligible = {};
+    for (const id of PERSISTED_JOB_IDS) {
+      if ((rawLegacy as Record<string, unknown>)[id] === true) legacySkillJobEligible[id] = true;
+    }
+    if (!Object.keys(legacySkillJobEligible).length) legacySkillJobEligible = undefined;
+  }
+
+  let skillsLegacyEligibleSnapshotted = (u as any)?.skillsLegacyEligibleSnapshotted === true;
+  if (!skillsLegacyEligibleSnapshotted) {
+    const snapUser = {
+      skills,
+      skillGrandmaster: Object.keys(skillGrandmaster).length ? skillGrandmaster : undefined,
+    } as EconomyUser;
+    const computed = computeLegacySkillJobEligible(snapUser);
+    if (computed) {
+      legacySkillJobEligible = { ...legacySkillJobEligible, ...computed };
+    }
+    skillsLegacyEligibleSnapshotted = true;
   }
 
   const rawJobExp = (u as any)?.jobExp ?? {};
@@ -595,6 +625,8 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     courierBikeUntilMs,
     skills,
     skillGrandmaster: Object.keys(skillGrandmaster).length ? skillGrandmaster : undefined,
+    legacySkillJobEligible,
+    skillsLegacyEligibleSnapshotted: skillsLegacyEligibleSnapshotted || undefined,
     lastTrainAt: Number.isFinite(u?.lastTrainAt) ? Math.max(0, Math.floor(u!.lastTrainAt!)) : undefined,
     jobExp,
     economyLastMskYmd,

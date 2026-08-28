@@ -1,4 +1,14 @@
-import type { EconomyUser, SkillId } from "./userStore.js";
+import type { EconomyUser, JobId, SkillId } from "./userStore.js";
+
+/** Старые трёхнавыковые пороги (до rank v2) — для миграции и legacy-допуска. */
+export const LEGACY_JOB_SKILL_REQS: Partial<Record<JobId, Partial<Record<SkillId, number>>>> = {
+  dispatcher: { communication: 28, discipline: 20 },
+  assembler: { discipline: 28, logistics: 20 },
+  expediter: { logistics: 28, communication: 20 },
+  officeAnalyst: { communication: 30, logistics: 28, discipline: 35 },
+  shadowFixer: { communication: 42, logistics: 38, discipline: 48 },
+  soleProp: { communication: 55, logistics: 52, discipline: 60 },
+};
 
 /** Числовой потолок навыка до ранга «Грандмастер». */
 export const ECONOMY_SKILL_MAX = 999;
@@ -177,6 +187,30 @@ export function formatJobRehireWarning(jobTitle: string, missing: string[]): str
   ].join("\n");
 }
 
+export function meetsLegacyJobSkillReq(u: EconomyUser, jobId: JobId): boolean {
+  const legacy = LEGACY_JOB_SKILL_REQS[jobId];
+  if (!legacy) return false;
+  for (const id of ALL_SKILL_IDS) {
+    const need = legacy[id];
+    if (need == null || need <= 0) continue;
+    if (getSkillLevel(u, id) < need) return false;
+  }
+  return true;
+}
+
+/** Одноразовая миграция: кто проходил по старым трём навыкам — сохраняем допуск. */
+export function computeLegacySkillJobEligible(u: EconomyUser): Partial<Record<JobId, true>> | undefined {
+  const out: Partial<Record<JobId, true>> = {};
+  for (const jobId of Object.keys(LEGACY_JOB_SKILL_REQS) as JobId[]) {
+    if (meetsLegacyJobSkillReq(u, jobId)) out[jobId] = true;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+export function hasLegacySkillJobAccess(u: EconomyUser, jobId: JobId): boolean {
+  return u.legacySkillJobEligible?.[jobId] === true;
+}
+
 export function meetsJobSkillReq(
   u: EconomyUser,
   req: JobSkillReq | undefined,
@@ -190,6 +224,18 @@ export function meetsJobSkillReq(
     ok: false,
     missing: [`${skillName(req.skill)} ${needLabel} (у вас ${haveLabel})`],
   };
+}
+
+/** Новый порог **или** legacy-допуск с миграции (три навыка параллельно). */
+export function meetsJobSkillAccess(
+  u: EconomyUser,
+  jobId: JobId,
+  req: JobSkillReq | undefined,
+): { ok: boolean; missing: string[]; viaLegacy?: boolean } {
+  const check = meetsJobSkillReq(u, req);
+  if (check.ok) return check;
+  if (hasLegacySkillJobAccess(u, jobId)) return { ok: true, missing: [], viaLegacy: true };
+  return check;
 }
 
 export function formatJobSkillReqLine(req: JobSkillReq): string {

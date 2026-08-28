@@ -50,7 +50,7 @@ import {
   formatSkillRankTraining,
   getSkillGrandmasterLevel,
   getSkillLevel,
-  meetsJobSkillReq,
+  meetsJobSkillAccess,
   skillIncomeMultFromUser,
   skillIncomeMultLabel,
   skillName,
@@ -1167,8 +1167,8 @@ function jobTitle(id: JobId): string {
   return getAnyJobDef(id).title;
 }
 
-function meetsJobReq(u: ReturnType<typeof getEconomyUser>, def: JobDef): { ok: boolean; missing: string[] } {
-  return meetsJobSkillReq(u, def.reqSkill);
+function meetsJobReq(u: ReturnType<typeof getEconomyUser>, def: JobDef): { ok: boolean; missing: string[]; viaLegacy?: boolean } {
+  return meetsJobSkillAccess(u, def.id, def.reqSkill);
 }
 
 function currentJobRehireWarning(u: EconomyUser): string | null {
@@ -1977,7 +1977,11 @@ function buildJobInfoEmbed(member: GuildMember, jobId: JobId): EmbedBuilder {
   const req = meetsJobReq(u, def);
   if (def.reqSkill) {
     body.push("");
-    body.push(req.ok ? "Требования: **выполнены**." : `Требования: **не выполнены**.\n- ${req.missing.join("\n- ")}`);
+    if (req.ok) {
+      body.push(req.viaLegacy ? "Требования: **выполнены** (допуск по старой системе навыков)." : "Требования: **выполнены**.");
+    } else {
+      body.push(`Требования: **не выполнены**.\n- ${req.missing.join("\n- ")}`);
+    }
   }
 
   const needsHousing = isTier2JobId(jobId) || isTier3PanelJob(jobId);
