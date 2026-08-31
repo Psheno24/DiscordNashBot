@@ -1,56 +1,53 @@
 import type { EconomyUser, JobId } from "./userStore.js";
 
-/** Пауза между переходами **офис ↔ ИП** (в любую сторону). */
-export const OFFICE_IP_SWITCH_CD_MS = 7 * 24 * 60 * 60 * 1000;
+/** Пауза после перехода **с любой работы на ИП** или **с ИП на другую**. */
+export const IP_SWITCH_CD_MS = 7 * 24 * 60 * 60 * 1000;
 
-export type OfficeIpSwitchTarget = "officeAnalyst" | "soleProp";
+/** @deprecated alias */
+export const OFFICE_IP_SWITCH_CD_MS = IP_SWITCH_CD_MS;
 
-export function isOfficeIpSwitch(from: JobId | undefined, to: JobId): boolean {
+export function isIpSwitchTransition(from: JobId | undefined, to: JobId): boolean {
   if (!from) return false;
-  return (from === "officeAnalyst" && to === "soleProp") || (from === "soleProp" && to === "officeAnalyst");
+  if (from === to) return false;
+  return from === "soleProp" || to === "soleProp";
 }
 
-export function isOfficeIpJob(id: JobId): id is OfficeIpSwitchTarget {
-  return id === "officeAnalyst" || id === "soleProp";
-}
-
-export function officeIpSwitchMsLeft(u: EconomyUser, nowMs: number = Date.now()): number {
+export function ipSwitchMsLeft(u: EconomyUser, nowMs: number = Date.now()): number {
   const ready = u.tier3OfficeIpSwitchReadyAt ?? 0;
   if (!Number.isFinite(ready) || ready <= 0) return 0;
   return Math.max(0, ready - nowMs);
 }
 
-/** Нельзя устроиться на эту работу, пока не истекла пауза после прошлого перехода. */
-export function officeIpSwitchBlocksTarget(u: EconomyUser, targetJobId: JobId, nowMs: number = Date.now()): boolean {
-  if (!isOfficeIpJob(targetJobId)) return false;
-  if (officeIpSwitchMsLeft(u, nowMs) <= 0) return false;
+/** Нельзя устроиться на эту работу, пока не истекла пауза после прошлого перехода с/на ИП. */
+export function ipSwitchBlocksTarget(u: EconomyUser, targetJobId: JobId, nowMs: number = Date.now()): boolean {
+  if (ipSwitchMsLeft(u, nowMs) <= 0) return false;
   const locked = u.tier3OfficeIpSwitchLockedTo;
-  if (locked !== "officeAnalyst" && locked !== "soleProp") return true;
+  if (!locked) return false;
   return locked === targetJobId;
 }
 
-export function officeIpSwitchOnCooldown(
+export function ipSwitchOnCooldown(
   u: EconomyUser,
   from: JobId | undefined,
   to: JobId,
   nowMs: number = Date.now(),
 ): boolean {
-  if (isOfficeIpSwitch(from, to)) return officeIpSwitchBlocksTarget(u, to, nowMs);
-  if (!from && isOfficeIpJob(to)) return officeIpSwitchBlocksTarget(u, to, nowMs);
+  if (isIpSwitchTransition(from, to)) return ipSwitchBlocksTarget(u, to, nowMs);
+  if (!from) return ipSwitchBlocksTarget(u, to, nowMs);
   return false;
 }
 
-/** После успешного перехода офис ↔ ИП — запустить паузу на обратную сторону. */
-export function officeIpSwitchCooldownPatch(
+/** После успешного перехода с/на ИП — запустить паузу на прошлую сторону. */
+export function ipSwitchCooldownPatch(
   from: JobId | undefined,
   to: JobId,
   nowMs: number = Date.now(),
 ): Partial<EconomyUser> {
-  if (!isOfficeIpSwitch(from, to)) return {};
-  const lockedTo: OfficeIpSwitchTarget = from === "officeAnalyst" ? "officeAnalyst" : "soleProp";
+  if (!isIpSwitchTransition(from, to) || !from) return {};
+  const lockedJobId: JobId = from === "soleProp" ? "soleProp" : from;
   return {
-    tier3OfficeIpSwitchReadyAt: nowMs + OFFICE_IP_SWITCH_CD_MS,
-    tier3OfficeIpSwitchLockedTo: lockedTo,
+    tier3OfficeIpSwitchReadyAt: nowMs + IP_SWITCH_CD_MS,
+    tier3OfficeIpSwitchLockedTo: lockedJobId,
   };
 }
 
@@ -64,11 +61,20 @@ function formatCooldownMs(msLeft: number): string {
   return `${m} м`;
 }
 
-export function officeIpSwitchCooldownMessage(msLeft: number): string {
+export function ipSwitchCooldownMessage(msLeft: number): string {
   const cd = formatCooldownMs(msLeft);
-  const days = OFFICE_IP_SWITCH_CD_MS / (24 * 60 * 60 * 1000);
+  const days = IP_SWITCH_CD_MS / (24 * 60 * 60 * 1000);
   return (
-    `Переход между **офисом** и **ИП** будет доступен через **${cd}**. ` +
-    `После каждой смены стороны действует пауза **${days} сут**.`
+    `Эту работу можно взять через **${cd}**. ` +
+    `После каждого перехода **на ИП** или **с ИП** действует пауза **${days} сут** на возврат к прошлой стороне.`
   );
 }
+
+/** @deprecated */
+export const officeIpSwitchMsLeft = ipSwitchMsLeft;
+/** @deprecated */
+export const officeIpSwitchOnCooldown = ipSwitchOnCooldown;
+/** @deprecated */
+export const officeIpSwitchCooldownPatch = ipSwitchCooldownPatch;
+/** @deprecated */
+export const officeIpSwitchCooldownMessage = ipSwitchCooldownMessage;

@@ -348,10 +348,10 @@ import { tier3RankTitle } from "./tier3RankTitles.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
 import {
-  officeIpSwitchCooldownMessage,
-  officeIpSwitchCooldownPatch,
-  officeIpSwitchMsLeft,
-  officeIpSwitchOnCooldown,
+  ipSwitchCooldownMessage,
+  ipSwitchCooldownPatch,
+  ipSwitchMsLeft,
+  ipSwitchOnCooldown,
 } from "./tier3JobSwitchGuard.js";
 import { mskTodayYmd } from "./mskCalendar.js";
 import {
@@ -3296,7 +3296,7 @@ export type EconomyTakeJobResult =
   | { ok: false; kind: "missing_skills"; missing: string[] }
   | { ok: false; kind: "need_housing" }
   | { ok: false; kind: "shift_cooldown"; msLeft: number }
-  | { ok: false; kind: "office_ip_switch_cooldown"; msLeft: number }
+  | { ok: false; kind: "ip_switch_cooldown"; msLeft: number }
   | { ok: false; kind: "confirm_switch"; jobId: JobId; currentTitle: string; newTitle: string; rehireWarning?: string };
 
 export function economyTakeJob(
@@ -3314,8 +3314,8 @@ export function economyTakeJob(
   if ((isTier2JobId(jobId) || isTier3PanelJob(jobId)) && !hasTier2PlusHousing(cur, nowTake)) {
     return { ok: false, kind: "need_housing" };
   }
-  if (officeIpSwitchOnCooldown(cur, cur.jobId, jobId, nowTake)) {
-    return { ok: false, kind: "office_ip_switch_cooldown", msLeft: officeIpSwitchMsLeft(cur, nowTake) };
+  if (ipSwitchOnCooldown(cur, cur.jobId, jobId, nowTake)) {
+    return { ok: false, kind: "ip_switch_cooldown", msLeft: ipSwitchMsLeft(cur, nowTake) };
   }
   if (cur.jobId) {
     if (cur.jobId === jobId) return { ok: true, kind: "already_current" };
@@ -3336,7 +3336,7 @@ export function economyTakeJob(
       jobId,
       jobChosenAt: Date.now(),
       ...tier3PatchWhenJobChanges(cur, jobId),
-      ...officeIpSwitchCooldownPatch(cur.jobId, jobId, nowTake),
+      ...ipSwitchCooldownPatch(cur.jobId, jobId, nowTake),
     });
     return { ok: true, kind: "hired" };
   }
@@ -5379,9 +5379,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       });
       return true;
     }
-    if (officeIpSwitchOnCooldown(cur, cur.jobId, jobId, nowTake)) {
+    if (ipSwitchOnCooldown(cur, cur.jobId, jobId, nowTake)) {
       await interaction.reply({
-        content: officeIpSwitchCooldownMessage(officeIpSwitchMsLeft(cur, nowTake)),
+        content: ipSwitchCooldownMessage(ipSwitchMsLeft(cur, nowTake)),
         flags: MessageFlags.Ephemeral,
       });
       return true;
@@ -5436,9 +5436,9 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       });
       return true;
     }
-    if (officeIpSwitchOnCooldown(cur, cur.jobId, jobId, nowSw)) {
+    if (ipSwitchOnCooldown(cur, cur.jobId, jobId, nowSw)) {
       await interaction.reply({
-        content: officeIpSwitchCooldownMessage(officeIpSwitchMsLeft(cur, nowSw)),
+        content: ipSwitchCooldownMessage(ipSwitchMsLeft(cur, nowSw)),
         flags: MessageFlags.Ephemeral,
       });
       return true;
@@ -5468,7 +5468,7 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       jobId,
       jobChosenAt: Date.now(),
       ...tier3PatchWhenJobChanges(cur, jobId),
-      ...officeIpSwitchCooldownPatch(cur.jobId, jobId, nowSw),
+      ...ipSwitchCooldownPatch(cur.jobId, jobId, nowSw),
     });
     await replyOrUpdate(interaction, { embeds: [buildCurrentJobEmbed(member)], components: buildCurrentJobRows(member) });
     return true;

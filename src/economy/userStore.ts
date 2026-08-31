@@ -178,10 +178,10 @@ export interface EconomyUser {
   legacySkillJobEligible?: Partial<Record<JobId, true>>;
   /** Флаг: снимок legacy-допуска к работам уже сохранён. */
   skillsLegacyEligibleSnapshotted?: boolean;
-  /** Unix ms: когда снова можно переключиться между офисом и ИП. */
+  /** Unix ms: когда снова можно взять работу, заблокированную после перехода с/на ИП. */
   tier3OfficeIpSwitchReadyAt?: number;
-  /** Какую из двух работ нельзя взять до конца паузы (обратная сторона перехода). */
-  tier3OfficeIpSwitchLockedTo?: "officeAnalyst" | "soleProp";
+  /** Какую работу нельзя взять до конца паузы (сторона, с которой ушли при переходе с/на ИП). */
+  tier3OfficeIpSwitchLockedTo?: JobId;
   /** Последняя тренировка навыков (unix ms) */
   lastTrainAt?: number;
 
@@ -337,9 +337,9 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     ? Math.max(0, Math.floor((u as any).tier3OfficeIpSwitchReadyAt))
     : undefined;
   const tier3OfficeIpSwitchLockedTo =
-    (u as any)?.tier3OfficeIpSwitchLockedTo === "officeAnalyst" ||
-    (u as any)?.tier3OfficeIpSwitchLockedTo === "soleProp"
-      ? ((u as any).tier3OfficeIpSwitchLockedTo as "officeAnalyst" | "soleProp")
+    typeof (u as any)?.tier3OfficeIpSwitchLockedTo === "string" &&
+    (PERSISTED_JOB_IDS as readonly string[]).includes((u as any).tier3OfficeIpSwitchLockedTo)
+      ? ((u as any).tier3OfficeIpSwitchLockedTo as JobId)
       : undefined;
 
   const rawJobExp = (u as any)?.jobExp ?? {};
