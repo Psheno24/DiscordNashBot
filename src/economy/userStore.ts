@@ -178,9 +178,9 @@ export interface EconomyUser {
   legacySkillJobEligible?: Partial<Record<JobId, true>>;
   /** Флаг: снимок legacy-допуска к работам уже сохранён. */
   skillsLegacyEligibleSnapshotted?: boolean;
-  /** Unix ms: когда снова можно взять работу, заблокированную после перехода с/на ИП. */
+  /** Unix ms: когда снова можно оформить ИП после ухода с soleProp. */
   tier3OfficeIpSwitchReadyAt?: number;
-  /** Какую работу нельзя взять до конца паузы (сторона, с которой ушли при переходе с/на ИП). */
+  /** Всегда soleProp, если пауза активна — для совместимости сохранения. */
   tier3OfficeIpSwitchLockedTo?: JobId;
   /** Последняя тренировка навыков (unix ms) */
   lastTrainAt?: number;

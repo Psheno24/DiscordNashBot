@@ -1,15 +1,13 @@
 import type { EconomyUser, JobId } from "./userStore.js";
 
-/** Пауза после перехода **с любой работы на ИП** или **с ИП на другую**. */
+/** Пауза на повторное оформление ИП после ухода с soleProp. */
 export const IP_SWITCH_CD_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** @deprecated alias */
 export const OFFICE_IP_SWITCH_CD_MS = IP_SWITCH_CD_MS;
 
-export function isIpSwitchTransition(from: JobId | undefined, to: JobId): boolean {
-  if (!from) return false;
-  if (from === to) return false;
-  return from === "soleProp" || to === "soleProp";
+export function isIpLeaveTransition(from: JobId | undefined, to: JobId): boolean {
+  return from === "soleProp" && to !== "soleProp";
 }
 
 export function ipSwitchMsLeft(u: EconomyUser, nowMs: number = Date.now()): number {
@@ -18,36 +16,31 @@ export function ipSwitchMsLeft(u: EconomyUser, nowMs: number = Date.now()): numb
   return Math.max(0, ready - nowMs);
 }
 
-/** Нельзя устроиться на эту работу, пока не истекла пауза после прошлого перехода с/на ИП. */
+/** Нельзя снова оформить ИП, пока не истекла пауза после ухода с soleProp. */
 export function ipSwitchBlocksTarget(u: EconomyUser, targetJobId: JobId, nowMs: number = Date.now()): boolean {
-  if (ipSwitchMsLeft(u, nowMs) <= 0) return false;
-  const locked = u.tier3OfficeIpSwitchLockedTo;
-  if (!locked) return false;
-  return locked === targetJobId;
+  if (targetJobId !== "soleProp") return false;
+  return ipSwitchMsLeft(u, nowMs) > 0;
 }
 
 export function ipSwitchOnCooldown(
   u: EconomyUser,
-  from: JobId | undefined,
+  _from: JobId | undefined,
   to: JobId,
   nowMs: number = Date.now(),
 ): boolean {
-  if (isIpSwitchTransition(from, to)) return ipSwitchBlocksTarget(u, to, nowMs);
-  if (!from) return ipSwitchBlocksTarget(u, to, nowMs);
-  return false;
+  return ipSwitchBlocksTarget(u, to, nowMs);
 }
 
-/** После успешного перехода с/на ИП — запустить паузу на прошлую сторону. */
+/** После ухода с ИП — запустить паузу только на повторное оформление soleProp. */
 export function ipSwitchCooldownPatch(
   from: JobId | undefined,
   to: JobId,
   nowMs: number = Date.now(),
 ): Partial<EconomyUser> {
-  if (!isIpSwitchTransition(from, to) || !from) return {};
-  const lockedJobId: JobId = from === "soleProp" ? "soleProp" : from;
+  if (!isIpLeaveTransition(from, to)) return {};
   return {
     tier3OfficeIpSwitchReadyAt: nowMs + IP_SWITCH_CD_MS,
-    tier3OfficeIpSwitchLockedTo: lockedJobId,
+    tier3OfficeIpSwitchLockedTo: "soleProp",
   };
 }
 
@@ -65,16 +58,7 @@ export function ipSwitchCooldownMessage(msLeft: number): string {
   const cd = formatCooldownMs(msLeft);
   const days = IP_SWITCH_CD_MS / (24 * 60 * 60 * 1000);
   return (
-    `Эту работу можно взять через **${cd}**. ` +
-    `После каждого перехода **на ИП** или **с ИП** действует пауза **${days} сут** на возврат к прошлой стороне.`
+    `Оформить **ИП** снова можно через **${cd}**. ` +
+    `После ухода с ИП действует пауза **${days} сут** — при переходе **на** ИП уходить можно сразу.`
   );
 }
-
-/** @deprecated */
-export const officeIpSwitchMsLeft = ipSwitchMsLeft;
-/** @deprecated */
-export const officeIpSwitchOnCooldown = ipSwitchOnCooldown;
-/** @deprecated */
-export const officeIpSwitchCooldownPatch = ipSwitchCooldownPatch;
-/** @deprecated */
-export const officeIpSwitchCooldownMessage = ipSwitchCooldownMessage;

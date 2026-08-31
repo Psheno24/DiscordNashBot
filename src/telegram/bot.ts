@@ -458,7 +458,7 @@ async function handleTake(
     }
     if (r.kind === "ip_switch_cooldown") {
       const msg = ipSwitchCooldownMessage(r.msLeft);
-      if (ack) await answerCallback(token, ack.id, "Пауза с/на ИП");
+      if (ack) await answerCallback(token, ack.id, "Пауза на ИП");
       await presentPanel(tgUserId, token, chatId, {
         text: economyMarkdownToTelegramHtml(msg) + "\n\n" + economyFormatTelegramWorkScreen(ctx.member),
         markup: workMenuKeyboard(ctx.member),

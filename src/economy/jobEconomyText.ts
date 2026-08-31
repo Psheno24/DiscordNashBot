@@ -12,7 +12,7 @@ import type { JobId } from "./userStore.js";
 
 function ipSwitchCdLine(): string {
   const days = IP_SWITCH_CD_MS / (24 * 60 * 60 * 1000);
-  return `**Переход с/на ИП:** пауза **${days} сут** после каждого перехода (с любой работы или обратно).`;
+  return `**После ухода с ИП:** повторно оформить можно через **${days} сут** · уйти с ИП можно сразу.`;
 }
 
 function formatJobSkillReqText(req: JobSkillReq): string {
