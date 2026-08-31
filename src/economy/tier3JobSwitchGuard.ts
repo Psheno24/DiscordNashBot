@@ -1,44 +1,74 @@
-import { mskTodayYmd } from "./mskCalendar.js";
-import { lastWorkAtForJob, type EconomyUser } from "./userStore.js";
+import type { EconomyUser, JobId } from "./userStore.js";
 
-/** Была ли смена офиса в указанный календарный день (МСК). */
-export function hadOfficeShiftOnMskDay(u: EconomyUser, ymd: string = mskTodayYmd()): boolean {
-  const last = lastWorkAtForJob(u, "officeAnalyst");
-  if (!last) return false;
-  return mskTodayYmd(last) === ymd;
+/** Пауза между переходами **офис ↔ ИП** (в любую сторону). */
+export const OFFICE_IP_SWITCH_CD_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type OfficeIpSwitchTarget = "officeAnalyst" | "soleProp";
+
+export function isOfficeIpSwitch(from: JobId | undefined, to: JobId): boolean {
+  if (!from) return false;
+  return (from === "officeAnalyst" && to === "soleProp") || (from === "soleProp" && to === "officeAnalyst");
 }
 
-/** Получен ли сегодня (МСK) суточный оклад ИП. */
-export function receivedSolePropPassiveOnMskDay(u: EconomyUser, ymd: string = mskTodayYmd()): boolean {
-  return u.solePropPassivePaidMskYmd === ymd;
+export function isOfficeIpJob(id: JobId): id is OfficeIpSwitchTarget {
+  return id === "officeAnalyst" || id === "soleProp";
 }
 
-export type Tier3CrossJobBlock =
-  | { kind: "office_shift_blocks_ip" }
-  | { kind: "ip_passive_blocks_office" };
+export function officeIpSwitchMsLeft(u: EconomyUser, nowMs: number = Date.now()): number {
+  const ready = u.tier3OfficeIpSwitchReadyAt ?? 0;
+  if (!Number.isFinite(ready) || ready <= 0) return 0;
+  return Math.max(0, ready - nowMs);
+}
 
-export function tier3CrossJobSwitchBlock(
+/** Нельзя устроиться на эту работу, пока не истекла пауза после прошлого перехода. */
+export function officeIpSwitchBlocksTarget(u: EconomyUser, targetJobId: JobId, nowMs: number = Date.now()): boolean {
+  if (!isOfficeIpJob(targetJobId)) return false;
+  if (officeIpSwitchMsLeft(u, nowMs) <= 0) return false;
+  const locked = u.tier3OfficeIpSwitchLockedTo;
+  if (locked !== "officeAnalyst" && locked !== "soleProp") return true;
+  return locked === targetJobId;
+}
+
+export function officeIpSwitchOnCooldown(
   u: EconomyUser,
-  targetJobId: "officeAnalyst" | "soleProp",
+  from: JobId | undefined,
+  to: JobId,
   nowMs: number = Date.now(),
-): Tier3CrossJobBlock | null {
-  const today = mskTodayYmd(nowMs);
-  if (targetJobId === "soleProp" && hadOfficeShiftOnMskDay(u, today)) {
-    return { kind: "office_shift_blocks_ip" };
-  }
-  if (targetJobId === "officeAnalyst" && receivedSolePropPassiveOnMskDay(u, today)) {
-    return { kind: "ip_passive_blocks_office" };
-  }
-  return null;
+): boolean {
+  if (isOfficeIpSwitch(from, to)) return officeIpSwitchBlocksTarget(u, to, nowMs);
+  if (!from && isOfficeIpJob(to)) return officeIpSwitchBlocksTarget(u, to, nowMs);
+  return false;
 }
 
-export function tier3CrossJobSwitchBlockMessage(block: Tier3CrossJobBlock): string {
-  if (block.kind === "office_shift_blocks_ip") {
-    return (
-      "Сегодня уже была **смена в офисе** — устроиться на **ИП** можно **завтра** (смена и суточный оклад ИП в один день не суммируются)."
-    );
-  }
+/** После успешного перехода офис ↔ ИП — запустить паузу на обратную сторону. */
+export function officeIpSwitchCooldownPatch(
+  from: JobId | undefined,
+  to: JobId,
+  nowMs: number = Date.now(),
+): Partial<EconomyUser> {
+  if (!isOfficeIpSwitch(from, to)) return {};
+  const lockedTo: OfficeIpSwitchTarget = from === "officeAnalyst" ? "officeAnalyst" : "soleProp";
+  return {
+    tier3OfficeIpSwitchReadyAt: nowMs + OFFICE_IP_SWITCH_CD_MS,
+    tier3OfficeIpSwitchLockedTo: lockedTo,
+  };
+}
+
+function formatCooldownMs(msLeft: number): string {
+  const ms = Math.max(0, msLeft);
+  const d = Math.floor(ms / (24 * 60 * 60 * 1000));
+  const h = Math.floor((ms % (24 * 60 * 60 * 1000)) / (60 * 60 * 1000));
+  const m = Math.ceil((ms % (60 * 60 * 1000)) / (60 * 1000));
+  if (d > 0) return `${d} сут ${h} ч`;
+  if (h > 0) return `${h} ч ${m} м`;
+  return `${m} м`;
+}
+
+export function officeIpSwitchCooldownMessage(msLeft: number): string {
+  const cd = formatCooldownMs(msLeft);
+  const days = OFFICE_IP_SWITCH_CD_MS / (24 * 60 * 60 * 1000);
   return (
-    "Сегодня уже начислен **суточный оклад ИП** — устроиться в **офис** можно **завтра** (оклад ИП и смены офиса в один день не суммируются)."
+    `Переход между **офисом** и **ИП** будет доступен через **${cd}**. ` +
+    `После каждой смены стороны действует пауза **${days} сут**.`
   );
 }

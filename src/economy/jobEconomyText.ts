@@ -6,8 +6,14 @@ import {
   shiftPayCoeffExemptEmbedLine,
 } from "./shiftPayCoeff.js";
 import { getTier3JobDef } from "./tier3Jobs.js";
+import { OFFICE_IP_SWITCH_CD_MS } from "./tier3JobSwitchGuard.js";
 import { formatSkillRankReq, skillName, type JobSkillReq } from "./skills.js";
 import type { JobId } from "./userStore.js";
+
+function officeIpSwitchCdLine(): string {
+  const days = OFFICE_IP_SWITCH_CD_MS / (24 * 60 * 60 * 1000);
+  return `**Переход офис ↔ ИП:** пауза **${days} сут** после каждой смены стороны (в любую сторону).`;
+}
 
 function formatJobSkillReqText(req: JobSkillReq): string {
   return `${skillName(req.skill).toLowerCase()} ${formatSkillRankReq(req.minLevel)}`;
@@ -114,12 +120,12 @@ export function jobOpeningLine(guildId: string, jobId: JobId): string {
       return `**Развлекательный центр** · КД **6** ч · **от ~${compactJobRub(guildId, -38_000)} до ~${compactJobRub(guildId, 155_000)}** (шансы в **Подробнее**) · **×ранг** т2`;
     case "officeAnalyst": {
       const basePass = getTier3JobDef("officeAnalyst").passiveBaseRub;
-      return `**Офис · аналитик** · суточный оклад **${fmtJobIncome(guildId, basePass)}** ₽ + смена КД **4** ч · фикс смены **${compactJobRange(guildId, 45_000, 55_000)}**+`;
+      return `**Офис · аналитик** · суточный оклад **${fmtJobIncome(guildId, basePass)}** ₽ + смена КД **4** ч · фикс смены **${compactJobRange(guildId, 45_000, 55_000)}**+ · ${officeIpSwitchCdLine()}`;
     }
     case "shadowFixer":
       return `**Схемы · посредник** · КД **12** ч · рандом (шансы в **Подробнее**)`;
     case "soleProp":
-      return `**ИП · услуги** · суточный оклад от капитала · смен **нет**`;
+      return `**ИП · услуги** · суточный оклад от капитала · смен **нет** · ${officeIpSwitchCdLine()}`;
     default:
       return `**${jobId}**`;
   }
@@ -236,6 +242,7 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
         `**Смена:** **${fmtJobIncomeRange(guildId, 45_000, 55_000)}** ₽ + надбавки, тоже × **престиж**.`,
         "**Престиж к ₽:** линейно от очков престижа (телефон мало, машина больше, жильё сильно больше, номер мало). Vertu + порш + поместье + лучший номер — **×2**.",
         "**Навыки:** " + formatJobSkillReqText({ skill: "communication", minLevel: 93 }) + " · **жильё**.",
+        officeIpSwitchCdLine(),
       ].join("\n\n");
       break;
     }
@@ -253,6 +260,7 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
         "Каждый следующий миллион на балансе даёт **меньше**, чем предыдущий. Дальше сильнее **ранг, престиж и эффективность** (персонал).",
         "**Реклама / персонал / контроль** — в панели ИП.",
         "**Навыки:** " + formatJobSkillReqText({ skill: "discipline", minLevel: 167 }) + " · **жильё**.",
+        officeIpSwitchCdLine(),
       ].join("\n\n");
       break;
     }

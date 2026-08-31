@@ -19,7 +19,7 @@ import {
   listWorkJobsByTier,
 } from "../economy/panel.js";
 import { getEconomyUser, lastWorkAtForJob, type JobId, type SkillId } from "../economy/userStore.js";
-import { tier3CrossJobSwitchBlockMessage } from "../economy/tier3JobSwitchGuard.js";
+import { officeIpSwitchCooldownMessage } from "../economy/tier3JobSwitchGuard.js";
 import {
   getNotifyLatch,
   getTelegramLink,
@@ -456,9 +456,9 @@ async function handleTake(
       await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId });
       return;
     }
-    if (r.kind === "office_shift_blocks_ip" || r.kind === "ip_passive_blocks_office") {
-      const msg = tier3CrossJobSwitchBlockMessage({ kind: r.kind });
-      if (ack) await answerCallback(token, ack.id, "Нельзя сменить работу");
+    if (r.kind === "office_ip_switch_cooldown") {
+      const msg = officeIpSwitchCooldownMessage(r.msLeft);
+      if (ack) await answerCallback(token, ack.id, "Пауза офис ↔ ИП");
       await presentPanel(tgUserId, token, chatId, {
         text: economyMarkdownToTelegramHtml(msg) + "\n\n" + economyFormatTelegramWorkScreen(ctx.member),
         markup: workMenuKeyboard(ctx.member),

@@ -178,8 +178,10 @@ export interface EconomyUser {
   legacySkillJobEligible?: Partial<Record<JobId, true>>;
   /** Флаг: снимок legacy-допуска к работам уже сохранён. */
   skillsLegacyEligibleSnapshotted?: boolean;
-  /** Календарный день (МСK), когда последний раз начислили суточный оклад ИП. */
-  solePropPassivePaidMskYmd?: string;
+  /** Unix ms: когда снова можно переключиться между офисом и ИП. */
+  tier3OfficeIpSwitchReadyAt?: number;
+  /** Какую из двух работ нельзя взять до конца паузы (обратная сторона перехода). */
+  tier3OfficeIpSwitchLockedTo?: "officeAnalyst" | "soleProp";
   /** Последняя тренировка навыков (unix ms) */
   lastTrainAt?: number;
 
@@ -331,10 +333,13 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     skillsLegacyEligibleSnapshotted = true;
   }
 
-  const solePropPassivePaidMskYmd =
-    typeof (u as any)?.solePropPassivePaidMskYmd === "string" &&
-    /^\d{4}-\d{2}-\d{2}$/.test((u as any).solePropPassivePaidMskYmd)
-      ? (u as any).solePropPassivePaidMskYmd
+  const tier3OfficeIpSwitchReadyAt = Number.isFinite((u as any)?.tier3OfficeIpSwitchReadyAt)
+    ? Math.max(0, Math.floor((u as any).tier3OfficeIpSwitchReadyAt))
+    : undefined;
+  const tier3OfficeIpSwitchLockedTo =
+    (u as any)?.tier3OfficeIpSwitchLockedTo === "officeAnalyst" ||
+    (u as any)?.tier3OfficeIpSwitchLockedTo === "soleProp"
+      ? ((u as any).tier3OfficeIpSwitchLockedTo as "officeAnalyst" | "soleProp")
       : undefined;
 
   const rawJobExp = (u as any)?.jobExp ?? {};
@@ -635,7 +640,8 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     skillGrandmaster: Object.keys(skillGrandmaster).length ? skillGrandmaster : undefined,
     legacySkillJobEligible,
     skillsLegacyEligibleSnapshotted: skillsLegacyEligibleSnapshotted || undefined,
-    solePropPassivePaidMskYmd,
+    tier3OfficeIpSwitchReadyAt,
+    tier3OfficeIpSwitchLockedTo,
     lastTrainAt: Number.isFinite(u?.lastTrainAt) ? Math.max(0, Math.floor(u!.lastTrainAt!)) : undefined,
     jobExp,
     economyLastMskYmd,
