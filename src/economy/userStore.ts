@@ -178,6 +178,8 @@ export interface EconomyUser {
   legacySkillJobEligible?: Partial<Record<JobId, true>>;
   /** Флаг: снимок legacy-допуска к работам уже сохранён. */
   skillsLegacyEligibleSnapshotted?: boolean;
+  /** Календарный день (МСK), когда последний раз начислили суточный оклад ИП. */
+  solePropPassivePaidMskYmd?: string;
   /** Последняя тренировка навыков (unix ms) */
   lastTrainAt?: number;
 
@@ -328,6 +330,12 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     }
     skillsLegacyEligibleSnapshotted = true;
   }
+
+  const solePropPassivePaidMskYmd =
+    typeof (u as any)?.solePropPassivePaidMskYmd === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test((u as any).solePropPassivePaidMskYmd)
+      ? (u as any).solePropPassivePaidMskYmd
+      : undefined;
 
   const rawJobExp = (u as any)?.jobExp ?? {};
   const jobExp: Partial<Record<string, number>> = {};
@@ -627,6 +635,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     skillGrandmaster: Object.keys(skillGrandmaster).length ? skillGrandmaster : undefined,
     legacySkillJobEligible,
     skillsLegacyEligibleSnapshotted: skillsLegacyEligibleSnapshotted || undefined,
+    solePropPassivePaidMskYmd,
     lastTrainAt: Number.isFinite(u?.lastTrainAt) ? Math.max(0, Math.floor(u!.lastTrainAt!)) : undefined,
     jobExp,
     economyLastMskYmd,

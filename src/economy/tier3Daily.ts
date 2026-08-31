@@ -116,6 +116,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
         jobMskDayStreak: streakOut.nextStreak,
         jobMskStreakAnchorJobId: streakOut.nextAnchorJobId,
         rubles: rublesNext,
+        ...(jobId === "soleProp" && passive > 0 ? { solePropPassivePaidMskYmd: today } : {}),
         ...solePropMskPatch,
       });
 

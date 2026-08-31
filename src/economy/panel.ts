@@ -347,6 +347,10 @@ import {
 import { tier3RankTitle } from "./tier3RankTitles.js";
 import { loadVoiceLadder } from "../voice/loadLadder.js";
 import { listBetEvents, type BetEvent, type PlacedBet } from "../bets/store.js";
+import {
+  tier3CrossJobSwitchBlock,
+  tier3CrossJobSwitchBlockMessage,
+} from "./tier3JobSwitchGuard.js";
 import { mskTodayYmd } from "./mskCalendar.js";
 import {
   addToTreasury,
@@ -3290,6 +3294,8 @@ export type EconomyTakeJobResult =
   | { ok: false; kind: "missing_skills"; missing: string[] }
   | { ok: false; kind: "need_housing" }
   | { ok: false; kind: "shift_cooldown"; msLeft: number }
+  | { ok: false; kind: "office_shift_blocks_ip" }
+  | { ok: false; kind: "ip_passive_blocks_office" }
   | { ok: false; kind: "confirm_switch"; jobId: JobId; currentTitle: string; newTitle: string; rehireWarning?: string };
 
 export function economyTakeJob(
@@ -3306,6 +3312,11 @@ export function economyTakeJob(
   const nowTake = Date.now();
   if ((isTier2JobId(jobId) || isTier3PanelJob(jobId)) && !hasTier2PlusHousing(cur, nowTake)) {
     return { ok: false, kind: "need_housing" };
+  }
+  if (jobId === "soleProp" || jobId === "officeAnalyst") {
+    const cross = tier3CrossJobSwitchBlock(cur, jobId, nowTake);
+    if (cross?.kind === "office_shift_blocks_ip") return { ok: false, kind: "office_shift_blocks_ip" };
+    if (cross?.kind === "ip_passive_blocks_office") return { ok: false, kind: "ip_passive_blocks_office" };
   }
   if (cur.jobId) {
     if (cur.jobId === jobId) return { ok: true, kind: "already_current" };
@@ -5368,6 +5379,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
       });
       return true;
     }
+    if (jobId === "soleProp" || jobId === "officeAnalyst") {
+      const cross = tier3CrossJobSwitchBlock(cur, jobId, nowTake);
+      if (cross) {
+        await interaction.reply({ content: tier3CrossJobSwitchBlockMessage(cross), flags: MessageFlags.Ephemeral });
+        return true;
+      }
+    }
 
     if (cur.jobId) {
       const st = canWorkNow(cur, cur.jobId, Date.now());
@@ -5417,6 +5435,13 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         flags: MessageFlags.Ephemeral,
       });
       return true;
+    }
+    if (jobId === "soleProp" || jobId === "officeAnalyst") {
+      const cross = tier3CrossJobSwitchBlock(cur, jobId, nowSw);
+      if (cross) {
+        await interaction.reply({ content: tier3CrossJobSwitchBlockMessage(cross), flags: MessageFlags.Ephemeral });
+        return true;
+      }
     }
 
     if (!cur.jobId) {
