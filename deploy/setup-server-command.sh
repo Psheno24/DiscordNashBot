@@ -23,5 +23,9 @@ else
 fi
 
 echo ""
-echo "Готово. После push на сервере:  nashbot-update"
+echo "Готово. Вручную на сервере:  nashbot-update"
 echo "(git pull + npm ci + npm run build + restart, в конце [OK] или [FAIL])"
+echo ""
+echo "Автодеплой из GitHub Actions (push в main): добавь secrets"
+echo "  DEPLOY_HOST, DEPLOY_USER, DEPLOY_SSH_KEY"
+echo "и положи соответствующий публичный ключ в ~/.ssh/authorized_keys"
