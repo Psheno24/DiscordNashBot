@@ -3157,7 +3157,7 @@ export function economyFormatTelegramWorkScreen(member: GuildMember): string {
 
   if (!u.jobId) {
     lines.push("Текущая: <b>не выбрана</b>");
-    lines.push("", "Выберите профессию в каталоге ниже.");
+    lines.push("", "Каталог: Ур. 1 / 2 / 3 — кнопки ниже.");
     return lines.join("\n");
   }
 
@@ -3166,26 +3166,29 @@ export function economyFormatTelegramWorkScreen(member: GuildMember): string {
 
   if (u.jobId === "soleProp") {
     lines.push("", "ИП — смен нет, доход пассивный.");
+    lines.push("Управление ИП — в Discord-терминале.");
     return lines.join("\n");
   }
 
   const ls = u.lastShiftSummary;
   if (ls) {
-    lines.push(`Последняя смена: <b>${tgFmtDelta(ls.walletRub)}</b>`);
+    lines.push("", `Последняя смена: <b>${tgFmtDelta(ls.walletRub)}</b>`);
     if (ls.walletRub > 0 && ls.prestigeRub > 0) {
       const baseRub = Math.max(0, ls.walletRub - ls.prestigeRub);
-      lines.push(`В том числе: смена ${tgFmtDelta(baseRub)} · престиж +${tgFmtRub(ls.prestigeRub)} ₽`);
+      lines.push(`· смена ${tgFmtDelta(baseRub)}`);
+      lines.push(`· престиж +${tgFmtRub(ls.prestigeRub)} ₽`);
     }
-    if (ls.ps > 0) lines.push(`СР: +${tgFmtRub(ls.ps)}`);
+    if (ls.ps > 0) lines.push(`· СР +${tgFmtRub(ls.ps)}`);
   } else {
-    lines.push("Последняя смена: —");
+    lines.push("", "Последняя смена: —");
   }
 
   const cdMs = effectiveShiftCooldownMs(u, u.jobId, now);
   const st = canWorkNow(u, u.jobId, now);
   const cdH = cdHoursLabel(cdMs);
+  lines.push("");
   lines.push(
-    st.ok ? `КД: ${cdH} ч · <b>можно</b>` : `КД: ${cdH} ч · <b>${tgFmtCooldown(st.msLeft)}</b>`,
+    st.ok ? `КД смены: ${cdH} ч · <b>можно</b>` : `КД смены: ${cdH} ч · осталось <b>${tgFmtCooldown(st.msLeft)}</b>`,
   );
 
   if (shiftPayCoeffApplies(cdMs)) {
@@ -3194,22 +3197,22 @@ export function economyFormatTelegramWorkScreen(member: GuildMember): string {
     const usedH = formatAccCdHours(acc);
     const limitH = formatAccCdHours(SHIFT_PAY_FREE_CD_MS);
     const coeff = shiftPayCoeffFromAccMs(acc);
-    lines.push(coeff < 1 - 1e-9 ? `Лимит за сутки: ${usedH}/${limitH} ч · ×${coeff}` : `Лимит за сутки: ${usedH}/${limitH} ч`);
+    lines.push(
+      coeff < 1 - 1e-9
+        ? `Лимит за сутки: ${usedH}/${limitH} ч · выплата ×${coeff}`
+        : `Лимит за сутки: ${usedH}/${limitH} ч`,
+    );
   }
 
   return lines.join("\n");
 }
 
-export function economyFormatTelegramJobListScreen(tier: "t1" | "t2" | "t3"): string {
-  const title = tier === "t1" ? "Начальные · ур. 1" : tier === "t2" ? "С навыком · ур. 2" : "Продвинутые · ур. 3";
-  return `<b>${title}</b>\n\nВыберите профессию:`;
+export function economyFormatTelegramJobListScreen(guildId: string, tier: "t1" | "t2" | "t3"): string {
+  return economyFormatJobListScreen(guildId, tier);
 }
 
 export function economyFormatTelegramJobCardScreen(member: GuildMember, jobId: JobId): string {
-  const u = getEconomyUser(member.guild.id, member.id);
-  const title = economyJobTitle(jobId);
-  if (u.jobId === jobId) return `<b>${title}</b>\n\nТекущая работа.`;
-  return `<b>${title}</b>`;
+  return economyFormatJobCardScreen(member, jobId);
 }
 
 /** Markdown Discord → HTML для Telegram (упрощённо). */
@@ -3217,14 +3220,25 @@ export function economyCurrentJobRehireWarning(member: GuildMember): string | nu
   return currentJobRehireWarning(getEconomyUser(member.guild.id, member.id));
 }
 
+function escapeTelegramHtml(text: string): string {
+  return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
 export function economyMarkdownToTelegramHtml(text: string): string {
-  let s = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  let s = escapeTelegramHtml(text);
   s = s.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
-  s = s.replace(/<t:(\d+):[a-zA-Z]+>/g, (_, sec) => {
+  s = s.replace(/&lt;t:(\d+):[a-zA-Z]+&gt;/g, (_, sec) => {
     const d = new Date(Number(sec) * 1000);
     return d.toLocaleString("ru-RU", { dateStyle: "short", timeStyle: "short" });
   });
   return s;
+}
+
+/** Заголовок HTML + тело из Discord-markdown (без двойного экранирования тегов). */
+export function economyTelegramScreen(title: string, markdownBody: string): string {
+  const body = markdownBody.trim();
+  if (!body) return `<b>${escapeTelegramHtml(title)}</b>`;
+  return `<b>${escapeTelegramHtml(title)}</b>\n\n${economyMarkdownToTelegramHtml(body)}`;
 }
 
 export function economyIsWorkJobId(s: string): s is JobId {
@@ -3241,21 +3255,23 @@ export function economyJobTitle(id: JobId): string {
   return jobTitle(id);
 }
 
+export { economyJobButtonLabel } from "./jobTitles.js";
+
 export function economyFormatSkillsScreen(member: GuildMember): string {
   const u = getEconomyUser(member.guild.id, member.id);
   const now = Date.now();
   const left = u.lastTrainAt ? Math.max(0, u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS - now) : 0;
   const cdLine =
     left > 0
-      ? `Следующая тренировка (любой навык) через <b>${formatCooldown(left)}</b>.`
-      : "Тренировка <b>доступна сейчас</b>.";
+      ? `КД тренировки: <b>${formatCooldown(left)}</b> (общий на все навыки).`
+      : "Тренировка: <b>можно</b>.";
   const skillMult = skillIncomeMultFromUser(u);
   const skillMultLine =
     skillMult > 1 + 1e-9
-      ? `Бонус ко всем выплатам: <b>${skillIncomeMultLabel(skillMult)}</b>.`
-      : "Бонус <b>×1.2</b>+ — когда все три навыка перейдут на <b>Ученик</b>, <b>Любитель</b>…";
-  const lines = SKILLS.map((s) => `· <b>${s.title}</b>: ${formatSkillRankTraining(u, s.id)}`);
-  return ["<b>Навыки</b>", "", cdLine, skillMultLine, "", ...lines, "", "Выбери навык ниже."].join("\n");
+      ? `Бонус к выплатам: <b>${skillIncomeMultLabel(skillMult)}</b>`
+      : "Бонус к выплатам: пока ×1 (растёт от рангов всех трёх навыков).";
+  const lines = SKILLS.map((s) => `· <b>${s.title}</b> — ${formatSkillRankTraining(u, s.id)}`);
+  return ["<b>Навыки</b>", "", cdLine, skillMultLine, "", ...lines, "", "Нажми навык ниже."].join("\n");
 }
 
 export function economyFormatSkillsNotify(u: ReturnType<typeof getEconomyUser>): string {
@@ -3267,21 +3283,21 @@ export function economyFormatWorkMenuScreen(member: GuildMember): string {
   const embed = buildWorkMenuEmbed(member);
   const title = embed.data.title ?? "Работа";
   const desc = embed.data.description ?? "";
-  return economyMarkdownToTelegramHtml(`<b>${title}</b>\n\n${desc}`);
+  return economyTelegramScreen(title, desc);
 }
 
 export function economyFormatJobCardScreen(member: GuildMember, jobId: JobId): string {
   const embed = buildJobInfoEmbed(member, jobId);
   const title = embed.data.title ?? economyJobTitle(jobId);
   const desc = embed.data.description ?? "";
-  return economyMarkdownToTelegramHtml(`<b>${title}</b>\n\n${desc}`);
+  return economyTelegramScreen(title, desc);
 }
 
 export function economyFormatJobListScreen(guildId: string, tier: "t1" | "t2" | "t3"): string {
-  const title = tier === "t1" ? "Начальные · ур. 1" : tier === "t2" ? "С навыком · ур. 2" : "Продвинутые · ур. 3";
+  const title = tier === "t1" ? "Ур. 1 · начальные" : tier === "t2" ? "Ур. 2 · с навыком" : "Ур. 3 · продвинутые";
   const jobs = listWorkJobsByTier(tier);
   const lines = jobs.map((id) => `· ${jobOpeningLine(guildId, id)}`);
-  return economyMarkdownToTelegramHtml(`<b>${title}</b>\n\n${lines.join("\n")}\n\nВыбери профессию ниже.`);
+  return economyTelegramScreen(title, `${lines.join("\n")}\n\nВыбери профессию кнопкой ниже.`);
 }
 
 export type EconomyTakeJobResult =
