@@ -29,6 +29,10 @@ export interface NotifyLatch {
   lastTrainBoundaryNotifiedMs?: number;
 }
 
+/** Ожидание текстового ввода (переименование питомца и т.п.). */
+export type TelegramPendingInput =
+  | { kind: "petRename"; uid: string; expiresAtMs: number };
+
 /** UI в личке Telegram: одна панель + отдельные push-уведомления. */
 export interface TelegramUiState {
   /** Сообщение с inline-меню (редактируется как в Discord). */
@@ -37,6 +41,8 @@ export interface TelegramUiState {
   notifyWorkMessageId?: number;
   /** Последнее уведомление «навык готов» (заменяется новым). */
   notifyTrainMessageId?: number;
+  /** Ожидание следующего текстового сообщения от пользователя. */
+  pendingInput?: TelegramPendingInput;
 }
 
 interface StoreShape {
@@ -237,7 +243,11 @@ export function patchTelegramUiState(telegramUserId: string, patch: Partial<Tele
   const s = readStore();
   const id = String(telegramUserId);
   const cur = s.uiByTelegramId[id] ?? {};
-  s.uiByTelegramId[id] = { ...cur, ...patch };
+  const next: TelegramUiState = { ...cur, ...patch };
+  if ("pendingInput" in patch && patch.pendingInput === undefined) {
+    delete next.pendingInput;
+  }
+  s.uiByTelegramId[id] = next;
   writeStore(s);
 }
 

@@ -9,6 +9,7 @@ import {
   economyCurrentJobRehireWarning,
   economyMarkdownToTelegramHtml,
   economyIsWorkJobId,
+  economyJobButtonLabel,
   economyJobTitle,
   economyQuitJob,
   economyRunTrainSkill,
@@ -31,6 +32,26 @@ import {
   setTelegramLink,
 } from "./bridgeStore.js";
 import { isTelegramBridgeConfigured, telegramAllowedUserIds, telegramBotToken } from "./env.js";
+import {
+  beginPetRenamePending,
+  clearPendingInput,
+  handlePetRenameText,
+  isPetRenameCallback,
+  routeShopCallback,
+  screenShopHub,
+} from "./shop.js";
+import {
+  btnLabel,
+  fmtMs,
+  fmtMsCompact,
+  kb,
+  navRow,
+  row,
+  TG_BTN_FULL,
+  type InlineBtn,
+  type InlineKb,
+  type ScreenPayload,
+} from "./tgUi.js";
 
 type TgMsg = { message?: { chat: { id: number }; text?: string; from?: { id: number } } };
 type TgCb = {
@@ -39,9 +60,6 @@ type TgCb = {
   from: { id: number };
   message?: { chat: { id: number }; message_id: number };
 };
-
-type InlineBtn = { text: string; callback_data: string };
-type InlineKb = { inline_keyboard: InlineBtn[][] };
 
 type TgApiResult = { ok?: boolean; result?: { message_id?: number } };
 
@@ -63,6 +81,7 @@ async function registerBotCommands(token: string) {
       { command: "menu", description: "Главное меню" },
       { command: "work", description: "Работа и смены" },
       { command: "skills", description: "Навыки и тренировка" },
+      { command: "shop", description: "Магазин" },
       { command: "shift", description: "Выйти на смену" },
       { command: "train", description: "Тренировка (communication|logistics|discipline)" },
       { command: "status", description: "Статус работы и навыков" },
@@ -72,56 +91,41 @@ async function registerBotCommands(token: string) {
   });
 }
 
-function fmtMs(ms: number): string {
-  const m = Math.ceil(ms / 60000);
-  if (m >= 1440) return `${Math.floor(m / 1440)} д ${Math.floor((m % 1440) / 60)} ч`;
-  if (m >= 60) return `${Math.floor(m / 60)} ч ${m % 60} мин`;
-  return `${m} мин`;
-}
-
 function workReadyBoundaryMs(u: ReturnType<typeof getEconomyUser>, jobId: JobId, now: number): number {
   const last = lastWorkAtForJob(u, jobId);
   const cd = effectiveShiftCooldownMs(u, jobId, now);
   return last + cd;
 }
 
-function row(...buttons: InlineBtn[]): InlineBtn[] {
-  return buttons;
-}
-
-function kb(...rows: InlineBtn[][]): InlineKb {
-  return { inline_keyboard: rows };
-}
-
 function mainMenuKeyboard(): InlineKb {
   return kb(
     row({ text: "Работа", callback_data: "w" }, { text: "Навыки", callback_data: "sk" }),
-    row({ text: "Статус", callback_data: "st" }),
+    row({ text: "Магазин", callback_data: "s" }, { text: "Статус", callback_data: "st" }),
   );
 }
 
 function workMenuKeyboard(member: GuildMember): InlineKb {
   const u = getEconomyUser(member.guild.id, member.id);
-  const rows: InlineBtn[][] = [
-    row(
-      { text: "Начальные · ур. 1", callback_data: "wt1" },
-      { text: "С навыком · ур. 2", callback_data: "wt2" },
-    ),
-    row({ text: "Продвинутые · ур. 3", callback_data: "wt3" }),
-  ];
+  const rows: InlineBtn[][] = [];
+
   if (u.jobId) {
-    const now = Date.now();
-    const st = u.jobId !== "soleProp" ? canWorkNow(u, u.jobId, now) : { ok: false, msLeft: 0 };
-    const actions: InlineBtn[] = [{ text: `Моя: ${economyJobTitle(u.jobId).slice(0, 12)}`, callback_data: `j:${u.jobId}` }];
+    rows.push(row({ text: "Моя работа", callback_data: `j:${u.jobId}` }));
     if (u.jobId !== "soleProp") {
-      actions.unshift({
-        text: st.ok ? "Выйти на смену" : `Смена (${fmtMs(st.msLeft)})`,
-        callback_data: "sh",
-      });
+      const now = Date.now();
+      const st = canWorkNow(u, u.jobId, now);
+      rows.push(
+        row({
+          text: st.ok ? "На смену" : `КД ${fmtMsCompact(st.msLeft)}`,
+          callback_data: "sh",
+        }),
+      );
     }
-    rows.unshift(row(...actions));
   }
-  rows.push(row({ text: "Главное меню", callback_data: "m" }));
+
+  rows.push(row({ text: "Ур. 1", callback_data: "wt1" }));
+  rows.push(row({ text: "Ур. 2", callback_data: "wt2" }));
+  rows.push(row({ text: "Ур. 3", callback_data: "wt3" }));
+  rows.push(navRow("m", "← Меню"));
   return kb(...rows);
 }
 
@@ -129,10 +133,9 @@ function tierListKeyboard(tier: "t1" | "t2" | "t3"): InlineKb {
   const jobs = listWorkJobsByTier(tier);
   const rows: InlineBtn[][] = [];
   for (const id of jobs) {
-    const title = economyJobTitle(id);
-    rows.push(row({ text: title.slice(0, 28), callback_data: `j:${id}` }));
+    rows.push(row({ text: btnLabel(economyJobButtonLabel(id), TG_BTN_FULL), callback_data: `j:${id}` }));
   }
-  rows.push(row({ text: "← Работа", callback_data: "w" }, { text: "Главное меню", callback_data: "m" }));
+  rows.push(navRow("w", "← Работа"));
   return kb(...rows);
 }
 
@@ -151,50 +154,78 @@ function jobCardKeyboard(member: GuildMember, jobId: JobId): InlineKb {
     if (jobId !== "soleProp") {
       const st = canWorkNow(u, jobId, now);
       rows.push(
-        row(
-          { text: st.ok ? "Выйти на смену" : `КД ${fmtMs(st.msLeft)}`, callback_data: "sh" },
-          { text: "Уволиться", callback_data: "q" },
-        ),
+        row({
+          text: st.ok ? "На смену" : `КД ${fmtMsCompact(st.msLeft)}`,
+          callback_data: "sh",
+        }),
       );
-    } else {
-      const st = canWorkNow(u, jobId, now);
-      rows.push(row({ text: "Уволиться", callback_data: "q" }));
-      void st;
     }
+    rows.push(row({ text: "Уволиться", callback_data: "q" }));
   } else {
     rows.push(row({ text: "Выбрать", callback_data: `t:${jobId}` }));
   }
 
-  rows.push(row({ text: "← Каталог", callback_data: backTier }, { text: "Работа", callback_data: "w" }));
-  rows.push(row({ text: "Главное меню", callback_data: "m" }));
+  rows.push(row({ text: "← Каталог", callback_data: backTier }));
+  rows.push(navRow("w", "← Работа"));
   return kb(...rows);
 }
 
 function switchConfirmKeyboard(jobId: JobId): InlineKb {
   return kb(
-    row({ text: "Да, сменить работу", callback_data: `ty:${jobId}` }),
+    row({ text: "Да, сменить", callback_data: `ty:${jobId}` }),
     row({ text: "Отмена", callback_data: `j:${jobId}` }),
   );
 }
 
 function quitConfirmKeyboard(): InlineKb {
-  return kb(row({ text: "Да, уволиться", callback_data: "qy" }, { text: "Отмена", callback_data: "w" }));
+  return kb(
+    row({ text: "Да, уволиться", callback_data: "qy" }),
+    row({ text: "Отмена", callback_data: "w" }),
+  );
+}
+
+const SKILL_BTN: Record<SkillId, string> = {
+  communication: "Коммуникация",
+  logistics: "Логистика",
+  discipline: "Дисциплина",
+};
+
+function skillTrainLabel(skillId: SkillId, ready: boolean, msLeft: number): string {
+  const name = SKILL_BTN[skillId];
+  if (ready) return name;
+  return btnLabel(`${name} · ${fmtMsCompact(msLeft)}`, TG_BTN_FULL);
 }
 
 function skillsKeyboard(member: GuildMember): InlineKb {
   const u = getEconomyUser(member.guild.id, member.id);
   const now = Date.now();
-  const ready = !u.lastTrainAt || now >= u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS;
-  const trainRow = row(
-    { text: ready ? "Коммуникация" : "КД…", callback_data: "tr:communication" },
-    { text: ready ? "Логистика" : "КД…", callback_data: "tr:logistics" },
+  const msLeft = u.lastTrainAt ? Math.max(0, u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS - now) : 0;
+  const ready = msLeft <= 0;
+  return kb(
+    row({ text: skillTrainLabel("communication", ready, msLeft), callback_data: "tr:communication" }),
+    row({ text: skillTrainLabel("logistics", ready, msLeft), callback_data: "tr:logistics" }),
+    row({ text: skillTrainLabel("discipline", ready, msLeft), callback_data: "tr:discipline" }),
+    navRow("w", "← Работа"),
   );
-  const trainRow2 = row({ text: ready ? "Дисциплина" : "КД…", callback_data: "tr:discipline" });
-  return kb(trainRow, trainRow2, row({ text: "Работа", callback_data: "w" }, { text: "Главное меню", callback_data: "m" }));
+}
+
+function skillsKeyboardForUser(u: ReturnType<typeof getEconomyUser>): InlineKb {
+  const now = Date.now();
+  const msLeft = u.lastTrainAt ? Math.max(0, u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS - now) : 0;
+  const ready = msLeft <= 0;
+  return kb(
+    row({ text: skillTrainLabel("communication", ready, msLeft), callback_data: "tr:communication" }),
+    row({ text: skillTrainLabel("logistics", ready, msLeft), callback_data: "tr:logistics" }),
+    row({ text: skillTrainLabel("discipline", ready, msLeft), callback_data: "tr:discipline" }),
+    navRow("m", "← Меню"),
+  );
 }
 
 function shiftNotifyKeyboard(): InlineKb {
-  return kb(row({ text: "Выйти на смену", callback_data: "sh" }, { text: "Работа", callback_data: "w" }));
+  return kb(
+    row({ text: "На смену", callback_data: "sh" }),
+    row({ text: "Работа", callback_data: "w" }),
+  );
 }
 
 async function sendMessage(token: string, chatId: number, text: string, replyMarkup?: InlineKb): Promise<number | undefined> {
@@ -205,6 +236,26 @@ async function sendMessage(token: string, chatId: number, text: string, replyMar
     parse_mode: "HTML",
     ...(replyMarkup ? { reply_markup: replyMarkup } : {}),
   });
+  return res.ok ? res.result?.message_id : undefined;
+}
+
+async function sendPhoto(
+  token: string,
+  chatId: number,
+  caption: string,
+  png: Buffer,
+  replyMarkup?: InlineKb,
+): Promise<number | undefined> {
+  const form = new FormData();
+  form.append("chat_id", String(chatId));
+  form.append("caption", caption.length > 1000 ? `${caption.slice(0, 990)}…` : caption);
+  form.append("parse_mode", "HTML");
+  form.append("photo", new Blob([new Uint8Array(png)], { type: "image/png" }), "card.png");
+  if (replyMarkup) form.append("reply_markup", JSON.stringify(replyMarkup));
+  const res = (await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, {
+    method: "POST",
+    body: form,
+  }).then((r) => r.json())) as TgApiResult;
   return res.ok ? res.result?.message_id : undefined;
 }
 
@@ -244,11 +295,14 @@ async function resolveMember(client: Client, guildId: string, discordUserId: str
   return guild.members.fetch({ user: discordUserId, force: false }).catch(() => null);
 }
 
-type ScreenPayload = { text: string; markup?: InlineKb };
-
 function screenMain(): ScreenPayload {
   return {
-    text: "<b>Nash · терминал</b>\n\nРабота и навыки — как в Discord-терминале.",
+    text: [
+      "<b>Nash · терминал</b>",
+      "",
+      "Кнопки для смен, навыков и магазина.",
+      "Подробности — в тексте экрана; нажимай действия ниже.",
+    ].join("\n"),
     markup: mainMenuKeyboard(),
   };
 }
@@ -257,8 +311,11 @@ function screenWork(member: GuildMember): ScreenPayload {
   return { text: economyFormatTelegramWorkScreen(member), markup: workMenuKeyboard(member) };
 }
 
-function screenTier(_member: GuildMember, tier: "t1" | "t2" | "t3"): ScreenPayload {
-  return { text: economyFormatTelegramJobListScreen(tier), markup: tierListKeyboard(tier) };
+function screenTier(member: GuildMember, tier: "t1" | "t2" | "t3"): ScreenPayload {
+  return {
+    text: economyFormatTelegramJobListScreen(member.guild.id, tier),
+    markup: tierListKeyboard(tier),
+  };
 }
 
 function screenJob(member: GuildMember, jobId: JobId): ScreenPayload {
@@ -276,7 +333,7 @@ function screenSwitchConfirm(currentTitle: string, newTitle: string, jobId: JobI
     `Сейчас: <b>${currentTitle}</b>`,
     `Новая: <b>${newTitle}</b>`,
     "",
-    "Текущая смена должна быть без КД.",
+    "Смена на текущей работе должна быть без КД.",
   ];
   if (rehireWarning) {
     lines.push("", economyMarkdownToTelegramHtml(rehireWarning));
@@ -331,15 +388,17 @@ function screenStatus(member: GuildMember): ScreenPayload {
   let line = "Работа: <b>не выбрана</b>";
   if (jid && jid !== "soleProp") {
     const st = canWorkNow(eu, jid, Date.now());
-    line = st.ok ? `Смена (<b>${economyJobTitle(jid)}</b>): можно` : `Смена: КД ${fmtMs(st.msLeft)}`;
+    line = st.ok
+      ? `Смена (<b>${economyJobTitle(jid)}</b>): можно`
+      : `Смена (<b>${economyJobTitle(jid)}</b>): КД ${fmtMs(st.msLeft)}`;
   } else if (jid === "soleProp") line = "ИП — смен нет, пассивный доход.";
-  let tline = "Навыки: тренировка доступна";
+  let tline = "Навыки: <b>можно</b>";
   if (eu.lastTrainAt) {
     const left = eu.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS - Date.now();
     tline = left > 0 ? `Навыки: КД ${fmtMs(left)}` : "Навыки: <b>можно</b>";
   }
   return {
-    text: ["<b>Статус</b>", "", line, tline].join("\n"),
+    text: ["<b>Статус</b>", "", line, tline, "", "Магазин — кнопка ниже."].join("\n"),
     markup: mainMenuKeyboard(),
   };
 }
@@ -350,11 +409,7 @@ function screenAfterShift(member: GuildMember): ScreenPayload {
 
 function screenAfterTrain(member: GuildMember, skillLabel: string, rankDisplay: string): ScreenPayload {
   return {
-    text: [
-      `<b>${skillLabel}</b> → <b>${rankDisplay}</b>.`,
-      "",
-      economyFormatSkillsScreen(member),
-    ].join("\n"),
+    text: [`<b>${skillLabel}</b> → <b>${rankDisplay}</b>.`, "", economyFormatSkillsScreen(member)].join("\n"),
     markup: skillsKeyboard(member),
   };
 }
@@ -388,8 +443,9 @@ async function handleShift(client: Client, tgUserId: string, chatId: number, tok
   if (!ctx) return;
   const r = await economyRunWorkShift(client, ctx.member);
   if (!r.ok) {
-    const msg = r.kind === "cooldown" ? "Смена на КД." : r.message.replace(/\*\*/g, "");
-    if (ack) await answerCallback(token, ack.id, msg);
+    const msg =
+      r.kind === "cooldown" ? "Смена на КД." : economyMarkdownToTelegramHtml(r.message).replace(/<[^>]+>/g, "");
+    if (ack) await answerCallback(token, ack.id, msg.slice(0, 180));
     await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId });
     return;
   }
@@ -410,7 +466,15 @@ async function handleTrain(
   if (!ctx) return;
   const tr = economyRunTrainSkill(ctx.member, skillId);
   if (!tr.ok) {
-    if (ack) await answerCallback(token, ack.id, tr.kind === "unknown_skill" ? "Неверный навык" : "КД");
+    if (ack) {
+      const u = getEconomyUser(ctx.member.guild.id, ctx.member.id);
+      const left = u.lastTrainAt ? Math.max(0, u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS - Date.now()) : 0;
+      await answerCallback(
+        token,
+        ack.id,
+        tr.kind === "unknown_skill" ? "Неверный навык" : left > 0 ? `КД ${fmtMsCompact(left)}` : "КД",
+      );
+    }
     await presentPanel(tgUserId, token, chatId, screenSkills(ctx.member), { messageId });
     return;
   }
@@ -434,20 +498,35 @@ async function handleTake(
   if (!r.ok) {
     if (r.kind === "missing_skills") {
       if (ack) await answerCallback(token, ack.id, "Не хватает навыков");
-      await presentPanel(tgUserId, token, chatId, {
-        text: `<b>Не хватает навыков:</b>\n${r.missing.map((m) => `· ${m}`).join("\n")}\n\n${economyFormatTelegramWorkScreen(ctx.member)}`,
-        markup: workMenuKeyboard(ctx.member),
-      }, { messageId });
+      await presentPanel(
+        tgUserId,
+        token,
+        chatId,
+        {
+          text: `<b>Не хватает навыков:</b>\n${r.missing.map((m) => `· ${m}`).join("\n")}\n\n${economyFormatTelegramWorkScreen(ctx.member)}`,
+          markup: workMenuKeyboard(ctx.member),
+        },
+        { messageId },
+      );
       return;
     }
     if (r.kind === "need_housing") {
       if (ack) await answerCallback(token, ack.id, "Нужно жильё");
-      await presentPanel(tgUserId, token, chatId, {
-        text:
-          "Сначала оформите <b>жильё</b> (аренда или квартира) в магазине терминала Discord — для профессий ур. 2+.\n\n" +
-          economyFormatTelegramWorkScreen(ctx.member),
-        markup: workMenuKeyboard(ctx.member),
-      }, { messageId });
+      await presentPanel(
+        tgUserId,
+        token,
+        chatId,
+        {
+          text:
+            "Сначала оформите <b>жильё</b> (аренда или квартира) в <b>Магазине</b> — для профессий ур. 2+.\n\n" +
+            economyFormatTelegramWorkScreen(ctx.member),
+          markup: kb(
+            row({ text: "Магазин · Жильё", callback_data: "s:hs" }),
+            ...workMenuKeyboard(ctx.member).inline_keyboard,
+          ),
+        },
+        { messageId },
+      );
       return;
     }
     if (r.kind === "shift_cooldown") {
@@ -456,7 +535,13 @@ async function handleTake(
       return;
     }
     if (r.kind === "confirm_switch") {
-      await presentPanel(tgUserId, token, chatId, screenSwitchConfirm(r.currentTitle, r.newTitle, r.jobId, r.rehireWarning), { messageId, ack });
+      await presentPanel(
+        tgUserId,
+        token,
+        chatId,
+        screenSwitchConfirm(r.currentTitle, r.newTitle, r.jobId, r.rehireWarning),
+        { messageId, ack },
+      );
       return;
     }
     return;
@@ -465,16 +550,20 @@ async function handleTake(
   await presentPanel(tgUserId, token, chatId, screenJob(ctx.member, jobId), { messageId });
 }
 
-async function handleQuit(client: Client, tgUserId: string, chatId: number, token: string, confirm: boolean, ack?: TgCb, messageId?: number) {
+async function handleQuit(
+  client: Client,
+  tgUserId: string,
+  chatId: number,
+  token: string,
+  confirm: boolean,
+  ack?: TgCb,
+  messageId?: number,
+) {
   const ctx = await requireLink(client, tgUserId, chatId, token, ack);
   if (!ctx) return;
   if (!confirm) {
     const warn = economyCurrentJobRehireWarning(ctx.member);
-    const lines = [
-      "<b>Уволиться?</b>",
-      "",
-      "Нельзя уволиться, пока идёт КД смены на текущей работе.",
-    ];
+    const lines = ["<b>Уволиться?</b>", "", "Нельзя уволиться, пока идёт КД смены на текущей работе."];
     if (warn) lines.push("", economyMarkdownToTelegramHtml(warn));
     await presentPanel(
       tgUserId,
@@ -498,21 +587,18 @@ async function handleQuit(client: Client, tgUserId: string, chatId: number, toke
   await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId });
 }
 
-async function routeCallback(
-  client: Client,
-  token: string,
-  tgUserId: string,
-  cq: TgCb,
-): Promise<void> {
+async function routeCallback(client: Client, token: string, tgUserId: string, cq: TgCb): Promise<void> {
   const data = cq.data ?? "";
   const chatId = cq.message?.chat.id ?? Number(tgUserId);
   const messageId = cq.message?.message_id;
 
   if (data === "m") {
+    clearPendingInput(tgUserId);
     await presentPanel(tgUserId, token, chatId, screenMain(), { messageId, ack: cq });
     return;
   }
   if (data === "w") {
+    clearPendingInput(tgUserId);
     const ctx = await requireLink(client, tgUserId, chatId, token, cq);
     if (!ctx) return;
     await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId, ack: cq });
@@ -526,12 +612,13 @@ async function routeCallback(
     return;
   }
   if (data === "sk") {
+    clearPendingInput(tgUserId);
     const ctx = await requireLink(client, tgUserId, chatId, token, cq);
     if (!ctx) return;
     await presentPanel(tgUserId, token, chatId, screenSkills(ctx.member), { messageId, ack: cq });
     return;
   }
-  if (data === "sh") {
+  if (data === "sh" || data === "shift") {
     await handleShift(client, tgUserId, chatId, token, cq, messageId);
     return;
   }
@@ -577,10 +664,42 @@ async function routeCallback(
     await handleTrain(client, tgUserId, chatId, token, sid, cq, messageId);
     return;
   }
-  if (data === "shift") {
-    await handleShift(client, tgUserId, chatId, token, cq, messageId);
+
+  // Магазин
+  if (data === "s" || data.startsWith("s:")) {
+    const ctx = await requireLink(client, tgUserId, chatId, token, cq);
+    if (!ctx) return;
+
+    const renameUid = isPetRenameCallback(data);
+    if (renameUid) beginPetRenamePending(tgUserId, renameUid);
+    else if (!data.startsWith("s:an:v:")) clearPendingInput(tgUserId);
+
+    let acked = false;
+    const toast = async (text?: string) => {
+      if (acked) return;
+      acked = true;
+      await answerCallback(token, cq.id, text);
+    };
+
+    const handled = await routeShopCallback({
+      client,
+      member: ctx.member,
+      data,
+      present: async (payload) => {
+        await toast();
+        await presentPanel(tgUserId, token, chatId, payload, { messageId });
+      },
+      toast,
+      sendPhoto: async (caption, png, markup) => {
+        await toast();
+        const sent = await sendPhoto(token, chatId, caption, png, markup);
+        if (sent != null) patchTelegramUiState(tgUserId, { panelMessageId: sent });
+      },
+    });
+    if (!handled) await toast();
     return;
   }
+
   await answerCallback(token, cq.id);
 }
 
@@ -626,22 +745,9 @@ async function tickNotifications(client: Client, token: string) {
   }
 }
 
-function skillsKeyboardForUser(u: ReturnType<typeof getEconomyUser>): InlineKb {
-  const now = Date.now();
-  const ready = !u.lastTrainAt || now >= u.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS;
-  return kb(
-    row(
-      { text: ready ? "Коммуникация" : "КД…", callback_data: "tr:communication" },
-      { text: ready ? "Логистика" : "КД…", callback_data: "tr:logistics" },
-    ),
-    row({ text: ready ? "Дисциплина" : "КД…", callback_data: "tr:discipline" }),
-    row({ text: "Работа", callback_data: "w" }, { text: "Главное меню", callback_data: "m" }),
-  );
-}
-
 function parseCommand(text: string): { cmd: string; args: string[] } {
   const t = text.trim();
-  const m = t.match(/^\/([a-zA-Z0-9_]+)(?:\s+([\s\S]*))?$/);
+  const m = t.match(/^\/([a-zA-Z0-9_]+)(?:@[\w]+)?(?:\s+([\s\S]*))?$/);
   if (!m) return { cmd: "", args: [] };
   const rest = (m[2] ?? "").trim();
   return { cmd: (m[1] ?? "").toLowerCase(), args: rest ? rest.split(/\s+/) : [] };
@@ -695,8 +801,27 @@ export function startTelegramSidecar(client: Client): void {
 
         const msg = u.message;
         if (!msg?.text || !msg.chat?.id) continue;
+
+        // Ожидание имени питомца (не команда)
+        const pending = getTelegramUiState(tgUserId).pendingInput;
+        if (pending?.kind === "petRename" && !msg.text.startsWith("/")) {
+          if (Date.now() > pending.expiresAtMs) {
+            clearPendingInput(tgUserId);
+            await sendMessage(token, msg.chat.id, "Время на ввод имени истекло. Открой питомца снова.");
+            continue;
+          }
+          const ctx = await requireLink(client, tgUserId, msg.chat.id, token);
+          if (ctx) {
+            clearPendingInput(tgUserId);
+            const payload = handlePetRenameText(ctx.member, pending.uid, msg.text);
+            await presentPanel(tgUserId, token, msg.chat.id, payload);
+          }
+          continue;
+        }
+
         const { cmd, args } = parseCommand(msg.text);
         if (cmd === "start" || cmd === "help" || cmd === "menu") {
+          clearPendingInput(tgUserId);
           const linked = getTelegramLink(tgUserId);
           if (linked) {
             await presentPanel(tgUserId, token, msg.chat.id, screenMain());
@@ -706,7 +831,7 @@ export function startTelegramSidecar(client: Client): void {
                 "<b>Nash · Telegram</b>",
                 "",
                 "<code>/link КОД</code> — привязка (Discord → профиль → Telegram).",
-                "После привязки — кнопки <b>Работа</b> и <b>Навыки</b>.",
+                "После привязки — <b>Работа</b>, <b>Навыки</b> и <b>Магазин</b>.",
               ].join("\n"),
             });
           }
@@ -719,20 +844,24 @@ export function startTelegramSidecar(client: Client): void {
             });
             continue;
           }
-          const row = peekTelegramLinkCode(args[0]);
-          if (!row) {
+          const codeRow = peekTelegramLinkCode(args[0]);
+          if (!codeRow) {
             await presentPanel(tgUserId, token, msg.chat.id, {
               text: "Код недействителен или истёк. Запроси новый в Discord.",
             });
             continue;
           }
-          const g = await client.guilds.fetch(row.guildId).catch(() => null);
+          const g = await client.guilds.fetch(codeRow.guildId).catch(() => null);
           if (!g) {
             await presentPanel(tgUserId, token, msg.chat.id, { text: "Сервер Discord недоступен боту." });
             continue;
           }
           removeTelegramLinkCode(args[0]);
-          setTelegramLink(tgUserId, { guildId: row.guildId, discordUserId: row.discordUserId, linkedAtMs: Date.now() });
+          setTelegramLink(tgUserId, {
+            guildId: codeRow.guildId,
+            discordUserId: codeRow.discordUserId,
+            linkedAtMs: Date.now(),
+          });
           await presentPanel(tgUserId, token, msg.chat.id, screenMain());
           continue;
         }
@@ -744,6 +873,11 @@ export function startTelegramSidecar(client: Client): void {
         if (cmd === "skills" || cmd === "sk") {
           const ctx = await requireLink(client, tgUserId, msg.chat.id, token);
           if (ctx) await presentPanel(tgUserId, token, msg.chat.id, screenSkills(ctx.member));
+          continue;
+        }
+        if (cmd === "shop" || cmd === "s") {
+          const ctx = await requireLink(client, tgUserId, msg.chat.id, token);
+          if (ctx) await presentPanel(tgUserId, token, msg.chat.id, screenShopHub(ctx.member));
           continue;
         }
         if (cmd === "shift") {
@@ -759,6 +893,7 @@ export function startTelegramSidecar(client: Client): void {
           if (ctx) await presentPanel(tgUserId, token, msg.chat.id, screenStatus(ctx.member));
           continue;
         }
+
       }
     } catch (e) {
       console.error("Telegram poll:", e);
