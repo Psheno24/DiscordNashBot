@@ -92,6 +92,10 @@ import {
   type Tier3JobId,
 } from "./tier3Jobs.js";
 import {
+  SOLE_PROP_CONTROL_RECOVER_UNLOCK_DAYS,
+  solePropControlRecoverChance,
+} from "./tier3SolePropMsk.js";
+import {
   APARTMENT_MODELS,
   APARTMENT_TRADE_IN_RATE,
   APARTMENT_TRADE_IN_RATE_AFTER_MONTH,
@@ -2050,13 +2054,28 @@ function tier3StatusLines(guildId: string, u: ReturnType<typeof getEconomyUser>,
       solePropPassiveTempMult: u.solePropPassiveTempMult ?? 1,
     });
     lines.push(`Баланс бизнеса: **${fmt(u.solePropCapitalRub ?? 0)}** ₽ · оценка суточного оклада: **~${fmt(passEst)}** ₽.`);
+    const effNow = u.solePropPassiveEffMult ?? 1;
     lines.push(
-      `Эффективность суточного оклада: **×${(u.solePropPassiveEffMult ?? 1).toFixed(1)}** · временный множ.: **×${(u.solePropPassiveTempMult ?? 1).toFixed(2)}**${
+      `Эффективность суточного оклада: **×${effNow.toFixed(1)}** · временный множ.: **×${(u.solePropPassiveTempMult ?? 1).toFixed(2)}**${
         u.solePropPassiveTempUntilMs && now < u.solePropPassiveTempUntilMs
           ? ` до <t:${Math.floor(u.solePropPassiveTempUntilMs / 1000)}:R>`
           : ""
       }.`,
     );
+    if (effNow < 1 - 1e-9) {
+      const consec = u.solePropControlConsecDays ?? 0;
+      if (consec >= SOLE_PROP_CONTROL_RECOVER_UNLOCK_DAYS) {
+        const pct = Math.round(solePropControlRecoverChance(u.solePropControlRecoverFails ?? 0) * 100);
+        lines.push(
+          `Контроль → восстановление: серия **${consec}** дн. · шанс **+0.1** = **${pct}%** (после удачи снова **30%**, без паузы в 3 дня).`,
+        );
+      } else {
+        const left = SOLE_PROP_CONTROL_RECOVER_UNLOCK_DAYS - consec;
+        lines.push(
+          `Контроль → восстановление: серия **${consec}** / **${SOLE_PROP_CONTROL_RECOVER_UNLOCK_DAYS}** дн. · ещё **${left}** дн. до первой попытки (**30%**).`,
+        );
+      }
+    }
     const adL = (u.solePropAdvertReadyAt ?? 0) - now;
     const stL = (u.solePropStaffReadyAt ?? 0) - now;
     const ctL = (u.solePropControlReadyAt ?? 0) - now;
@@ -3165,7 +3184,20 @@ export function economyFormatTelegramWorkScreen(member: GuildMember): string {
   lines.push(`Текущая: <b>${def.title}</b>`);
 
   if (u.jobId === "soleProp") {
+    const effNow = u.solePropPassiveEffMult ?? 1;
     lines.push("", "ИП — смен нет, доход пассивный.");
+    lines.push(`Эффективность: <b>×${effNow.toFixed(1)}</b>`);
+    if (effNow < 1 - 1e-9) {
+      const consec = u.solePropControlConsecDays ?? 0;
+      if (consec >= SOLE_PROP_CONTROL_RECOVER_UNLOCK_DAYS) {
+        const pct = Math.round(solePropControlRecoverChance(u.solePropControlRecoverFails ?? 0) * 100);
+        lines.push(`Восстановление контролем: серия <b>${consec}</b> дн. · шанс <b>${pct}%</b>`);
+      } else {
+        lines.push(
+          `Восстановление контролем: серия <b>${consec}</b> / <b>${SOLE_PROP_CONTROL_RECOVER_UNLOCK_DAYS}</b> дн.`,
+        );
+      }
+    }
     lines.push("Управление ИП — в Discord-терминале.");
     return lines.join("\n");
   }

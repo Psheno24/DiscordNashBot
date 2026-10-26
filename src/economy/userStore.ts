@@ -209,6 +209,8 @@ export interface EconomyUser {
   solePropMissedControlStreak?: number;
   /** Подряд календарных дней с контролем (для восстановления множителя). */
   solePropControlConsecDays?: number;
+  /** Неудачные попытки восстановления эффективности подряд (шанс = 30% + 10%×N). */
+  solePropControlRecoverFails?: number;
   /** Множитель эффективности суточного оклада ИП (0.3…1.0). */
   solePropPassiveEffMult?: number;
   /** Временный множитель оклада после «Персонал» (1.0…1.3). */
@@ -372,6 +374,9 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     : undefined;
   const solePropControlConsecDays = Number.isFinite((u as any)?.solePropControlConsecDays)
     ? Math.max(0, Math.floor((u as any).solePropControlConsecDays))
+    : undefined;
+  const solePropControlRecoverFails = Number.isFinite((u as any)?.solePropControlRecoverFails)
+    ? Math.max(0, Math.floor((u as any).solePropControlRecoverFails))
     : undefined;
   let solePropPassiveEffMult: number | undefined;
   if (Number.isFinite((u as any)?.solePropPassiveEffMult)) {
@@ -639,6 +644,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
     solePropControlMskYmd,
     solePropMissedControlStreak,
     solePropControlConsecDays,
+    solePropControlRecoverFails,
     solePropPassiveEffMult,
     solePropPassiveTempMult,
     solePropPassiveTempUntilMs,

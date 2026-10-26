@@ -9,6 +9,7 @@ import {
 import { discordToken } from "./config.js";
 import { randomJoinCopy, randomLeaveCopy } from "./copy/ussrMemberActivity.js";
 import { grantTelegramHubCommand } from "./telegram/ownerCommands.js";
+import { setIpEffCommand } from "./economy/ownerSolePropCommands.js";
 import { profileCardSlashCommandsJson } from "./economy/profileCardCommands.js";
 import { embedInfo, embedWarn } from "./theme.js";
 
@@ -75,6 +76,7 @@ export async function registerMemberActivityPreviewCommands(client: Client) {
     giveMoneyCommand.toJSON(),
     takeMoneyCommand.toJSON(),
     grantTelegramHubCommand.toJSON(),
+    setIpEffCommand.toJSON(),
     ...profileCardSlashCommandsJson(),
   ];
 

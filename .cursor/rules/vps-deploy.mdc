@@ -1,0 +1,13 @@
+---
+description: DiscordNashBot runs on the user's VPS — deploy there after code changes
+alwaysApply: true
+---
+
+# VPS deploy
+
+- Production bot runs on the user's **VPS**, not locally.
+- Server path: `/opt/discord-nash-bot/DiscordNashBot`
+- Service: `discord-nash-bot` (systemd)
+- Update after push to `main`: SSH in and run `nashbot-update` (or `bash update.sh`) — git pull, npm ci/build, restart.
+- SSH: `root@85.192.41.117` (also `79.137.197.220` — same host). Key: `~/.ssh/id_ed25519`.
+- When the user asks to "обновить бота" / "добавь в бота": commit/push needed files to `main`, then SSH and run `nashbot-update` (or `bash update.sh`).

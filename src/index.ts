@@ -38,6 +38,7 @@ import {
 } from "./welcomePreview.js";
 import { startTelegramSidecar } from "./telegram/bot.js";
 import { grantTelegramHubCommandName, handleGrantTelegramHubCommand } from "./telegram/ownerCommands.js";
+import { handleSetIpEffCommand, setIpEffCommandName } from "./economy/ownerSolePropCommands.js";
 import {
   handleProfileCardPrivateCommand,
   handleProfileCardPublicCommand,
@@ -118,6 +119,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
       }
       if (interaction.commandName === grantTelegramHubCommandName) {
         await handleGrantTelegramHubCommand(interaction);
+        return;
+      }
+      if (interaction.commandName === setIpEffCommandName) {
+        await handleSetIpEffCommand(interaction);
         return;
       }
       if (interaction.commandName === profileCardPrivateCommandName) {

@@ -65,7 +65,7 @@ export const JOBS_TIER3: Tier3JobDef[] = [
     basePayoutRub: 0,
     description: [
       "**ИП** тир-3: доход **суточным окладом** (пассивно) **только от баланса бизнеса** (до **500 000 000** ₽). Без капитала оклад **0**. Около **7 млн** чуть выгоднее полного гринда офиса. **Престиж** линейно от очков (до **×2** при полном наборе лучших покупок) — тот же множитель, что у офиса.",
-      "**Реклама** (риск/доход с баланса бизнеса, лимит суммы растёт с рангом), **персонал** (КД **7 дн.**), **контроль** (КД **сутки**). Пополнение и вывод баланса бизнеса — кнопками **в бизнес** / **на счёт**.",
+      "**Реклама** (риск/доход с баланса бизнеса, лимит суммы растёт с рангом), **персонал** (КД **7 дн.**), **контроль** (КД **сутки**: с **3**-го дня подряд шанс **+0.1** эффективности **30%**, при неудаче **+10%**/день; после удачи снова **30%** без новой паузы). Пополнение и вывод — **в бизнес** / **на счёт**.",
     ].join("\n"),
     reqSkill: { skill: "discipline", minLevel: 167 },
     archetype: "ip",
@@ -251,6 +251,7 @@ export function tier3PatchWhenJobChanges(prevUser: EconomyUser, nextJobId: JobId
     patch.solePropControlMskYmd = undefined;
     patch.solePropMissedControlStreak = undefined;
     patch.solePropControlConsecDays = undefined;
+    patch.solePropControlRecoverFails = undefined;
     patch.solePropPassiveEffMult = undefined;
     patch.solePropPassiveTempMult = undefined;
     patch.solePropPassiveTempUntilMs = undefined;
