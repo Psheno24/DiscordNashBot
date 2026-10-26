@@ -12,8 +12,15 @@ import {
   economyJobButtonLabel,
   economyJobTitle,
   economyQuitJob,
+  economyRunSolePropAdvert,
+  economyRunSolePropControl,
+  economyRunSolePropDeposit,
+  economyRunSolePropStaff,
+  economyRunSolePropWithdraw,
   economyRunTrainSkill,
   economyRunWorkShift,
+  economySolePropBalances,
+  economySolePropCalc,
   economyTakeJob,
   ECONOMY_TRAIN_COOLDOWN_MS,
   effectiveShiftCooldownMs,
@@ -110,7 +117,28 @@ function workMenuKeyboard(member: GuildMember): InlineKb {
 
   if (u.jobId) {
     rows.push(row({ text: "Моя работа", callback_data: `j:${u.jobId}` }));
-    if (u.jobId !== "soleProp") {
+    if (u.jobId === "soleProp") {
+      const now = Date.now();
+      const adR = !u.solePropAdvertReadyAt || now >= u.solePropAdvertReadyAt;
+      const stR = !u.solePropStaffReadyAt || now >= u.solePropStaffReadyAt;
+      const ctR = !u.solePropControlReadyAt || now >= u.solePropControlReadyAt;
+      rows.push(
+        row(
+          {
+            text: adR ? "Реклама" : `Реклама · ${fmtMsCompact((u.solePropAdvertReadyAt ?? 0) - now)}`,
+            callback_data: "ip:ad",
+          },
+          {
+            text: stR ? "Персонал" : `Персонал · ${fmtMsCompact((u.solePropStaffReadyAt ?? 0) - now)}`,
+            callback_data: "ip:st",
+          },
+          {
+            text: ctR ? "Контроль" : `Контроль · ${fmtMsCompact((u.solePropControlReadyAt ?? 0) - now)}`,
+            callback_data: "ip:ct",
+          },
+        ),
+      );
+    } else {
       const now = Date.now();
       const st = canWorkNow(u, u.jobId, now);
       rows.push(
@@ -151,7 +179,36 @@ function jobCardKeyboard(member: GuildMember, jobId: JobId): InlineKb {
         : "wt3";
 
   if (u.jobId === jobId) {
-    if (jobId !== "soleProp") {
+    if (jobId === "soleProp") {
+      const adR = !u.solePropAdvertReadyAt || now >= u.solePropAdvertReadyAt;
+      const stR = !u.solePropStaffReadyAt || now >= u.solePropStaffReadyAt;
+      const ctR = !u.solePropControlReadyAt || now >= u.solePropControlReadyAt;
+      const biz = u.solePropCapitalRub ?? 0;
+      rows.push(
+        row(
+          {
+            text: adR ? "Реклама" : `Реклама · ${fmtMsCompact((u.solePropAdvertReadyAt ?? 0) - now)}`,
+            callback_data: "ip:ad",
+          },
+          {
+            text: stR ? "Персонал" : `Персонал · ${fmtMsCompact((u.solePropStaffReadyAt ?? 0) - now)}`,
+            callback_data: "ip:st",
+          },
+          {
+            text: ctR ? "Контроль" : `Контроль · ${fmtMsCompact((u.solePropControlReadyAt ?? 0) - now)}`,
+            callback_data: "ip:ct",
+          },
+        ),
+      );
+      rows.push(
+        row(
+          { text: "В бизнес", callback_data: "ip:dep" },
+          { text: biz >= 1 ? "На счёт" : "На счёт (пусто)", callback_data: "ip:wd" },
+          { text: "Калькулятор", callback_data: "ip:calc" },
+        ),
+      );
+      rows.push(row({ text: "Уволиться", callback_data: "q" }));
+    } else {
       const st = canWorkNow(u, jobId, now);
       rows.push(
         row({
@@ -159,8 +216,8 @@ function jobCardKeyboard(member: GuildMember, jobId: JobId): InlineKb {
           callback_data: "sh",
         }),
       );
+      rows.push(row({ text: "Уволиться", callback_data: "q" }));
     }
-    rows.push(row({ text: "Уволиться", callback_data: "q" }));
   } else {
     rows.push(row({ text: "Выбрать", callback_data: `t:${jobId}` }));
   }
@@ -391,7 +448,15 @@ function screenStatus(member: GuildMember): ScreenPayload {
     line = st.ok
       ? `Смена (<b>${economyJobTitle(jid)}</b>): можно`
       : `Смена (<b>${economyJobTitle(jid)}</b>): КД ${fmtMs(st.msLeft)}`;
-  } else if (jid === "soleProp") line = "ИП — смен нет, пассивный доход.";
+  } else if (jid === "soleProp") {
+    const now = Date.now();
+    const ctL = (eu.solePropControlReadyAt ?? 0) - now;
+    const biz = (eu.solePropCapitalRub ?? 0).toLocaleString("ru-RU");
+    line =
+      ctL > 0
+        ? `ИП · контроль через ${fmtMs(ctL)} · бизнес ${biz} ₽`
+        : `ИП · контроль <b>можно</b> · бизнес ${biz} ₽`;
+  }
   let tline = "Навыки: <b>можно</b>";
   if (eu.lastTrainAt) {
     const left = eu.lastTrainAt + ECONOMY_TRAIN_COOLDOWN_MS - Date.now();
@@ -587,6 +652,163 @@ async function handleQuit(
   await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId });
 }
 
+const IP_PENDING_TTL_MS = 5 * 60_000;
+
+function parseRubAmount(text: string): number | null {
+  const n = Math.floor(Number(text.trim().replace(/\s/g, "").replace(",", ".")));
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+function beginIpPending(tgUserId: string, kind: "ipDep" | "ipWd" | "ipCalc" | "ipAd"): void {
+  patchTelegramUiState(tgUserId, {
+    pendingInput: { kind, expiresAtMs: Date.now() + IP_PENDING_TTL_MS },
+  });
+}
+
+function screenIpNote(member: GuildMember, note?: string): ScreenPayload {
+  const base = economyFormatTelegramWorkScreen(member);
+  const text = note ? `${economyMarkdownToTelegramHtml(note)}\n\n${base}` : base;
+  return { text, markup: jobCardKeyboard(member, "soleProp") };
+}
+
+async function promptIpAmount(
+  tgUserId: string,
+  token: string,
+  chatId: number,
+  member: GuildMember,
+  kind: "ipDep" | "ipWd" | "ipCalc" | "ipAd",
+  ack?: TgCb,
+  messageId?: number,
+) {
+  const bal = economySolePropBalances(member);
+  let text: string;
+  if (kind === "ipDep") {
+    text = [
+      "<b>В бизнес</b>",
+      "",
+      `Счёт: <b>${bal.wallet.toLocaleString("ru-RU")}</b> ₽`,
+      `Бизнес: <b>${bal.biz.toLocaleString("ru-RU")}</b> ₽`,
+      "",
+      "Пришли сумму целым числом ₽.",
+    ].join("\n");
+  } else if (kind === "ipWd") {
+    text = [
+      "<b>На счёт</b>",
+      "",
+      `Бизнес: <b>${bal.biz.toLocaleString("ru-RU")}</b> ₽`,
+      bal.withdrawFeePercent > 0 ? `Комиссия вывода: <b>${bal.withdrawFeePercent}%</b>` : "Комиссии нет.",
+      "",
+      "Пришли сумму целым числом ₽.",
+    ].join("\n");
+  } else if (kind === "ipAd") {
+    text = [
+      "<b>Реклама</b>",
+      "",
+      `Бизнес: <b>${bal.biz.toLocaleString("ru-RU")}</b> ₽`,
+      `Диапазон: <b>${bal.adMinRub.toLocaleString("ru-RU")}</b>–<b>${bal.adMaxRub.toLocaleString("ru-RU")}</b> ₽`,
+      "",
+      "Пришли сумму рекламы целым числом ₽ (риск потери с баланса бизнеса).",
+    ].join("\n");
+  } else {
+    text = [
+      "<b>Калькулятор ИП</b>",
+      "",
+      `Сейчас в бизнесе: <b>${bal.biz.toLocaleString("ru-RU")}</b> ₽`,
+      "",
+      "Пришли сумму капитала для прогноза суточного оклада.",
+    ].join("\n");
+  }
+  beginIpPending(tgUserId, kind);
+  await presentPanel(
+    tgUserId,
+    token,
+    chatId,
+    { text, markup: kb(navRow(`j:soleProp`, "Отмена")) },
+    { messageId, ack },
+  );
+}
+
+async function handleIpAmountMessage(
+  client: Client,
+  tgUserId: string,
+  chatId: number,
+  token: string,
+  kind: "ipDep" | "ipWd" | "ipCalc" | "ipAd",
+  text: string,
+) {
+  const ctx = await requireLink(client, tgUserId, chatId, token);
+  if (!ctx) {
+    clearPendingInput(tgUserId);
+    return;
+  }
+  const amount = parseRubAmount(text);
+  if (amount == null || (kind !== "ipCalc" && amount < 1)) {
+    await presentPanel(tgUserId, token, chatId, {
+      text: "Нужно целое число ₽. Повтори или нажми <b>Отмена</b>.",
+      markup: kb(navRow(`j:soleProp`, "Отмена")),
+    });
+    return;
+  }
+  clearPendingInput(tgUserId);
+  const run =
+    kind === "ipDep"
+      ? economyRunSolePropDeposit(ctx.member, amount)
+      : kind === "ipWd"
+        ? economyRunSolePropWithdraw(ctx.member, amount)
+        : kind === "ipAd"
+          ? economyRunSolePropAdvert(ctx.member, amount)
+          : economySolePropCalc(ctx.member, amount);
+  if (!run.ok) {
+    await presentPanel(tgUserId, token, chatId, screenIpNote(ctx.member, run.message));
+    return;
+  }
+  await presentPanel(tgUserId, token, chatId, screenIpNote(ctx.member, run.detail));
+}
+
+async function handleIpAction(
+  client: Client,
+  tgUserId: string,
+  chatId: number,
+  token: string,
+  action: "ct" | "st" | "dep" | "wd" | "calc" | "ad",
+  ack?: TgCb,
+  messageId?: number,
+) {
+  const ctx = await requireLink(client, tgUserId, chatId, token, ack);
+  if (!ctx) return;
+  const u = getEconomyUser(ctx.member.guild.id, ctx.member.id);
+  if (u.jobId !== "soleProp") {
+    if (ack) await answerCallback(token, ack.id, "Только на ИП");
+    await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId });
+    return;
+  }
+  if (action === "dep" || action === "wd" || action === "calc" || action === "ad") {
+    if (action === "wd" && (u.solePropCapitalRub ?? 0) < 1) {
+      if (ack) await answerCallback(token, ack.id, "Бизнес пуст");
+      await presentPanel(tgUserId, token, chatId, screenIpNote(ctx.member), { messageId });
+      return;
+    }
+    const pendingKind =
+      action === "dep" ? "ipDep" : action === "wd" ? "ipWd" : action === "ad" ? "ipAd" : "ipCalc";
+    await promptIpAmount(tgUserId, token, chatId, ctx.member, pendingKind, ack, messageId);
+    return;
+  }
+  const run = action === "ct" ? economyRunSolePropControl(ctx.member) : economyRunSolePropStaff(ctx.member);
+  if (!run.ok) {
+    if (ack) {
+      await answerCallback(
+        token,
+        ack.id,
+        run.kind === "cooldown" ? `КД ${fmtMsCompact(run.msLeft ?? 0)}` : run.message.replace(/\*\*/g, ""),
+      );
+    }
+    await presentPanel(tgUserId, token, chatId, screenIpNote(ctx.member), { messageId });
+    return;
+  }
+  if (ack) await answerCallback(token, ack.id, "Готово");
+  await presentPanel(tgUserId, token, chatId, screenIpNote(ctx.member, run.detail), { messageId });
+}
+
 async function routeCallback(client: Client, token: string, tgUserId: string, cq: TgCb): Promise<void> {
   const data = cq.data ?? "";
   const chatId = cq.message?.chat.id ?? Number(tgUserId);
@@ -602,6 +824,28 @@ async function routeCallback(client: Client, token: string, tgUserId: string, cq
     const ctx = await requireLink(client, tgUserId, chatId, token, cq);
     if (!ctx) return;
     await presentPanel(tgUserId, token, chatId, screenWork(ctx.member), { messageId, ack: cq });
+    return;
+  }
+  if (data === "ip" || data.startsWith("ip:")) {
+    const action =
+      data === "ip:ct"
+        ? "ct"
+        : data === "ip:st"
+          ? "st"
+          : data === "ip:dep"
+            ? "dep"
+            : data === "ip:wd"
+              ? "wd"
+              : data === "ip:calc"
+                ? "calc"
+                : data === "ip:ad"
+                  ? "ad"
+                  : null;
+    if (!action) {
+      await answerCallback(token, cq.id, "Неизвестно");
+      return;
+    }
+    await handleIpAction(client, tgUserId, chatId, token, action, cq, messageId);
     return;
   }
   if (data === "wt1" || data === "wt2" || data === "wt3") {
@@ -802,21 +1046,32 @@ export function startTelegramSidecar(client: Client): void {
         const msg = u.message;
         if (!msg?.text || !msg.chat?.id) continue;
 
-        // Ожидание имени питомца (не команда)
+        // Ожидание имени питомца / сумм ИП (не команда)
         const pending = getTelegramUiState(tgUserId).pendingInput;
-        if (pending?.kind === "petRename" && !msg.text.startsWith("/")) {
+        if (pending && !msg.text.startsWith("/")) {
           if (Date.now() > pending.expiresAtMs) {
             clearPendingInput(tgUserId);
-            await sendMessage(token, msg.chat.id, "Время на ввод имени истекло. Открой питомца снова.");
+            await sendMessage(token, msg.chat.id, "Время на ввод истекло. Открой экран снова.");
             continue;
           }
-          const ctx = await requireLink(client, tgUserId, msg.chat.id, token);
-          if (ctx) {
-            clearPendingInput(tgUserId);
-            const payload = handlePetRenameText(ctx.member, pending.uid, msg.text);
-            await presentPanel(tgUserId, token, msg.chat.id, payload);
+          if (pending.kind === "petRename") {
+            const ctx = await requireLink(client, tgUserId, msg.chat.id, token);
+            if (ctx) {
+              clearPendingInput(tgUserId);
+              const payload = handlePetRenameText(ctx.member, pending.uid, msg.text);
+              await presentPanel(tgUserId, token, msg.chat.id, payload);
+            }
+            continue;
           }
-          continue;
+          if (
+            pending.kind === "ipDep" ||
+            pending.kind === "ipWd" ||
+            pending.kind === "ipCalc" ||
+            pending.kind === "ipAd"
+          ) {
+            await handleIpAmountMessage(client, tgUserId, msg.chat.id, token, pending.kind, msg.text);
+            continue;
+          }
         }
 
         const { cmd, args } = parseCommand(msg.text);

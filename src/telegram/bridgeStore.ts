@@ -29,9 +29,10 @@ export interface NotifyLatch {
   lastTrainBoundaryNotifiedMs?: number;
 }
 
-/** Ожидание текстового ввода (переименование питомца и т.п.). */
+/** Ожидание текстового ввода (переименование питомца, суммы ИП и т.п.). */
 export type TelegramPendingInput =
-  | { kind: "petRename"; uid: string; expiresAtMs: number };
+  | { kind: "petRename"; uid: string; expiresAtMs: number }
+  | { kind: "ipDep" | "ipWd" | "ipCalc" | "ipAd"; expiresAtMs: number };
 
 /** UI в личке Telegram: одна панель + отдельные push-уведомления. */
 export interface TelegramUiState {

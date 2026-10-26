@@ -355,6 +355,7 @@ import { mskTodayYmd } from "./mskCalendar.js";
 import {
   addToTreasury,
   getLegalIncomeTaxPercent,
+  getSolePropWithdrawFeePercent,
   getSolePropWeeklyCapitalTaxPercent,
   isLegalTaxableJob,
   remitShopPurchaseVatToTreasury,
@@ -2876,6 +2877,187 @@ export type EconomyRunTrainSkillResult =
   | { ok: false; kind: "unknown_skill" | "cooldown" }
   | { ok: true; skillLabel: string; rankDisplay: string };
 
+export type EconomySolePropActionResult =
+  | { ok: true; detail: string }
+  | { ok: false; kind: "cooldown" | "ephemeral"; message: string; msLeft?: number };
+
+export function economySolePropBalances(member: GuildMember): {
+  wallet: number;
+  biz: number;
+  withdrawFeePercent: number;
+  adMaxRub: number;
+  adMinRub: number;
+} {
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  return {
+    wallet: u.rubles,
+    biz: u.solePropCapitalRub ?? 0,
+    withdrawFeePercent: getSolePropWithdrawFeePercent(gid),
+    adMaxRub: solePropAdMaxRub(gid, u.jobMskDayStreak ?? 0),
+    adMinRub: scalePositiveIncome(gid, 10_000),
+  };
+}
+
+export function economyRunSolePropStaff(member: GuildMember): EconomySolePropActionResult {
+  const guildId = member.guild.id;
+  const u = getEconomyUser(guildId, member.id);
+  if (u.jobId !== "soleProp") {
+    return { ok: false, kind: "ephemeral", message: "Эти действия доступны только на работе **ИП**." };
+  }
+  const now = Date.now();
+  if (u.solePropStaffReadyAt && now < u.solePropStaffReadyAt) {
+    return {
+      ok: false,
+      kind: "cooldown",
+      message: "Персонал ещё на перезарядке.",
+      msLeft: u.solePropStaffReadyAt - now,
+    };
+  }
+  const { patch, detail } = rollSolePropStaffOutcome(u, now);
+  patchEconomyUser(guildId, member.id, patch);
+  return { ok: true, detail };
+}
+
+export function economyRunSolePropControl(member: GuildMember): EconomySolePropActionResult {
+  const guildId = member.guild.id;
+  const u = getEconomyUser(guildId, member.id);
+  if (u.jobId !== "soleProp") {
+    return { ok: false, kind: "ephemeral", message: "Эти действия доступны только на работе **ИП**." };
+  }
+  const now = Date.now();
+  if (u.solePropControlReadyAt && now < u.solePropControlReadyAt) {
+    return {
+      ok: false,
+      kind: "cooldown",
+      message: "Контроль ещё на перезарядке.",
+      msLeft: u.solePropControlReadyAt - now,
+    };
+  }
+  patchEconomyUser(guildId, member.id, {
+    solePropControlMskYmd: mskTodayYmd(now),
+    solePropControlReadyAt: now + SOLE_PROP_CONTROL_CD_MS,
+  });
+  return { ok: true, detail: "Контроль отмечен на текущие календарные сутки." };
+}
+
+export function economyRunSolePropAdvert(member: GuildMember, amount: number): EconomySolePropActionResult {
+  const guildId = member.guild.id;
+  const u = getEconomyUser(guildId, member.id);
+  if (u.jobId !== "soleProp") {
+    return { ok: false, kind: "ephemeral", message: "Формы **ИП** доступны только на работе **ИП**." };
+  }
+  const now = Date.now();
+  if (u.solePropAdvertReadyAt && now < u.solePropAdvertReadyAt) {
+    return {
+      ok: false,
+      kind: "cooldown",
+      message: "Реклама ещё на перезарядке.",
+      msLeft: u.solePropAdvertReadyAt - now,
+    };
+  }
+  const amt = Math.floor(amount);
+  if (!Number.isFinite(amt) || amt < 1) {
+    return { ok: false, kind: "ephemeral", message: "Введите целое число **от 1 ₽**." };
+  }
+  const maxAd = solePropAdMaxRub(guildId, u.jobMskDayStreak ?? 0);
+  const biz = u.solePropCapitalRub ?? 0;
+  const out = solePropAdvertOutcome(guildId, biz, amt, maxAd);
+  if (!out.ok && out.delta === 0) {
+    return { ok: false, kind: "ephemeral", message: out.detail };
+  }
+  patchEconomyUser(guildId, member.id, {
+    solePropCapitalRub: Math.max(0, biz + out.delta),
+    solePropAdvertReadyAt: now + SOLE_PROP_AD_CD_MS,
+  });
+  return { ok: true, detail: out.detail };
+}
+
+export function economyRunSolePropDeposit(member: GuildMember, amount: number): EconomySolePropActionResult {
+  const guildId = member.guild.id;
+  const u = getEconomyUser(guildId, member.id);
+  if (u.jobId !== "soleProp") {
+    return { ok: false, kind: "ephemeral", message: "Формы **ИП** доступны только на работе **ИП**." };
+  }
+  const amt = Math.floor(amount);
+  if (!Number.isFinite(amt) || amt < 1) {
+    return { ok: false, kind: "ephemeral", message: "Введите целое число **от 1 ₽**." };
+  }
+  let deposited = false;
+  let rubBalance = 0;
+  updateEconomyUser(guildId, member.id, (cur) => {
+    rubBalance = cur.rubles;
+    if (cur.rubles < amt) return cur;
+    deposited = true;
+    return {
+      ...cur,
+      rubles: cur.rubles - amt,
+      solePropCapitalRub: (cur.solePropCapitalRub ?? 0) + amt,
+    };
+  });
+  if (!deposited) {
+    return { ok: false, kind: "ephemeral", message: `На счёте только **${fmt(rubBalance)}** ₽.` };
+  }
+  return { ok: true, detail: `На баланс бизнеса переведено **${fmt(amt)}** ₽.` };
+}
+
+export function economyRunSolePropWithdraw(member: GuildMember, amount: number): EconomySolePropActionResult {
+  const guildId = member.guild.id;
+  const u = getEconomyUser(guildId, member.id);
+  if (u.jobId !== "soleProp") {
+    return { ok: false, kind: "ephemeral", message: "Формы **ИП** доступны только на работе **ИП**." };
+  }
+  const amt = Math.floor(amount);
+  if (!Number.isFinite(amt) || amt < 1) {
+    return { ok: false, kind: "ephemeral", message: "Введите целое число **от 1 ₽**." };
+  }
+  const bizW = u.solePropCapitalRub ?? 0;
+  if (amt > bizW) {
+    return { ok: false, kind: "ephemeral", message: `В бизнесе только **${fmt(bizW)}** ₽.` };
+  }
+  const { toPersonalRub, feeToTreasuryRub } = solePropWithdrawWithFee(guildId, amt);
+  let withdrawn = false;
+  updateEconomyUser(guildId, member.id, (cur) => {
+    const bizNow = cur.solePropCapitalRub ?? 0;
+    if (bizNow < amt) return cur;
+    withdrawn = true;
+    return {
+      ...cur,
+      rubles: cur.rubles + toPersonalRub,
+      solePropCapitalRub: bizNow - amt,
+    };
+  });
+  if (!withdrawn) {
+    return { ok: false, kind: "ephemeral", message: "Баланс бизнеса изменился, проверьте сумму и повторите." };
+  }
+  if (feeToTreasuryRub > 0) addToTreasury(guildId, feeToTreasuryRub);
+  const feeLine =
+    feeToTreasuryRub > 0
+      ? ` Комиссия учтена; на счёт **${fmt(toPersonalRub)}** ₽.`
+      : ` На счёт **${fmt(toPersonalRub)}** ₽.`;
+  return { ok: true, detail: `Вывод с бизнеса **${fmt(amt)}** ₽.${feeLine}` };
+}
+
+export function economySolePropCalc(member: GuildMember, amount: number): EconomySolePropActionResult {
+  const amt = Math.floor(amount);
+  if (!Number.isFinite(amt) || amt < 0) {
+    return { ok: false, kind: "ephemeral", message: "Введите целое число капитала **от 0 ₽**." };
+  }
+  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const result = solePropCalculatedIncome(gid, u, amt);
+  const currentCapital = u.jobId === "soleProp" ? (u.solePropCapitalRub ?? 0) : 0;
+  const current = solePropCalculatedIncome(gid, u, currentCapital);
+  const delta = result.net - current.net;
+  return {
+    ok: true,
+    detail: [
+      `Капитал **${fmt(amt)}** ₽ → **${fmt(result.net)}** ₽/сут на счёт.`,
+      `К текущему (**${fmt(currentCapital)}** ₽): **${delta >= 0 ? "+" : "−"}${fmt(Math.abs(delta))}** ₽/сут.`,
+    ].join("\n"),
+  };
+}
+
 export function economyRunTrainSkill(member: GuildMember, skillId: SkillId): EconomyRunTrainSkillResult {
   if (!ALL_SKILL_IDS.includes(skillId)) return { ok: false, kind: "unknown_skill" };
   const guildId = member.guild.id;
@@ -3185,7 +3367,13 @@ export function economyFormatTelegramWorkScreen(member: GuildMember): string {
 
   if (u.jobId === "soleProp") {
     const effNow = u.solePropPassiveEffMult ?? 1;
+    const biz = u.solePropCapitalRub ?? 0;
+    const now = Date.now();
+    const stL = (u.solePropStaffReadyAt ?? 0) - now;
+    const ctL = (u.solePropControlReadyAt ?? 0) - now;
+    const adL = (u.solePropAdvertReadyAt ?? 0) - now;
     lines.push("", "ИП — смен нет, доход пассивный.");
+    lines.push(`Бизнес: <b>${tgFmtRub(biz)}</b> ₽ · счёт: <b>${tgFmtRub(u.rubles)}</b> ₽`);
     lines.push(`Эффективность: <b>×${effNow.toFixed(1)}</b>`);
     if (effNow < 1 - 1e-9) {
       const consec = u.solePropControlConsecDays ?? 0;
@@ -3198,7 +3386,9 @@ export function economyFormatTelegramWorkScreen(member: GuildMember): string {
         );
       }
     }
-    lines.push("Управление ИП — в Discord-терминале.");
+    lines.push(adL > 0 ? `Реклама: через <b>${tgFmtCooldown(adL)}</b>` : "Реклама: <b>доступна</b>");
+    lines.push(stL > 0 ? `Персонал: через <b>${tgFmtCooldown(stL)}</b>` : "Персонал: <b>доступен</b>");
+    lines.push(ctL > 0 ? `Контроль: через <b>${tgFmtCooldown(ctL)}</b>` : "Контроль: <b>доступен</b>");
     return lines.join("\n");
   }
 
