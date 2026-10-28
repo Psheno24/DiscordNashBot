@@ -285,6 +285,14 @@ function shiftNotifyKeyboard(): InlineKb {
   );
 }
 
+function ipReadyNotifyKeyboard(action: "ct" | "st" | "ad"): InlineKb {
+  const label = action === "ct" ? "Контроль" : action === "st" ? "Персонал" : "Реклама";
+  return kb(
+    row({ text: label, callback_data: `ip:${action}` }),
+    row({ text: "Моя работа", callback_data: "j:soleProp" }, { text: "Работа", callback_data: "w" }),
+  );
+}
+
 async function sendMessage(token: string, chatId: number, text: string, replyMarkup?: InlineKb): Promise<number | undefined> {
   const chunk = text.length > 4000 ? `${text.slice(0, 3990)}…` : text;
   const res = await tgApi(token, "sendMessage", {
@@ -961,18 +969,64 @@ async function tickNotifications(client: Client, token: string) {
 
     const jobId = u.jobId;
     if (jobId && jobId !== "soleProp") {
-      const st = canWorkNow(u, jobId, now);
-      const boundary = workReadyBoundaryMs(u, jobId, now);
-      if (st.ok && boundary > 0 && latch.lastWorkBoundaryNotifiedMs !== boundary) {
+      const last = lastWorkAtForJob(u, jobId);
+      // Без хотя бы одной смены на этой работе не спамим «можно выйти».
+      if (last > 0) {
+        const st = canWorkNow(u, jobId, now);
+        const boundary = workReadyBoundaryMs(u, jobId, now);
+        if (st.ok && boundary > 0 && latch.lastWorkBoundaryNotifiedMs !== boundary) {
+          await pushNotify(
+            token,
+            tgId,
+            chatId,
+            "work",
+            `Можно выйти на смену: <b>${economyJobTitle(jobId)}</b>.`,
+            shiftNotifyKeyboard(),
+          );
+          patchNotifyLatch(tgId, { lastWorkBoundaryNotifiedMs: boundary });
+        }
+      }
+    } else if (jobId === "soleProp") {
+      type IpReady = {
+        label: string;
+        action: "ct" | "st" | "ad";
+        readyAt: number | undefined;
+        latchKey: "lastIpControlBoundaryNotifiedMs" | "lastIpStaffBoundaryNotifiedMs" | "lastIpAdvertBoundaryNotifiedMs";
+      };
+      const ipReady: IpReady[] = [
+        {
+          label: "Контроль",
+          action: "ct",
+          readyAt: u.solePropControlReadyAt,
+          latchKey: "lastIpControlBoundaryNotifiedMs",
+        },
+        {
+          label: "Персонал",
+          action: "st",
+          readyAt: u.solePropStaffReadyAt,
+          latchKey: "lastIpStaffBoundaryNotifiedMs",
+        },
+        {
+          label: "Реклама",
+          action: "ad",
+          readyAt: u.solePropAdvertReadyAt,
+          latchKey: "lastIpAdvertBoundaryNotifiedMs",
+        },
+      ];
+      for (const item of ipReady) {
+        // Только после первого использования (есть готовая граница КД).
+        if (item.readyAt == null || item.readyAt <= 0) continue;
+        if (now < item.readyAt) continue;
+        if (latch[item.latchKey] === item.readyAt) continue;
         await pushNotify(
           token,
           tgId,
           chatId,
           "work",
-          `Можно выйти на смену: <b>${economyJobTitle(jobId)}</b>.`,
-          shiftNotifyKeyboard(),
+          `ИП: <b>${item.label}</b> снова доступен.`,
+          ipReadyNotifyKeyboard(item.action),
         );
-        patchNotifyLatch(tgId, { lastWorkBoundaryNotifiedMs: boundary });
+        patchNotifyLatch(tgId, { [item.latchKey]: item.readyAt });
       }
     }
 

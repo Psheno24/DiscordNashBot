@@ -27,6 +27,12 @@ export interface NotifyLatch {
   lastWorkBoundaryNotifiedMs?: number;
   /** Последний `lastTrainAt+TRAIN_CD`, для которой уже отправили «навык готов». */
   lastTrainBoundaryNotifiedMs?: number;
+  /** Граница КД «Контроль» ИП, для которой уже уведомили. */
+  lastIpControlBoundaryNotifiedMs?: number;
+  /** Граница КД «Персонал» ИП, для которой уже уведомили. */
+  lastIpStaffBoundaryNotifiedMs?: number;
+  /** Граница КД «Реклама» ИП, для которой уже уведомили. */
+  lastIpAdvertBoundaryNotifiedMs?: number;
 }
 
 /** Ожидание текстового ввода (переименование питомца, суммы ИП и т.п.). */
