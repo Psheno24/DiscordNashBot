@@ -5,6 +5,7 @@ import {
   updateGuildConfig,
   type ShopCatalogItem,
   type ShopCatalogKind,
+  type ShopFolder,
 } from "../guildConfig/store.js";
 import {
   APARTMENT_MODELS,
@@ -264,6 +265,186 @@ export function menuHidden(guildId: string, id: string): boolean {
   return catalogOf(guildId)?.menus?.[id]?.hidden === true;
 }
 
+export const SHOP_FOLDER_LIMIT = 12;
+
+export interface ShopFolderView {
+  id: string;
+  section: ShopCatalogKind;
+  label: string;
+  parentId?: string;
+  hidden: boolean;
+  builtin: boolean;
+  origin?: "soviet" | "foreign";
+}
+
+const FOLDER_SECTION_CODE: Record<Exclude<ShopCatalogKind, "pet">, string> = { phone: "ph", car: "cr", apt: "ap" };
+
+export function builtinFolderId(section: Exclude<ShopCatalogKind, "pet">, origin: "soviet" | "foreign"): string {
+  return `b${FOLDER_SECTION_CODE[section]}${origin === "soviet" ? "s" : "f"}`;
+}
+
+export function parseBuiltinFolder(id: string): { section: Exclude<ShopCatalogKind, "pet">; origin: "soviet" | "foreign" } | undefined {
+  const match = /^b(ph|cr|ap)([sf])$/.exec(id);
+  if (!match) return undefined;
+  const section = match[1] === "ph" ? "phone" : match[1] === "cr" ? "car" : "apt";
+  return { section, origin: match[2] === "s" ? "soviet" : "foreign" };
+}
+
+function builtinMenuKey(section: Exclude<ShopCatalogKind, "pet">, origin: "soviet" | "foreign"): string {
+  const head = section === "apt" ? "house" : section;
+  return `${head}.${origin}`;
+}
+
+function customFolders(guildId: string, section?: ShopCatalogKind): ShopFolder[] {
+  return (catalogOf(guildId)?.folders ?? []).filter((folder) => !section || folder.section === section);
+}
+
+export function listShopFolders(guildId: string, section: ShopCatalogKind): ShopFolderView[] {
+  const custom = customFolders(guildId, section).map((folder) => ({
+    id: folder.id,
+    section,
+    label: folder.label,
+    parentId: folder.parentId,
+    hidden: folder.hidden === true,
+    builtin: false as const,
+  }));
+  if (section === "pet") return custom;
+  const builtins: ShopFolderView[] = (["soviet", "foreign"] as const).map((origin) => ({
+    id: builtinFolderId(section, origin),
+    section,
+    label: menuLabel(guildId, builtinMenuKey(section, origin)),
+    hidden: menuHidden(guildId, builtinMenuKey(section, origin)),
+    builtin: true,
+    origin,
+  }));
+  return [...builtins, ...custom];
+}
+
+export function shopFolder(guildId: string, id: string): ShopFolderView | undefined {
+  const builtin = parseBuiltinFolder(id);
+  if (builtin) return listShopFolders(guildId, builtin.section).find((folder) => folder.id === id);
+  for (const section of ["phone", "car", "apt", "pet"] as const) {
+    const found = listShopFolders(guildId, section).find((folder) => folder.id === id);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+export function childShopFolders(guildId: string, section: ShopCatalogKind, parentId?: string): ShopFolderView[] {
+  return listShopFolders(guildId, section).filter((folder) => !folder.hidden && (folder.parentId ?? "") === (parentId ?? ""));
+}
+
+export function topShopFolders(guildId: string, section: ShopCatalogKind): ShopFolderView[] {
+  return childShopFolders(guildId, section, undefined);
+}
+
+function folderDepth(guildId: string, id: string): number {
+  const folder = shopFolder(guildId, id);
+  if (!folder) return 0;
+  if (!folder.parentId) return 1;
+  return 1 + folderDepth(guildId, folder.parentId);
+}
+
+export function catalogItemSection(id: string): ShopCatalogKind | undefined {
+  if (PHONE_MODELS.some((item) => item.id === id) || id.startsWith("cph_") || id.startsWith("phone_")) return "phone";
+  if (CAR_MODELS.some((item) => item.id === id) || id.startsWith("ccr_") || id.startsWith("car_")) return "car";
+  if (APARTMENT_MODELS.some((item) => item.id === id) || id.startsWith("cap_") || id.startsWith("apt_")) return "apt";
+  if (PET_MODELS.some((item) => item.id === id) || id.startsWith("cpt_") || id.startsWith("pet_")) return "pet";
+  return undefined;
+}
+
+/** Папка, в которой товар виден на витрине. Для питомца без записи — корень раздела. */
+export function itemShopFolderId(
+  guildId: string,
+  itemId: string,
+  origin?: "soviet" | "foreign",
+): string | undefined {
+  const section = catalogItemSection(itemId);
+  if (!section) return undefined;
+  const placed = catalogOf(guildId)?.place?.[itemId];
+  if (placed && shopFolder(guildId, placed)?.section === section) return placed;
+  if (section === "pet" || !origin) return undefined;
+  return builtinFolderId(section, origin);
+}
+
+export type AddFolderResult = { ok: true; id: string } | { ok: false; reason: string };
+
+export function addShopFolder(guildId: string, section: ShopCatalogKind, label: string, parentId?: string): AddFolderResult {
+  const name = label.replace(/\s+/g, " ").trim().slice(0, 80);
+  if (!name) return { ok: false, reason: "Нужно название." };
+  if (customFolders(guildId, section).length >= SHOP_FOLDER_LIMIT) {
+    return { ok: false, reason: `В разделе уже ${SHOP_FOLDER_LIMIT} своих категорий.` };
+  }
+  if (parentId) {
+    const parent = shopFolder(guildId, parentId);
+    if (!parent || parent.section !== section) return { ok: false, reason: "Нет такой категории." };
+    if (folderDepth(guildId, parentId) >= 2) return { ok: false, reason: "Под подкатегорией новую уже не создать. Добавь её рядом." };
+  }
+  const id = `fld_${randomBytes(4).toString("hex")}`;
+  mutate(guildId, (_items, _hidden, _labels, _menus, _prices, folders) => {
+    folders.push({ id, section, label: name, parentId, hidden: false });
+  });
+  return { ok: true, id };
+}
+
+export function renameShopFolder(guildId: string, id: string, label: string | null): void {
+  const builtin = parseBuiltinFolder(id);
+  const text = label?.replace(/\s+/g, " ").trim().slice(0, 80) ?? "";
+  if (builtin) {
+    setMenuPatch(guildId, builtinMenuKey(builtin.section, builtin.origin), { label: text ? text : null });
+    return;
+  }
+  if (!text) return;
+  mutate(guildId, (_items, _hidden, _labels, _menus, _prices, folders) => {
+    const folder = folders.find((item) => item.id === id);
+    if (folder) folder.label = text;
+  });
+}
+
+export function setShopFolderHidden(guildId: string, id: string, hidden: boolean): void {
+  const builtin = parseBuiltinFolder(id);
+  if (builtin) {
+    setMenuPatch(guildId, builtinMenuKey(builtin.section, builtin.origin), { hidden });
+    return;
+  }
+  mutate(guildId, (_items, _hidden, _labels, _menus, _prices, folders) => {
+    const folder = folders.find((item) => item.id === id);
+    if (folder) folder.hidden = hidden;
+  });
+}
+
+export function removeShopFolder(guildId: string, id: string): boolean {
+  if (parseBuiltinFolder(id)) return false;
+  if (!shopFolder(guildId, id)) return false;
+  mutate(guildId, (_items, _hidden, _labels, _menus, _prices, folders, place) => {
+    const folder = folders.find((item) => item.id === id);
+    const parentId = folder?.parentId;
+    for (const child of folders) {
+      if (child.parentId === id) child.parentId = parentId;
+    }
+    const idx = folders.findIndex((item) => item.id === id);
+    if (idx >= 0) folders.splice(idx, 1);
+    for (const key of Object.keys(place)) {
+      if (place[key] === id) delete place[key];
+    }
+  });
+  return true;
+}
+
+export function placeShopItem(guildId: string, itemId: string, folderId: string | null): string | undefined {
+  const section = catalogItemSection(itemId);
+  if (!section) return "Неизвестный товар.";
+  if (folderId) {
+    const folder = shopFolder(guildId, folderId);
+    if (!folder || folder.section !== section) return "Папка из другого раздела.";
+  }
+  mutate(guildId, (_items, _hidden, _labels, _menus, _prices, _folders, place) => {
+    if (!folderId) delete place[itemId];
+    else place[itemId] = folderId;
+  });
+  return undefined;
+}
+
 export interface CustomPriceSource {
   label: string;
   rub: number;
@@ -297,21 +478,36 @@ export function findCustomPriceSource(priceId: string): CustomPriceSource | unde
   };
 }
 
-function mutate(guildId: string, updater: (items: ShopCatalogItem[], hidden: string[], labels: Record<string, string>, menus: Record<string, { label?: string; hidden?: boolean }>, prices: Record<string, { rub?: number; inflation?: boolean }>) => void): void {
+function mutate(
+  guildId: string,
+  updater: (
+    items: ShopCatalogItem[],
+    hidden: string[],
+    labels: Record<string, string>,
+    menus: Record<string, { label?: string; hidden?: boolean }>,
+    prices: Record<string, { rub?: number; inflation?: boolean }>,
+    folders: ShopFolder[],
+    place: Record<string, string>,
+  ) => void,
+): void {
   updateGuildConfig(guildId, (cur) => {
     const items = [...(cur.shopCatalog?.custom ?? [])];
     const hidden = [...(cur.shopCatalog?.hidden ?? [])];
     const labels = { ...(cur.shopCatalog?.labels ?? {}) };
     const menus = { ...(cur.shopCatalog?.menus ?? {}) };
     const prices = { ...(cur.shopPrices ?? {}) };
-    updater(items, hidden, labels, menus, prices);
+    const folders = (cur.shopCatalog?.folders ?? []).map((folder) => ({ ...folder }));
+    const place = { ...(cur.shopCatalog?.place ?? {}) };
+    updater(items, hidden, labels, menus, prices, folders, place);
     const shopCatalog = {
       custom: items.length ? items : undefined,
       hidden: hidden.length ? hidden : undefined,
       labels: Object.keys(labels).length ? labels : undefined,
       menus: Object.keys(menus).length ? menus : undefined,
+      folders: folders.length ? folders : undefined,
+      place: Object.keys(place).length ? place : undefined,
     };
-    const emptyCatalog = !shopCatalog.custom && !shopCatalog.hidden && !shopCatalog.labels && !shopCatalog.menus;
+    const emptyCatalog = !shopCatalog.custom && !shopCatalog.hidden && !shopCatalog.labels && !shopCatalog.menus && !shopCatalog.folders && !shopCatalog.place;
     return {
       ...cur,
       shopPrices: Object.keys(prices).length ? prices : undefined,
@@ -367,12 +563,13 @@ function priceIdsOf(item: ShopCatalogItem): string[] {
 export function removeCustomItem(guildId: string, id: string): boolean {
   const item = customItemOf(guildId, id);
   if (!item) return false;
-  mutate(guildId, (items, hidden, labels, _menus, prices) => {
+  mutate(guildId, (items, hidden, labels, _menus, prices, _folders, place) => {
     const idx = items.findIndex((row) => row.id === id);
     if (idx >= 0) items.splice(idx, 1);
     const hideAt = hidden.indexOf(id);
     if (hideAt >= 0) hidden.splice(hideAt, 1);
     delete labels[id];
+    delete place[id];
     for (const key of priceIdsOf(item)) delete prices[key];
   });
   return true;

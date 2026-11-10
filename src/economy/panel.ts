@@ -165,6 +165,10 @@ import {
   ECON_SHOP_CAR_PAGE_PREFIX,
   ECON_SHOP_HOUSE_PAGE_PREFIX,
   ECON_SHOP_PET_PAGE_PREFIX,
+  ECON_SHOP_FOLDER_PREFIX,
+  ECON_SHOP_FOLDER_PAGE_PREFIX,
+  buildShopFolderEmbed,
+  buildShopFolderRows,
   ECON_SHOP_APT_BUY_PREFIX,
   ECON_SHOP_APT_FULL_PREFIX,
   ECON_SHOP_APT_TRADE_PREFIX,
@@ -3893,6 +3897,27 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
         components: buildShopHouseListRows(member, origin, page),
       });
     }
+    return true;
+  }
+
+  if (id.startsWith(ECON_SHOP_FOLDER_PAGE_PREFIX) || id.startsWith(ECON_SHOP_FOLDER_PREFIX)) {
+    let folderId = "";
+    let page = 0;
+    if (id.startsWith(ECON_SHOP_FOLDER_PAGE_PREFIX)) {
+      const rest = id.slice(ECON_SHOP_FOLDER_PAGE_PREFIX.length);
+      const splitAt = rest.lastIndexOf(":");
+      folderId = rest.slice(0, splitAt);
+      page = Number(rest.slice(splitAt + 1));
+    } else {
+      folderId = id.slice(ECON_SHOP_FOLDER_PREFIX.length);
+    }
+    const embed = buildShopFolderEmbed(member, folderId);
+    const components = buildShopFolderRows(member, folderId, Number.isFinite(page) ? page : 0);
+    if (!embed || !components) {
+      await replyShopNotice(interaction, "Такой категории нет.", ECON_SHOP_HUB);
+      return true;
+    }
+    await replyOrUpdate(interaction, { embeds: [embed], components });
     return true;
   }
 

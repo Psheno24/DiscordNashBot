@@ -63,6 +63,15 @@ export interface ShopMenuPatch {
   hidden?: boolean;
 }
 
+export interface ShopFolder {
+  id: string;
+  section: ShopCatalogKind;
+  label: string;
+  /** Родитель: встроенная ветка (`bphs`) или другая своя папка. Нет — категория рядом с «Советское». */
+  parentId?: string;
+  hidden?: boolean;
+}
+
 export interface ShopCatalogConfig {
   /** Встроенные и свои id, скрытые из продажи. */
   hidden?: string[];
@@ -70,6 +79,10 @@ export interface ShopCatalogConfig {
   labels?: Record<string, string>;
   custom?: ShopCatalogItem[];
   menus?: Record<string, ShopMenuPatch>;
+  /** Свои категории и подкатегории витрины. */
+  folders?: ShopFolder[];
+  /** Товар → папка. Нет записи — товар лежит в своей ветке (советское / заморское). */
+  place?: Record<string, string>;
 }
 
 export interface ShopPriceOverride {

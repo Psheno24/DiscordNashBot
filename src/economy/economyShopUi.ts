@@ -103,7 +103,16 @@ import {
 import { remitShopPurchaseVatToTreasury } from "./taxTreasury.js";
 import { getEconomyUser, listEconomyUsers, patchEconomyUser, updateEconomyUser, type EconomyUser } from "./userStore.js";
 import { selectedShopTradeUids } from "./shopTradeDraft.js";
-import { menuHidden, menuLabel } from "./shopCatalog.js";
+import {
+  builtinFolderId,
+  childShopFolders,
+  itemShopFolderId,
+  menuHidden,
+  menuLabel,
+  shopFolder,
+  topShopFolders,
+  type ShopFolderView,
+} from "./shopCatalog.js";
 import { SHOP_HUB, UI } from "../ui/copy.js";
 import {
   detailsNavBottomRow,
@@ -184,6 +193,8 @@ export const ECON_SHOP_PHONE_PAGE_PREFIX = "econ:shop:phPg:";
 export const ECON_SHOP_CAR_PAGE_PREFIX = "econ:shop:crPg:";
 export const ECON_SHOP_HOUSE_PAGE_PREFIX = "econ:shop:hsPg:";
 export const ECON_SHOP_PET_PAGE_PREFIX = "econ:shop:ptPg:";
+export const ECON_SHOP_FOLDER_PREFIX = "econ:shop:fld:";
+export const ECON_SHOP_FOLDER_PAGE_PREFIX = "econ:shop:fdPg:";
 export const ECON_SHOP_PHONE_ORIGIN_PREFIX = "econ:shop:phone:";
 export const ECON_SHOP_PHONE_BUY_PREFIX = "econ:shop:phoneBuy:";
 export const ECON_SHOP_PHONE_FULL_PREFIX = "econ:shop:phoneFull:";
@@ -434,7 +445,8 @@ export function shopItemButtonLabel(short: string, cost: number): string {
 }
 
 function catalogWindow<T>(items: T[], perRow: number, reservedRows: number, page: number): { slice: T[]; page: number; pages: number } {
-  let itemRows = Math.max(1, 5 - reservedRows);
+  let itemRows = Math.max(0, 5 - reservedRows);
+  if (itemRows < 1) return { slice: [], page: 0, pages: 1 };
   let perPage = itemRows * perRow;
   let pages = Math.max(1, Math.ceil(items.length / perPage));
   if (pages > 1) {
@@ -444,6 +456,23 @@ function catalogWindow<T>(items: T[], perRow: number, reservedRows: number, page
   }
   const current = Math.min(pages - 1, Math.max(0, Math.floor(page)));
   return { slice: items.slice(current * perPage, current * perPage + perPage), page: current, pages };
+}
+
+function folderButtonRows(folders: ShopFolderView[]): ActionRowBuilder<ButtonBuilder>[] {
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  for (let i = 0; i < folders.length; i += 3) {
+    rows.push(
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...folders.slice(i, i + 3).map((folder) =>
+          new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_FOLDER_PREFIX}${folder.id}`)
+            .setLabel(folder.label.slice(0, 80))
+            .setStyle(ButtonStyle.Primary),
+        ),
+      ),
+    );
+  }
+  return rows;
 }
 
 function catalogPagerRow(prefix: string, origin: string, page: number, pages: number): ActionRowBuilder<ButtonBuilder> {
@@ -551,6 +580,7 @@ export function buildShopOriginPickRows(
   ].filter((button): button is ButtonBuilder => Boolean(button));
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   if (originButtons.length > 0) rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...originButtons));
+  rows.push(...folderButtonRows(topShopFolders(gid, kind).filter((folder) => !folder.builtin)));
   if (kind === "phone" && !menuHidden(gid, "phone.sim")) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -1502,6 +1532,7 @@ export function buildShopHousePickRows(backId: string, guildId?: string): Action
   ].filter((button): button is ButtonBuilder => Boolean(button));
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   if (buttons.length > 0) rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons));
+  if (gid) rows.push(...folderButtonRows(topShopFolders(gid, "apt").filter((folder) => !folder.builtin)));
   rows.push(shopNavBottomRow(backId));
   return rows;
 }
@@ -1566,7 +1597,9 @@ export function parseOriginFromSuffix(suffix: string): CatalogOrigin | undefined
 export function buildShopPhoneListEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const owned = listOwnedPhonesByOrigin(u, origin);
-  const catalogLines = phonesByOrigin(origin, member.guild.id).map((p) => {
+  const catalogLines = phonesByOrigin(origin, member.guild.id)
+    .filter((p) => itemShopFolderId(member.guild.id, p.id, p.origin) === builtinFolderId("phone", origin))
+    .map((p) => {
     const price = inflatedCatalogPhonePrice(member.guild.id, p.id);
     return `• **${p.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(p)}`;
   });
@@ -1608,8 +1641,12 @@ export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigi
       ),
     );
   }
-  const list = phonesByOrigin(origin, member.guild.id);
-  const window = catalogWindow(list, 3, (hasSell ? 1 : 0) + 1, page);
+  const list = phonesByOrigin(origin, member.guild.id).filter(
+    (p) => itemShopFolderId(member.guild.id, p.id, p.origin) === builtinFolderId("phone", origin),
+  );
+  const childRows = folderButtonRows(childShopFolders(member.guild.id, "phone", builtinFolderId("phone", origin)));
+  rows.push(...childRows);
+  const window = catalogWindow(list, 3, (hasSell ? 1 : 0) + childRows.length + 1, page);
   for (let i = 0; i < window.slice.length; i += 3) {
     const slice = window.slice.slice(i, i + 3);
     rows.push(
@@ -1634,7 +1671,9 @@ export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigi
 export function buildShopCarListEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const owned = listOwnedCarsByOrigin(u, origin);
-  const catalogLines = carsByOrigin(origin, member.guild.id).map((c) => {
+  const catalogLines = carsByOrigin(origin, member.guild.id)
+    .filter((c) => itemShopFolderId(member.guild.id, c.id, c.origin) === builtinFolderId("car", origin))
+    .map((c) => {
     const price = inflatedCatalogCarPrice(member.guild.id, c.id);
     const cd = (c.courierShiftCdMs / 3600000).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
     return `• **${c.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(c)} · доставка КД **${cd} ч**`;
@@ -1678,8 +1717,12 @@ export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin,
       ),
     );
   }
-  const list = carsByOrigin(origin, member.guild.id);
-  const window = catalogWindow(list, 3, (hasSell ? 1 : 0) + 1, page);
+  const list = carsByOrigin(origin, member.guild.id).filter(
+    (c) => itemShopFolderId(member.guild.id, c.id, c.origin) === builtinFolderId("car", origin),
+  );
+  const childRows = folderButtonRows(childShopFolders(member.guild.id, "car", builtinFolderId("car", origin)));
+  rows.push(...childRows);
+  const window = catalogWindow(list, 3, (hasSell ? 1 : 0) + childRows.length + 1, page);
   for (let i = 0; i < window.slice.length; i += 3) {
     const slice = window.slice.slice(i, i + 3);
     rows.push(
@@ -1725,7 +1768,9 @@ export function buildShopHouseListEmbed(member: GuildMember, origin: CatalogOrig
   }
   lines.push(...shopApartmentTradeInLines(), shopPlainSellLine(APARTMENT_SELL_REFUND_RATE));
   lines.push("На кнопках — **полная** цена. После нажатия можно купить ещё одну или обменять свою.");
-  const catalogLines = apartmentsByOrigin(origin, gid).map((a) => {
+  const catalogLines = apartmentsByOrigin(origin, gid)
+    .filter((a) => itemShopFolderId(gid, a.id, a.origin) === builtinFolderId("apt", origin))
+    .map((a) => {
     const price = inflatedCatalogApartmentPrice(gid, a.id);
     const utility = inflatedApartmentUtilityRub(gid, a.id);
     return `• **${a.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(a)} · ЖКХ **${fmt(utility)}** ₽/мес.`;
@@ -1767,8 +1812,12 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
       ),
     );
   }
-  const list = apartmentsByOrigin(origin, member.guild.id);
-  const window = catalogWindow(list, 4, (rows.length > 0 ? 1 : 0) + 1, page);
+  const list = apartmentsByOrigin(origin, member.guild.id).filter(
+    (a) => itemShopFolderId(member.guild.id, a.id, a.origin) === builtinFolderId("apt", origin),
+  );
+  const childRows = folderButtonRows(childShopFolders(member.guild.id, "apt", builtinFolderId("apt", origin)));
+  rows.push(...childRows);
+  const window = catalogWindow(list, 4, rows.length + 1, page);
   for (let i = 0; i < window.slice.length; i += 4) {
     const slice = window.slice.slice(i, i + 4);
     rows.push(
@@ -1825,7 +1874,9 @@ export function buildShopAnimalsRows(member: GuildMember): ActionRowBuilder<Butt
 
 export function buildShopAnimalsBuyEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const catalog = petsForSale(member.guild.id).map((p) => {
+  const catalog = petsForSale(member.guild.id)
+    .filter((p) => itemShopFolderId(member.guild.id, p.id) == null)
+    .map((p) => {
     const cost = quoteShopPrice(member.guild.id, `pet:${p.id}`);
     const ps = scaledEconomyPsIncome(member.guild.id, p.dailyPsRub);
     const owned = userOwnsPetType(u, p.id) ? " · **уже есть**" : "";
@@ -1864,8 +1915,10 @@ export function buildShopAnimalsDetailsEmbed(member: GuildMember): EmbedBuilder 
 export function buildShopAnimalsBuyRows(member: GuildMember, page = 0): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  const list = petsForSale(member.guild.id);
-  const window = catalogWindow(list, 3, 1, page);
+  const list = petsForSale(member.guild.id).filter((p) => itemShopFolderId(member.guild.id, p.id) == null);
+  const childRows = folderButtonRows(topShopFolders(member.guild.id, "pet"));
+  rows.push(...childRows);
+  const window = catalogWindow(list, 3, childRows.length + 1, page);
   for (let i = 0; i < window.slice.length; i += 3) {
     const slice = window.slice.slice(i, i + 3);
     rows.push(
@@ -1887,6 +1940,132 @@ export function buildShopAnimalsBuyRows(member: GuildMember, page = 0): ActionRo
   }
   if (window.pages > 1) rows.push(catalogPagerRow(ECON_SHOP_PET_PAGE_PREFIX, "all", window.page, window.pages));
   rows.push(shopDetailsNavBottomRow(ECON_SHOP_ANIMALS_DETAILS, ECON_SHOP_ANIMALS));
+  return rows;
+}
+
+function folderBackId(guildId: string, folder: ShopFolderView): string {
+  if (folder.parentId) {
+    const parent = shopFolder(guildId, folder.parentId);
+    if (parent?.builtin && parent.origin) {
+      const prefix = parent.section === "phone" ? ECON_SHOP_PHONE_ORIGIN_PREFIX : parent.section === "car" ? ECON_SHOP_CAR_ORIGIN_PREFIX : ECON_SHOP_HOUSE_ORIGIN_PREFIX;
+      return `${prefix}${parent.origin}`;
+    }
+    return `${ECON_SHOP_FOLDER_PREFIX}${folder.parentId}`;
+  }
+  if (folder.section === "phone") return ECON_SHOP_PHONE;
+  if (folder.section === "car") return ECON_SHOP_CAR;
+  if (folder.section === "apt") return ECON_SHOP_HOUSE;
+  return ECON_SHOP_ANIMALS_BUY;
+}
+
+export function buildShopFolderEmbed(member: GuildMember, folderId: string): EmbedBuilder | undefined {
+  const folder = shopFolder(member.guild.id, folderId);
+  if (!folder || folder.hidden) return undefined;
+  const gid = member.guild.id;
+  const lines = [`Баланс: **${fmt(getEconomyUser(gid, member.id).rubles)}** ₽`, ""];
+  const children = childShopFolders(gid, folder.section, folder.id);
+  if (children.length) lines.push(children.map((child) => `• **${child.label}**`).join("\n"), "");
+  const goods = folderGoods(member, folder).slice(0, 20);
+  lines.push(goods.length ? goods.join("\n") : "В этой категории пока пусто. Товары переносятся в настройках состава.");
+  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle(folder.label.slice(0, 256)).setDescription(lines.join("\n").slice(0, 4000));
+}
+
+function folderGoods(member: GuildMember, folder: ShopFolderView): string[] {
+  const gid = member.guild.id;
+  if (folder.section === "phone") {
+    return ["soviet", "foreign"].flatMap((origin) =>
+      phonesByOrigin(origin as CatalogOrigin, gid)
+        .filter((item) => itemShopFolderId(gid, item.id, item.origin) === folder.id)
+        .map((item) => `• **${item.label}** — **${fmt(inflatedCatalogPhonePrice(gid, item.id))}** ₽`),
+    );
+  }
+  if (folder.section === "car") {
+    return ["soviet", "foreign"].flatMap((origin) =>
+      carsByOrigin(origin as CatalogOrigin, gid)
+        .filter((item) => itemShopFolderId(gid, item.id, item.origin) === folder.id)
+        .map((item) => `• **${item.label}** — **${fmt(inflatedCatalogCarPrice(gid, item.id))}** ₽`),
+    );
+  }
+  if (folder.section === "apt") {
+    return ["soviet", "foreign"].flatMap((origin) =>
+      apartmentsByOrigin(origin as CatalogOrigin, gid)
+        .filter((item) => itemShopFolderId(gid, item.id, item.origin) === folder.id)
+        .map((item) => `• **${item.label}** — **${fmt(inflatedCatalogApartmentPrice(gid, item.id))}** ₽`),
+    );
+  }
+  return petsForSale(gid)
+    .filter((item) => itemShopFolderId(gid, item.id) === folder.id)
+    .map((item) => `• **${item.label}** — **${fmt(quoteShopPrice(gid, `pet:${item.id}`))}** ₽`);
+}
+
+export function buildShopFolderRows(member: GuildMember, folderId: string, page = 0): ActionRowBuilder<ButtonBuilder>[] | undefined {
+  const folder = shopFolder(member.guild.id, folderId);
+  if (!folder || folder.hidden) return undefined;
+  const gid = member.guild.id;
+  const u = getEconomyUser(gid, member.id);
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  const children = folderButtonRows(childShopFolders(gid, folder.section, folder.id));
+  rows.push(...children);
+  const perRow = folder.section === "apt" ? 4 : 3;
+  const buttons: ButtonBuilder[] = [];
+  if (folder.section === "phone") {
+    for (const origin of ["soviet", "foreign"] as const) {
+      for (const item of phonesByOrigin(origin, gid).filter((row) => itemShopFolderId(gid, row.id, row.origin) === folder.id)) {
+        const price = inflatedCatalogPhonePrice(gid, item.id);
+        buttons.push(
+          new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_PHONE_BUY_PREFIX}${item.id}`)
+            .setLabel(shopItemButtonLabel(item.label, price))
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(u.rubles < price && listOwnedPhonesByOrigin(u, item.origin).length === 0),
+        );
+      }
+    }
+  } else if (folder.section === "car") {
+    for (const origin of ["soviet", "foreign"] as const) {
+      for (const item of carsByOrigin(origin, gid).filter((row) => itemShopFolderId(gid, row.id, row.origin) === folder.id)) {
+        const price = inflatedCatalogCarPrice(gid, item.id);
+        buttons.push(
+          new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_CAR_BUY_PREFIX}${item.id}`)
+            .setLabel(shopItemButtonLabel(item.label, price))
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(u.rubles < price && listOwnedCarsByOrigin(u, item.origin).length === 0),
+        );
+      }
+    }
+  } else if (folder.section === "apt") {
+    for (const origin of ["soviet", "foreign"] as const) {
+      for (const item of apartmentsByOrigin(origin, gid).filter((row) => itemShopFolderId(gid, row.id, row.origin) === folder.id)) {
+        const price = inflatedCatalogApartmentPrice(gid, item.id);
+        buttons.push(
+          new ButtonBuilder()
+            .setCustomId(`${ECON_SHOP_APT_BUY_PREFIX}${item.id}`)
+            .setLabel(shopItemButtonLabel(apartmentShopShortLabel(item.label), price))
+            .setStyle(ButtonStyle.Secondary)
+            .setDisabled(u.rubles < price && listOwnedApartmentsByOrigin(u, item.origin).length === 0),
+        );
+      }
+    }
+  } else {
+    for (const item of petsForSale(gid).filter((row) => itemShopFolderId(gid, row.id) === folder.id)) {
+      const cost = quoteShopPrice(gid, `pet:${item.id}`);
+      buttons.push(
+        new ButtonBuilder()
+          .setCustomId(`${ECON_SHOP_PET_BUY_PREFIX}${item.id}`)
+          .setLabel(shopItemButtonLabel(item.label, cost))
+          .setStyle(ButtonStyle.Secondary)
+          .setDisabled(Boolean(petOwnershipBlockReason(u, item))),
+      );
+    }
+  }
+  const window = catalogWindow(buttons, perRow, children.length + 1, page);
+  for (let i = 0; i < window.slice.length; i += perRow) {
+    rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...window.slice.slice(i, i + perRow)));
+  }
+  if (window.pages > 1) rows.push(catalogPagerRow(ECON_SHOP_FOLDER_PAGE_PREFIX, folder.id, window.page, window.pages));
+  rows.push(shopNavBottomRow(folderBackId(gid, folder)));
+  if (rows.length > 5) return rows.slice(0, 4).concat(rows.slice(-1));
   return rows;
 }
 

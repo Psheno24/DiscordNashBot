@@ -49,6 +49,7 @@ import {
   buildShopCarTradePickEmbed,
   buildShopHouseDetailsEmbed,
   buildShopHouseListEmbed,
+  buildShopFolderEmbed,
   buildShopHousePickEmbed,
   buildShopHouseRentEmbed,
   buildShopHubEmbed,
@@ -139,7 +140,7 @@ import {
   voiceJoinPhrasePriceRub,
   type GuildJoinSound,
 } from "../voice/joinPhrase.js";
-import { menuHidden, menuLabel } from "../economy/shopCatalog.js";
+import { builtinFolderId, childShopFolders, itemShopFolderId, menuHidden, menuLabel, shopFolder, topShopFolders } from "../economy/shopCatalog.js";
 import { patchTelegramUiState } from "./bridgeStore.js";
 import {
   btnLabel,
@@ -190,6 +191,10 @@ function itemBtn(label: string, cost: number, data: string): InlineBtn {
 
 function shopNav(back: string, backLabel = "← Назад"): InlineBtn[] {
   return navRow(back, backLabel);
+}
+
+function tgFolderRows(folders: { id: string; label: string }[]): InlineBtn[][] {
+  return folders.map((folder) => row({ text: btnLabel(folder.label), callback_data: `s:fld:${folder.id}` }));
 }
 
 function tgMenuRows(guildId: string, groups: [string, string][][]): InlineBtn[][] {
@@ -263,16 +268,20 @@ function phoneMenu(member: GuildMember, note?: string): ScreenPayload {
       [["phone.foreign", "s:ph:f"]],
       [["phone.sim", "s:sim"]],
     ]),
+    ...tgFolderRows(topShopFolders(member.guild.id, "phone").filter((folder) => !folder.builtin)),
     shopNav("s"),
   );
 }
 
 function carMenu(member: GuildMember, note?: string): ScreenPayload {
   const u = getEconomyUser(member.guild.id, member.id);
-  const rows: InlineBtn[][] = tgMenuRows(member.guild.id, [
-    [["car.soviet", "s:car:s"]],
-    [["car.foreign", "s:car:f"]],
-  ]);
+  const rows: InlineBtn[][] = [
+    ...tgMenuRows(member.guild.id, [
+      [["car.soviet", "s:car:s"]],
+      [["car.foreign", "s:car:f"]],
+    ]),
+    ...tgFolderRows(topShopFolders(member.guild.id, "car").filter((folder) => !folder.builtin)),
+  ];
   if (userCanOpenPlateShop(u) && !menuHidden(member.guild.id, "car.plate")) {
     rows.push(row({ text: btnLabel(menuLabel(member.guild.id, "car.plate")), callback_data: "s:pl" }));
   }
@@ -287,7 +296,8 @@ function phoneList(member: GuildMember, origin: CatalogOrigin, note?: string): S
   if (listOwnedPhonesByOrigin(u, origin).length > 0) {
     rows.push(row({ text: "Продать", callback_data: `s:ph:sl:${oc}` }));
   }
-  for (const p of phonesByOrigin(origin, member.guild.id)) {
+  rows.push(...tgFolderRows(childShopFolders(member.guild.id, "phone", builtinFolderId("phone", origin))));
+  for (const p of phonesByOrigin(origin, member.guild.id).filter((item) => itemShopFolderId(member.guild.id, item.id, item.origin) === builtinFolderId("phone", origin))) {
     const price = inflatedCatalogPhonePrice(member.guild.id, p.id);
     rows.push(row(itemBtn(p.label, price, `s:ph:i:${p.id}`)));
   }
@@ -303,7 +313,8 @@ function carList(member: GuildMember, origin: CatalogOrigin, note?: string): Scr
   if (listOwnedCarsByOrigin(u, origin).length > 0) {
     rows.push(row({ text: "Продать", callback_data: `s:car:sl:${oc}` }));
   }
-  for (const c of carsByOrigin(origin, member.guild.id)) {
+  rows.push(...tgFolderRows(childShopFolders(member.guild.id, "car", builtinFolderId("car", origin))));
+  for (const c of carsByOrigin(origin, member.guild.id).filter((item) => itemShopFolderId(member.guild.id, item.id, item.origin) === builtinFolderId("car", origin))) {
     const price = inflatedCatalogCarPrice(member.guild.id, c.id);
     rows.push(row(itemBtn(c.label, price, `s:car:i:${c.id}`)));
   }
@@ -418,6 +429,7 @@ function houseMenu(member: GuildMember, note?: string): ScreenPayload {
       [["house.foreign", "s:hs:f"]],
       [["house.rent", "s:hs:rent"]],
     ]),
+    ...tgFolderRows(topShopFolders(member.guild.id, "apt").filter((folder) => !folder.builtin)),
     shopNav("s"),
   );
 }
@@ -429,7 +441,8 @@ function houseList(member: GuildMember, origin: CatalogOrigin, note?: string): S
   if (listOwnedApartmentsByOrigin(u, origin).length > 0) {
     rows.push(row({ text: "Продать", callback_data: `s:hs:sl:${oc}` }));
   }
-  for (const a of apartmentsByOrigin(origin, member.guild.id)) {
+  rows.push(...tgFolderRows(childShopFolders(member.guild.id, "apt", builtinFolderId("apt", origin))));
+  for (const a of apartmentsByOrigin(origin, member.guild.id).filter((item) => itemShopFolderId(member.guild.id, item.id, item.origin) === builtinFolderId("apt", origin))) {
     const price = inflatedCatalogApartmentPrice(member.guild.id, a.id);
     rows.push(row(itemBtn(apartmentShopShortLabel(a.label), price, `s:hs:i:${a.id}`)));
   }
@@ -509,6 +522,58 @@ function houseRent(member: GuildMember, note?: string): ScreenPayload {
   return screen(fromEmbed(buildShopHouseRentEmbed(member), note), ...rows);
 }
 
+function folderBackCallback(guildId: string, folderId: string): string {
+  const folder = shopFolder(guildId, folderId);
+  if (!folder) return "s";
+  if (folder.parentId) {
+    const parent = shopFolder(guildId, folder.parentId);
+    if (parent?.builtin && parent.origin) {
+      const code = parent.origin === "soviet" ? "s" : "f";
+      if (parent.section === "phone") return `s:ph:${code}`;
+      if (parent.section === "car") return `s:car:${code}`;
+      return `s:hs:${code}`;
+    }
+    return `s:fld:${folder.parentId}`;
+  }
+  if (folder.section === "phone") return "s:ph";
+  if (folder.section === "car") return "s:car";
+  if (folder.section === "apt") return "s:hs";
+  return "s:an:buy";
+}
+
+function folderScreen(member: GuildMember, folderId: string, note?: string): ScreenPayload {
+  const embed = buildShopFolderEmbed(member, folderId);
+  const folder = shopFolder(member.guild.id, folderId);
+  if (!embed || !folder) return screenShopHub(member, note);
+  const gid = member.guild.id;
+  const rows: InlineBtn[][] = [...tgFolderRows(childShopFolders(gid, folder.section, folder.id))];
+  if (folder.section === "phone") {
+    for (const origin of ["soviet", "foreign"] as const) {
+      for (const item of phonesByOrigin(origin, gid).filter((row) => itemShopFolderId(gid, row.id, row.origin) === folder.id)) {
+        rows.push(row(itemBtn(item.label, inflatedCatalogPhonePrice(gid, item.id), `s:ph:i:${item.id}`)));
+      }
+    }
+  } else if (folder.section === "car") {
+    for (const origin of ["soviet", "foreign"] as const) {
+      for (const item of carsByOrigin(origin, gid).filter((row) => itemShopFolderId(gid, row.id, row.origin) === folder.id)) {
+        rows.push(row(itemBtn(item.label, inflatedCatalogCarPrice(gid, item.id), `s:car:i:${item.id}`)));
+      }
+    }
+  } else if (folder.section === "apt") {
+    for (const origin of ["soviet", "foreign"] as const) {
+      for (const item of apartmentsByOrigin(origin, gid).filter((row) => itemShopFolderId(gid, row.id, row.origin) === folder.id)) {
+        rows.push(row(itemBtn(apartmentShopShortLabel(item.label), inflatedCatalogApartmentPrice(gid, item.id), `s:hs:i:${item.id}`)));
+      }
+    }
+  } else {
+    for (const item of petsForSale(gid).filter((row) => itemShopFolderId(gid, row.id) === folder.id)) {
+      rows.push(row(itemBtn(item.label, quoteShopPrice(gid, `pet:${item.id}`), `s:an:b:${item.id}`)));
+    }
+  }
+  rows.push(shopNav(folderBackCallback(gid, folder.id)));
+  return screen(fromEmbed(embed, note), ...rows);
+}
+
 function animalsMenu(member: GuildMember, note?: string): ScreenPayload {
   return screen(
     fromEmbed(buildShopAnimalsEmbed(member), note),
@@ -522,7 +587,8 @@ function animalsMenu(member: GuildMember, note?: string): ScreenPayload {
 function animalsBuy(member: GuildMember, note?: string): ScreenPayload {
   const gid = member.guild.id;
   const rows: InlineBtn[][] = [];
-  for (const p of petsForSale(member.guild.id)) {
+  rows.push(...tgFolderRows(topShopFolders(member.guild.id, "pet")));
+  for (const p of petsForSale(member.guild.id).filter((item) => itemShopFolderId(member.guild.id, item.id) == null)) {
     const cost = quoteShopPrice(gid, `pet:${p.id}`);
     rows.push(row(itemBtn(p.label, cost, `s:an:b:${p.id}`)));
   }
@@ -752,6 +818,10 @@ export async function routeShopCallback(opts: {
 
   if (data === "s") {
     await present(screenShopHub(member));
+    return true;
+  }
+  if (data.startsWith("s:fld:")) {
+    await present(folderScreen(member, data.slice("s:fld:".length)));
     return true;
   }
 

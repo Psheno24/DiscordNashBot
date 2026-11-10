@@ -15,17 +15,27 @@ import {
 import { quoteShopPrice } from "../economy/economyMacro.js";
 import {
   SHOP_CUSTOM_LIMIT,
+  SHOP_FOLDER_LIMIT,
   SHOP_MENU_DEFS,
   addCustomItem,
+  addShopFolder,
   catalogItemHidden,
+  catalogItemSection,
   customItemOf,
+  itemShopFolderId,
   listCatalogAdminItems,
+  listShopFolders,
   menuHidden,
   menuLabel,
+  placeShopItem,
   removeCustomItem,
+  removeShopFolder,
+  renameShopFolder,
   setCatalogHidden,
   setCatalogLabel,
   setMenuPatch,
+  setShopFolderHidden,
+  shopFolder,
   updateCustomStats,
 } from "../economy/shopCatalog.js";
 import { listEconomyUsers } from "../economy/userStore.js";
@@ -48,6 +58,17 @@ const CAT_MENU_HIDE = "neuro:cat:mh:";
 const CAT_MENU_EDIT = "neuro:cat:me:";
 const SEL_KIND = "neuro:cat:sel:";
 const SEL_MENU = "neuro:cat:selmenu";
+const CAT_FOLDS = "neuro:cat:folds";
+const CAT_FSEC = "neuro:cat:fsec:";
+const CAT_FOPEN = "neuro:cat:fopen:";
+const CAT_FADD = "neuro:cat:fadd:";
+const CAT_FSUB = "neuro:cat:fsub:";
+const CAT_FREN = "neuro:cat:fren:";
+const CAT_FHIDE = "neuro:cat:fhide:";
+const CAT_FDEL = "neuro:cat:fdel:";
+const SEL_FOLD = "neuro:cat:fsel:";
+const SEL_MOVE = "neuro:cat:fmov:";
+const MODAL_FOLD = "modal:neuro:catFold:";
 const MODAL_ADD = "modal:neuro:catAdd:";
 const MODAL_EDIT = "modal:neuro:catEdit:";
 const MODAL_MENU = "modal:neuro:catMenu:";
@@ -129,6 +150,7 @@ async function show(
 function rootPayload(note?: string) {
   const lines = [
     "Скрыть, вернуть, переименовать и добавить товары.",
+    "Категории — свои ветки и подкатегории, перенос товаров.",
     "Пункты меню терминала и магазина — отдельно: имя и видимость.",
     `Своих товаров в одном разделе — до **${SHOP_CUSTOM_LIMIT}**.`,
     "Уже купленное остаётся у игрока. Удалить свой товар можно, пока его ни у кого нет.",
@@ -139,6 +161,7 @@ function rootPayload(note?: string) {
     components: [
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(CAT_GOODS).setLabel("Товары").setStyle(ButtonStyle.Primary),
+        new ButtonBuilder().setCustomId(CAT_FOLDS).setLabel("Категории").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(CAT_MENUS).setLabel("Пункты меню").setStyle(ButtonStyle.Secondary),
       ),
       new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -306,12 +329,142 @@ function field(id: string, label: string, value: string, required = true): Actio
   return new ActionRowBuilder<TextInputBuilder>().addComponents(input);
 }
 
+function folderOptionLabel(guildId: string, folderId: string): string {
+  const folder = shopFolder(guildId, folderId);
+  if (!folder) return folderId;
+  const parent = folder.parentId ? shopFolder(guildId, folder.parentId) : undefined;
+  const path = parent ? `${parent.label} / ${folder.label}` : folder.label;
+  return `${folder.hidden ? "скрыта · " : ""}${path}`.slice(0, 100);
+}
+
+function foldsHome() {
+  return {
+    embeds: [
+      new EmbedBuilder()
+        .setColor(COLOR)
+        .setTitle("Категории")
+        .setDescription(
+          [
+            "Раздел, затем категория.",
+            "Новая категория встаёт рядом с **Советское** и **Заморское**.",
+            "Подкатегория создаётся внутри выбранной.",
+            `Своих категорий в разделе — до **${SHOP_FOLDER_LIMIT}**.`,
+            "Товар без переноса остаётся в своей ветке. Статы советского и заморского не меняются.",
+          ].join("\n"),
+        ),
+    ],
+    components: [
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        ...KINDS.map((kind) => new ButtonBuilder().setCustomId(`${CAT_FSEC}${kind.id}`).setLabel(kind.label).setStyle(ButtonStyle.Secondary)),
+      ),
+      new ActionRowBuilder<ButtonBuilder>().addComponents(
+        new ButtonBuilder().setCustomId(NEURO_CATALOG).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+      ),
+    ],
+  };
+}
+
+function foldSectionPayload(guildId: string, section: ShopCatalogKind, note?: string) {
+  const title = KINDS.find((kind) => kind.id === section)?.label ?? "Категории";
+  const folders = listShopFolders(guildId, section).slice(0, 25);
+  const lines = ["Выбери категорию или создай новую рядом с Советским и Заморским."];
+  if (note) lines.unshift(note, "");
+  const rows: ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>[] = [];
+  if (folders.length > 0) {
+    rows.push(
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`${SEL_FOLD}${section}`)
+          .setPlaceholder("Категория")
+          .addOptions(folders.map((folder) => ({ label: folderOptionLabel(guildId, folder.id), value: folder.id }))),
+      ),
+    );
+  }
+  rows.push(
+    new ActionRowBuilder<ButtonBuilder>().addComponents(
+      new ButtonBuilder().setCustomId(`${CAT_FADD}${section}`).setLabel("Новая категория").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId(CAT_FOLDS).setLabel("Назад").setStyle(ButtonStyle.Secondary),
+    ),
+  );
+  return {
+    embeds: [new EmbedBuilder().setColor(COLOR).setTitle(`Категории · ${title}`).setDescription(lines.join("\n"))],
+    components: rows,
+  };
+}
+
+function foldCard(guildId: string, folderId: string, note?: string) {
+  const folder = shopFolder(guildId, folderId);
+  if (!folder) return foldsHome();
+  const lines = [
+    `**${folderOptionLabel(guildId, folder.id)}**`,
+    folder.builtin ? "Встроенная ветка. Её можно переименовать и скрыть." : "Своя категория.",
+    folder.hidden ? "Сейчас **скрыта**." : "Сейчас **видна** в магазине.",
+    "Перенос кладёт товар в эту категорию. Убрать — возвращает в свою ветку.",
+  ];
+  if (note) lines.unshift(note, "");
+  const items = listCatalogAdminItems(guildId, folder.section).slice(0, 25);
+  const here = items.filter((item) => itemFolderHere(guildId, item.id, folder.id));
+  const rows: ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>[] = [];
+  if (items.length > 0) {
+    rows.push(
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`${SEL_MOVE}${folder.id}`)
+          .setPlaceholder("Перенести сюда")
+          .addOptions(
+            items.map((item) => ({
+              label: `${itemFolderHere(guildId, item.id, folder.id) ? "здесь · " : ""}${item.label}`.slice(0, 100),
+              value: item.id,
+            })),
+          ),
+      ),
+    );
+  }
+  if (here.length > 0) {
+    rows.push(
+      new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId(`${SEL_MOVE}out:${folder.id}`)
+          .setPlaceholder("Убрать отсюда")
+          .addOptions(here.map((item) => ({ label: item.label.slice(0, 100), value: `out:${item.id}` }))),
+      ),
+    );
+  }
+  const buttons = [
+    new ButtonBuilder().setCustomId(`${CAT_FREN}${folder.id}`).setLabel("Переименовать").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(`${CAT_FHIDE}${folder.id}`).setLabel(folder.hidden ? "Показать" : "Скрыть").setStyle(ButtonStyle.Secondary),
+  ];
+  if (!folder.parentId) buttons.push(new ButtonBuilder().setCustomId(`${CAT_FSUB}${folder.id}`).setLabel("Подкатегория").setStyle(ButtonStyle.Success));
+  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons));
+  const back = [
+    new ButtonBuilder().setCustomId(`${CAT_FSEC}${folder.section}`).setLabel("К списку").setStyle(ButtonStyle.Secondary),
+  ];
+  if (!folder.builtin) back.unshift(new ButtonBuilder().setCustomId(`${CAT_FDEL}${folder.id}`).setLabel("Удалить").setStyle(ButtonStyle.Danger));
+  rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...back));
+  return {
+    embeds: [new EmbedBuilder().setColor(COLOR).setTitle("Категория").setDescription(lines.join("\n"))],
+    components: rows.slice(0, 5),
+  };
+}
+
+function originOfItem(guildId: string, itemId: string): "soviet" | "foreign" | undefined {
+  const custom = customItemOf(guildId, itemId);
+  if (custom) return custom.kind === "pet" ? undefined : custom.origin === "foreign" ? "foreign" : "soviet";
+  if (itemId.includes("_for_")) return "foreign";
+  if (itemId.includes("_sov_")) return "soviet";
+  return undefined;
+}
+
+function itemFolderHere(guildId: string, itemId: string, folderId: string): boolean {
+  return itemShopFolderId(guildId, itemId, originOfItem(guildId, itemId)) === folderId;
+}
+
 export function isShopCatalogSelect(id: string): boolean {
-  return id.startsWith(SEL_KIND) || id === SEL_MENU;
+  return id.startsWith(SEL_KIND) || id === SEL_MENU || id.startsWith(SEL_FOLD) || id.startsWith(SEL_MOVE);
 }
 
 export function isShopCatalogModal(id: string): boolean {
-  return id.startsWith(MODAL_ADD) || id.startsWith(MODAL_EDIT) || id.startsWith(MODAL_MENU);
+  return id.startsWith(MODAL_ADD) || id.startsWith(MODAL_EDIT) || id.startsWith(MODAL_MENU) || id.startsWith(MODAL_FOLD);
 }
 
 export async function handleShopCatalogButton(interaction: ButtonInteraction): Promise<boolean> {
@@ -328,7 +481,15 @@ export async function handleShopCatalogButton(interaction: ButtonInteraction): P
     id.startsWith(CAT_EDIT) ||
     id.startsWith(CAT_MENU_ITEM) ||
     id.startsWith(CAT_MENU_HIDE) ||
-    id.startsWith(CAT_MENU_EDIT);
+    id.startsWith(CAT_MENU_EDIT) ||
+    id === CAT_FOLDS ||
+    id.startsWith(CAT_FSEC) ||
+    id.startsWith(CAT_FOPEN) ||
+    id.startsWith(CAT_FADD) ||
+    id.startsWith(CAT_FSUB) ||
+    id.startsWith(CAT_FREN) ||
+    id.startsWith(CAT_FHIDE) ||
+    id.startsWith(CAT_FDEL);
   if (!mine) return false;
   if (!interaction.inGuild() || !interaction.guildId) {
     await interaction.reply({ content: "Только на сервере.", flags: MessageFlags.Ephemeral });
@@ -437,6 +598,55 @@ export async function handleShopCatalogButton(interaction: ButtonInteraction): P
     await interaction.showModal(modal);
     return true;
   }
+  if (id === CAT_FOLDS) {
+    await show(interaction, foldsHome());
+    return true;
+  }
+  if (id.startsWith(CAT_FSEC)) {
+    const section = id.slice(CAT_FSEC.length);
+    if (!isKind(section)) return true;
+    await show(interaction, foldSectionPayload(gid, section));
+    return true;
+  }
+  if (id.startsWith(CAT_FOPEN)) {
+    await show(interaction, foldCard(gid, id.slice(CAT_FOPEN.length)));
+    return true;
+  }
+  if (id.startsWith(CAT_FADD)) {
+    const section = id.slice(CAT_FADD.length);
+    if (!isKind(section)) return true;
+    const modal = new ModalBuilder().setCustomId(`${MODAL_FOLD}top:${section}`).setTitle("Новая категория");
+    modal.addComponents(field("name", "Название", ""));
+    await interaction.showModal(modal);
+    return true;
+  }
+  if (id.startsWith(CAT_FSUB)) {
+    const modal = new ModalBuilder().setCustomId(`${MODAL_FOLD}sub:${id.slice(CAT_FSUB.length)}`).setTitle("Подкатегория");
+    modal.addComponents(field("name", "Название", ""));
+    await interaction.showModal(modal);
+    return true;
+  }
+  if (id.startsWith(CAT_FREN)) {
+    const folderId = id.slice(CAT_FREN.length);
+    const modal = new ModalBuilder().setCustomId(`${MODAL_FOLD}ren:${folderId}`).setTitle("Название категории");
+    modal.addComponents(field("name", "Текст. сброс — умолчание", shopFolder(gid, folderId)?.label ?? ""));
+    await interaction.showModal(modal);
+    return true;
+  }
+  if (id.startsWith(CAT_FHIDE)) {
+    const folderId = id.slice(CAT_FHIDE.length);
+    const folder = shopFolder(gid, folderId);
+    if (folder) setShopFolderHidden(gid, folderId, !folder.hidden);
+    await show(interaction, foldCard(gid, folderId, folder?.hidden ? "Категория снова видна." : "Категория скрыта."));
+    return true;
+  }
+  if (id.startsWith(CAT_FDEL)) {
+    const folderId = id.slice(CAT_FDEL.length);
+    const folder = shopFolder(gid, folderId);
+    removeShopFolder(gid, folderId);
+    await show(interaction, folder ? foldSectionPayload(gid, folder.section, "Категория удалена. Товары вернулись в свои ветки.") : foldsHome());
+    return true;
+  }
   return true;
 }
 
@@ -452,7 +662,17 @@ export async function handleShopCatalogSelect(interaction: StringSelectMenuInter
   }
   const value = interaction.values[0] ?? "";
   const gid = interaction.guildId;
-  const payload = interaction.customId === SEL_MENU ? menuItemPayload(gid, value) : itemPayload(gid, value);
+  let payload: { embeds: EmbedBuilder[]; components: ActionRowBuilder<ButtonBuilder | StringSelectMenuBuilder>[] } =
+    interaction.customId === SEL_MENU ? menuItemPayload(gid, value) : itemPayload(gid, value);
+  if (interaction.customId.startsWith(SEL_FOLD)) payload = foldCard(gid, value);
+  if (interaction.customId.startsWith(SEL_MOVE)) {
+    const rest = interaction.customId.slice(SEL_MOVE.length);
+    const removing = rest.startsWith("out:");
+    const folderId = removing ? rest.slice("out:".length) : rest;
+    const itemId = value.startsWith("out:") ? value.slice("out:".length) : value;
+    const err = placeShopItem(gid, itemId, removing ? null : folderId);
+    payload = foldCard(gid, folderId, err ?? (removing ? "Товар вернулся в свою ветку." : "Товар перенесён."));
+  }
   if (interaction.message?.flags?.has(MessageFlags.Ephemeral)) await interaction.update(payload);
   else await interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
   return true;
@@ -470,6 +690,33 @@ export async function handleShopCatalogModal(interaction: ModalSubmitInteraction
   }
   const gid = interaction.guildId;
   const id = interaction.customId;
+  if (id.startsWith(MODAL_FOLD)) {
+    const rest = id.slice(MODAL_FOLD.length);
+    const name = interaction.fields.getTextInputValue("name");
+    const reset = name.trim().toLowerCase() === "сброс" || name.trim() === "-";
+    if (rest.startsWith("top:")) {
+      const section = rest.slice("top:".length);
+      if (!isKind(section)) return true;
+      const added = addShopFolder(gid, section, name);
+      await show(interaction, foldSectionPayload(gid, section, added.ok ? `Категория **${name.trim()}** добавлена.` : added.reason));
+      return true;
+    }
+    if (rest.startsWith("sub:")) {
+      const parentId = rest.slice("sub:".length);
+      const parent = shopFolder(gid, parentId);
+      if (!parent) return true;
+      const added = addShopFolder(gid, parent.section, name, parentId);
+      await show(interaction, added.ok ? foldCard(gid, added.id, "Подкатегория добавлена.") : foldCard(gid, parentId, added.reason));
+      return true;
+    }
+    if (rest.startsWith("ren:")) {
+      const folderId = rest.slice("ren:".length);
+      renameShopFolder(gid, folderId, reset ? null : name);
+      await show(interaction, foldCard(gid, folderId, "Название сохранено."));
+      return true;
+    }
+    return true;
+  }
   if (id.startsWith(MODAL_MENU)) {
     const menuId = id.slice(MODAL_MENU.length);
     const raw = interaction.fields.getTextInputValue("name").trim().toLowerCase();
