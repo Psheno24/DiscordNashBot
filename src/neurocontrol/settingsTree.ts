@@ -28,6 +28,8 @@ import {
 } from "../economy/taxTreasury.js";
 import { ensureEconomyTerminalPanel } from "../economy/panel.js";
 import { NEURO_BUTTON_ADMIN_SETTINGS_ROOT, NEURO_MAIN_ADMIN } from "./adminHub.js";
+import { handleShopCatalogButton } from "./shopCatalogAdmin.js";
+import { handleShopPriceAdminButton, NEURO_SETTINGS_SHOP } from "./shopPricesAdmin.js";
 
 const NEURO_SETTINGS_CHANNELS = "neuro:settings:channels";
 const NEURO_SETTINGS_TAXES = "neuro:settings:taxes";
@@ -94,6 +96,7 @@ function buildSettingsRootEmbed(guildId: string): EmbedBuilder {
         "**Каналы** — приветствия, панель, терминал, лента.",
         "**Налоги** — подоходный, НДС, комиссия ИП и казна.",
         "**Макро** — индексация доходов и инфляция цен.",
+        "**Магазин** — база каждой цены и включена ли инфляция.",
         "",
         `Казна: **${fmtTreasury(guildId)}** ₽`,
       ].join("\n"),
@@ -106,6 +109,7 @@ function buildSettingsRootRows(): ActionRowBuilder<ButtonBuilder>[] {
       new ButtonBuilder().setCustomId(NEURO_SETTINGS_CHANNELS).setLabel("Каналы").setStyle(ButtonStyle.Primary),
       new ButtonBuilder().setCustomId(NEURO_SETTINGS_TAXES).setLabel("Налоги").setStyle(ButtonStyle.Secondary),
       new ButtonBuilder().setCustomId(NEURO_SETTINGS_MACRO).setLabel("Макро").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(NEURO_SETTINGS_SHOP).setLabel("Магазин").setStyle(ButtonStyle.Secondary),
     ),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_MAIN_ADMIN).setLabel("Назад").setStyle(ButtonStyle.Secondary),
@@ -245,7 +249,8 @@ function buildMacroEmbed(guildId: string): EmbedBuilder {
       [
         `**Индексация (настройка):** **${indexing}** % за цикл`,
         `**Текущий множитель доходов:** **×${salaryMult.toFixed(2)}**`,
-        `**Текущий множитель цен магазина:** **×${priceMult.toFixed(2)}** (сим-карта и лотерея **без** инфляции)`,
+        `**Текущий множитель цен магазина:** **×${priceMult.toFixed(2)}**`,
+        "Какие цены его берут — в **Магазин**.",
       ].join("\n"),
     );
 }
@@ -289,7 +294,7 @@ function buildPolicyDetailsEmbed(kind: "general" | "ip" | "macro"): EmbedBuilder
           ]
         : [
             "Индексация доходов применяется 1 марта, июня, сентября и декабря (МСК); вероятности исходов не меняются.",
-            "Цены индексируются ежемесячно. Сим-карта и лотерея не участвуют в инфляции.",
+            "Цены индексируются ежемесячно. У каждой позиции магазина свой флаг, берёт ли она этот множитель.",
           ];
   return new EmbedBuilder()
     .setColor(SETTINGS_COLOR)
@@ -313,6 +318,8 @@ export function parsePercentInput(raw: string): number | undefined {
 }
 
 export async function handleNeuroSettingsTreeButton(interaction: ButtonInteraction): Promise<boolean> {
+  if (await handleShopCatalogButton(interaction)) return true;
+  if (await handleShopPriceAdminButton(interaction)) return true;
   const id = interaction.customId;
   const navIds = new Set([
     NEURO_BUTTON_ADMIN_SETTINGS_ROOT,

@@ -1,35 +1,21 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+import { createJsonStore } from "../storage/jsonStore.js";
 
 interface Store {
   /** channelId → messageId последней панели */
   messages: Record<string, string>;
 }
 
-const storePath = () => {
-  const dir = join(process.cwd(), "data");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, "voice-ladder-panel.json");
-};
-
-function readStore(): Store {
-  const p = storePath();
-  if (!existsSync(p)) return { messages: {} };
-  try {
-    return JSON.parse(readFileSync(p, "utf-8")) as Store;
-  } catch {
-    return { messages: {} };
-  }
-}
+const voicePanelJson = createJsonStore<Store>({
+  fileName: "voice-ladder-panel.json",
+  empty: () => ({ messages: {} }),
+});
 
 export function getVoiceLadderPanelMessageId(channelId: string): string | undefined {
-  return readStore().messages[channelId];
+  return voicePanelJson.read().messages[channelId];
 }
 
 export function setVoiceLadderPanelMessageId(channelId: string, messageId: string) {
-  const s = readStore();
+  const s = voicePanelJson.read();
   s.messages[channelId] = messageId;
-  writeJsonAtomicSync(storePath(), s);
+  voicePanelJson.write(s);
 }
-

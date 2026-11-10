@@ -1,4 +1,5 @@
 import type { Client, GuildMember } from "discord.js";
+import { menuHidden, menuLabel } from "../economy/shopCatalog.js";
 import {
   canWorkNow,
   economyFormatSkillsNotify,
@@ -104,11 +105,18 @@ function workReadyBoundaryMs(u: ReturnType<typeof getEconomyUser>, jobId: JobId,
   return last + cd;
 }
 
-function mainMenuKeyboard(): InlineKb {
-  return kb(
-    row({ text: "Работа", callback_data: "w" }, { text: "Навыки", callback_data: "sk" }),
-    row({ text: "Магазин", callback_data: "s" }, { text: "Статус", callback_data: "st" }),
-  );
+function mainMenuKeyboard(guildId?: string): InlineKb {
+  const text = (id: string, fallback: string) => btnLabel(guildId ? menuLabel(guildId, id) : fallback);
+  const show = (id: string) => !(guildId && menuHidden(guildId, id));
+  const top = [
+    show("term.work") ? { text: text("term.work", "Работа"), callback_data: "w" } : undefined,
+    show("term.skills") ? { text: text("term.skills", "Навыки"), callback_data: "sk" } : undefined,
+  ].filter((button): button is { text: string; callback_data: string } => Boolean(button));
+  const bottom = [
+    show("term.shop") ? { text: text("term.shop", "Магазин"), callback_data: "s" } : undefined,
+    { text: "Статус", callback_data: "st" },
+  ].filter((button): button is { text: string; callback_data: string } => Boolean(button));
+  return kb(...[top, bottom].filter((line) => line.length > 0).map((line) => row(...line)));
 }
 
 function workMenuKeyboard(member: GuildMember): InlineKb {
@@ -360,7 +368,7 @@ async function resolveMember(client: Client, guildId: string, discordUserId: str
   return guild.members.fetch({ user: discordUserId, force: false }).catch(() => null);
 }
 
-function screenMain(): ScreenPayload {
+function screenMain(guildId?: string): ScreenPayload {
   return {
     text: [
       "<b>Nash · терминал</b>",
@@ -368,7 +376,7 @@ function screenMain(): ScreenPayload {
       "Кнопки для смен, навыков и магазина.",
       "Подробности — в тексте экрана; нажимай действия ниже.",
     ].join("\n"),
-    markup: mainMenuKeyboard(),
+    markup: mainMenuKeyboard(guildId),
   };
 }
 
@@ -472,7 +480,7 @@ function screenStatus(member: GuildMember): ScreenPayload {
   }
   return {
     text: ["<b>Статус</b>", "", line, tline, "", "Магазин — кнопка ниже."].join("\n"),
-    markup: mainMenuKeyboard(),
+    markup: mainMenuKeyboard(member.guild.id),
   };
 }
 
@@ -824,7 +832,7 @@ async function routeCallback(client: Client, token: string, tgUserId: string, cq
 
   if (data === "m") {
     clearPendingInput(tgUserId);
-    await presentPanel(tgUserId, token, chatId, screenMain(), { messageId, ack: cq });
+    await presentPanel(tgUserId, token, chatId, screenMain(getTelegramLink(tgUserId)?.guildId), { messageId, ack: cq });
     return;
   }
   if (data === "w") {
@@ -1133,7 +1141,7 @@ export function startTelegramSidecar(client: Client): void {
           clearPendingInput(tgUserId);
           const linked = getTelegramLink(tgUserId);
           if (linked) {
-            await presentPanel(tgUserId, token, msg.chat.id, screenMain());
+            await presentPanel(tgUserId, token, msg.chat.id, screenMain(linked.guildId));
           } else {
             await presentPanel(tgUserId, token, msg.chat.id, {
               text: [
@@ -1171,7 +1179,7 @@ export function startTelegramSidecar(client: Client): void {
             discordUserId: codeRow.discordUserId,
             linkedAtMs: Date.now(),
           });
-          await presentPanel(tgUserId, token, msg.chat.id, screenMain());
+          await presentPanel(tgUserId, token, msg.chat.id, screenMain(codeRow.guildId));
           continue;
         }
         if (cmd === "work" || cmd === "w") {

@@ -14,7 +14,7 @@ import {
   CAR_TRADE_IN_RATE,
   HOUSING_CALENDAR_MONTH_MS,
   MS_PER_DAY,
-  PET_MODELS,
+  petsForSale,
   PHONE_SELL_REFUND_RATE,
   PHONE_TRADE_IN_RATE,
   apartmentShopShortLabel,
@@ -35,11 +35,6 @@ import {
   type HousingRentPlan,
 } from "./economyCatalog.js";
 import {
-  SHOP_CAR_PLATE_HINT_LINES,
-  SHOP_PLATE_CHANGE_DIGITS_BASE_RUB,
-  SHOP_PLATE_CHANGE_LETTERS_BASE_RUB,
-  SHOP_PLATE_CHANGE_REGION_BASE_RUB,
-  SHOP_PLATE_REGISTER_BASE_RUB,
   formatVehiclePlate,
   formatVehiclePlateFromUser,
   type VehiclePlateParts,
@@ -52,11 +47,6 @@ import {
   type PlateShopLastRoll,
 } from "./economyPlatePrestige.js";
 import {
-  SHOP_SIM_CHANGE_LAST_BASE_RUB,
-  SHOP_SIM_CHANGE_MID_BASE_RUB,
-  SHOP_SIM_CHANGE_OPERATOR_BASE_RUB,
-  SHOP_SIM_REGISTER_BASE_RUB,
-  SHOP_SIM_START_BALANCE_RUB,
   formatSimNumber,
   formatSimNumberFromUser,
   parseSimNumberParts,
@@ -107,13 +97,22 @@ import {
   inflatedCatalogCarPrice,
   inflatedCatalogPhonePrice,
   inflatedHousingRentPrice,
-  scaledEconomyExpense,
+  quoteShopPrice,
   scaledEconomyPsIncome,
-  scaledShopPrice,
 } from "./economyMacro.js";
 import { remitShopPurchaseVatToTreasury } from "./taxTreasury.js";
 import { getEconomyUser, listEconomyUsers, patchEconomyUser, updateEconomyUser, type EconomyUser } from "./userStore.js";
 import { selectedShopTradeUids } from "./shopTradeDraft.js";
+import { menuHidden, menuLabel } from "./shopCatalog.js";
+import { SHOP_HUB, UI } from "../ui/copy.js";
+import {
+  detailsNavBottomRow,
+  ECON_BUTTON_MENU,
+  ECON_NAV_BACK_TO_MENU,
+  menuOnlyRow,
+  navBottomRow,
+} from "../ui/discordNav.js";
+import { PANEL_COLOR } from "../ui/theme.js";
 export {
   attachVehiclePlateToCar,
   changeVehiclePlateDigits,
@@ -142,27 +141,11 @@ export {
   syncVehiclePlatePrestige,
 } from "./economyShopActions.js";
 
-const PANEL_COLOR = 0x2b2d31;
+export { ECON_BUTTON_MENU, ECON_NAV_BACK_TO_MENU };
 
-/** То же, что `ECON_BUTTON_MENU` в `panel.ts`. */
-export const ECON_BUTTON_MENU = "econ:menu";
-
-/**
- * «Назад» на экранах, где назад = главное меню.
- * Discord запрещает два кнопки с одним customId в одном сообщении, поэтому не `econ:menu`.
- */
-export const ECON_NAV_BACK_TO_MENU = "econ:nav:backMenu";
-
-function shopNavBackCustomId(backId: string): string {
-  return backId === ECON_BUTTON_MENU ? ECON_NAV_BACK_TO_MENU : backId;
-}
-
-/** Нижний ряд: «Назад» и «Главное меню» рядом (всегда последний ряд). */
-export function shopNavBottomRow(backId: string, backLabel = "Назад"): ActionRowBuilder<ButtonBuilder> {
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(shopNavBackCustomId(backId)).setLabel(backLabel).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-  );
+/** Нижний ряд: «Назад» и «Меню» (всегда последний ряд). */
+export function shopNavBottomRow(backId: string, backLabel: string = UI.BACK): ActionRowBuilder<ButtonBuilder> {
+  return navBottomRow(backId, backLabel);
 }
 
 export function buildShopNoticeEmbed(title: string, body: string): EmbedBuilder {
@@ -181,7 +164,7 @@ function shopShortageLine(have: number, need: number): string | undefined {
 }
 
 function tradeConfirmLabel(net: number, selectedCount: number): string {
-  if (selectedCount === 0) return "Подтвердить обмен";
+  if (selectedCount === 0) return UI.CONFIRM_TRADE;
   if (net > 0) return `Подтвердить · оплата ${fmt(net)} ₽`;
   if (net < 0) return `Подтвердить · возврат ${fmt(-net)} ₽`;
   return "Подтвердить · без доплаты";
@@ -190,17 +173,17 @@ function tradeConfirmLabel(net: number, selectedCount: number): string {
 function shopDetailsNavBottomRow(
   detailsId: string,
   backId: string,
-  backLabel = "Назад",
+  backLabel: string = UI.BACK,
 ): ActionRowBuilder<ButtonBuilder> {
-  return new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder().setCustomId(detailsId).setLabel("Условия").setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(shopNavBackCustomId(backId)).setLabel(backLabel).setStyle(ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId(ECON_BUTTON_MENU).setLabel("Главное меню").setStyle(ButtonStyle.Secondary),
-  );
+  return detailsNavBottomRow(detailsId, backId, backLabel);
 }
 
 export const ECON_SHOP_HUB = "econ:shop:hub";
 export const ECON_SHOP_PHONE = "econ:shop:phone";
+export const ECON_SHOP_PHONE_PAGE_PREFIX = "econ:shop:phPg:";
+export const ECON_SHOP_CAR_PAGE_PREFIX = "econ:shop:crPg:";
+export const ECON_SHOP_HOUSE_PAGE_PREFIX = "econ:shop:hsPg:";
+export const ECON_SHOP_PET_PAGE_PREFIX = "econ:shop:ptPg:";
 export const ECON_SHOP_PHONE_ORIGIN_PREFIX = "econ:shop:phone:";
 export const ECON_SHOP_PHONE_BUY_PREFIX = "econ:shop:phoneBuy:";
 export const ECON_SHOP_PHONE_FULL_PREFIX = "econ:shop:phoneFull:";
@@ -450,18 +433,46 @@ export function shopItemButtonLabel(short: string, cost: number): string {
   return `${s} · ${fmt(cost)} ₽`;
 }
 
+function catalogWindow<T>(items: T[], perRow: number, reservedRows: number, page: number): { slice: T[]; page: number; pages: number } {
+  let itemRows = Math.max(1, 5 - reservedRows);
+  let perPage = itemRows * perRow;
+  let pages = Math.max(1, Math.ceil(items.length / perPage));
+  if (pages > 1) {
+    itemRows = Math.max(1, 5 - reservedRows - 1);
+    perPage = itemRows * perRow;
+    pages = Math.max(1, Math.ceil(items.length / perPage));
+  }
+  const current = Math.min(pages - 1, Math.max(0, Math.floor(page)));
+  return { slice: items.slice(current * perPage, current * perPage + perPage), page: current, pages };
+}
+
+function catalogPagerRow(prefix: string, origin: string, page: number, pages: number): ActionRowBuilder<ButtonBuilder> {
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`${prefix}${origin}:${page - 1}`)
+      .setLabel("←")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page <= 0),
+    new ButtonBuilder().setCustomId(`${prefix}${origin}:${page}`).setLabel(`${page + 1}/${pages}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
+    new ButtonBuilder()
+      .setCustomId(`${prefix}${origin}:${page + 1}`)
+      .setLabel("→")
+      .setStyle(ButtonStyle.Secondary)
+      .setDisabled(page >= pages - 1),
+  );
+}
+
 export function buildShopHubEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
-    .setTitle("Магазин")
+    .setTitle(SHOP_HUB.title)
     .setDescription(
       [
         `Баланс: **${fmt(u.rubles)}** ₽`,
         `Престиж: **${fmt(u.prestigePoints ?? 0)}** · Быт: **${fmt(u.domesticPoints ?? 0)}**`,
         "",
-        "**Советское** = быт. **Заморское** и госномер = престиж к ₽ (от очков престижа). Полный набор лучших покупок — **×2**.",
-        "Подробные условия зачёта и продажи — внутри каждого раздела.",
+        SHOP_HUB.hint,
       ].join("\n"),
     );
 }
@@ -476,21 +487,38 @@ export const ECON_SHOP_SIM_TOPUP_OPEN = "econ:shop:sim:topupOpen";
 export const ECON_SHOP_SIM_DETAILS = "econ:shop:sim:details";
 export const ECON_SHOP_LOTTERY = "econ:shop:lottery";
 export const ECON_SHOP_APPEARANCE = "econ:shop:appearance";
+export const ECON_SHOP_VOICE = "econ:shop:voice";
+
+function hubButton(guildId: string, menuId: string, customId: string): ButtonBuilder | undefined {
+  if (menuHidden(guildId, menuId)) return undefined;
+  return new ButtonBuilder().setCustomId(customId).setLabel(menuLabel(guildId, menuId)).setStyle(ButtonStyle.Secondary);
+}
+
+function hubRow(guildId: string, buttons: [string, string][]): ActionRowBuilder<ButtonBuilder> | undefined {
+  const visible = buttons
+    .map(([menuId, customId]) => hubButton(guildId, menuId, customId))
+    .filter((button): button is ButtonBuilder => Boolean(button));
+  if (visible.length === 0) return undefined;
+  return new ActionRowBuilder<ButtonBuilder>().addComponents(...visible);
+}
 
 export function buildShopHubRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_PHONE).setLabel("Телефон").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_SHOP_CAR).setLabel("Авто").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE).setLabel("Жильё").setStyle(ButtonStyle.Secondary),
-    ),
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_ANIMALS).setLabel("Животные").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_SHOP_LOTTERY).setLabel("Лотерея").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_SHOP_APPEARANCE).setLabel("Оформление").setStyle(ButtonStyle.Secondary),
-    ),
-    shopNavBottomRow(ECON_BUTTON_MENU),
-  ];
+  const gid = member.guild.id;
+  const rows = [
+    hubRow(gid, [
+      ["hub.phone", ECON_SHOP_PHONE],
+      ["hub.car", ECON_SHOP_CAR],
+      ["hub.house", ECON_SHOP_HOUSE],
+    ]),
+    hubRow(gid, [
+      ["hub.animals", ECON_SHOP_ANIMALS],
+      ["hub.lottery", ECON_SHOP_LOTTERY],
+      ["hub.appearance", ECON_SHOP_APPEARANCE],
+    ]),
+    hubRow(gid, [["hub.voice", ECON_SHOP_VOICE]]),
+  ].filter((row): row is ActionRowBuilder<ButtonBuilder> => Boolean(row));
+  rows.push(menuOnlyRow());
+  return rows;
 }
 
 export function buildShopOriginPickEmbed(
@@ -501,7 +529,7 @@ export function buildShopOriginPickEmbed(
   const u = getEconomyUser(member.guild.id, member.id);
   const lines = [`Баланс: **${fmt(u.rubles)}** ₽`, "", ...shopBranchOwnershipBlock(u, kind)];
   if (kind === "car") {
-    lines.push("", ...SHOP_CAR_PLATE_HINT_LINES);
+    lines.push("", "Госномер — отдельный раздел (если есть авто).");
   }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle(title).setDescription(lines.join("\n"));
 }
@@ -512,26 +540,31 @@ export function buildShopOriginPickRows(
   backId: string,
 ): ActionRowBuilder<ButtonBuilder>[] {
   const prefix = kind === "phone" ? ECON_SHOP_PHONE_ORIGIN_PREFIX : ECON_SHOP_CAR_ORIGIN_PREFIX;
-  const rows: ActionRowBuilder<ButtonBuilder>[] = [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(`${prefix}soviet`).setLabel("Советское").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`${prefix}foreign`).setLabel("Заморское").setStyle(ButtonStyle.Secondary),
-    ),
-  ];
-  if (kind === "phone") {
+  const gid = member.guild.id;
+  const originButtons = [
+    menuHidden(gid, `${kind}.soviet`)
+      ? undefined
+      : new ButtonBuilder().setCustomId(`${prefix}soviet`).setLabel(menuLabel(gid, `${kind}.soviet`)).setStyle(ButtonStyle.Primary),
+    menuHidden(gid, `${kind}.foreign`)
+      ? undefined
+      : new ButtonBuilder().setCustomId(`${prefix}foreign`).setLabel(menuLabel(gid, `${kind}.foreign`)).setStyle(ButtonStyle.Secondary),
+  ].filter((button): button is ButtonBuilder => Boolean(button));
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (originButtons.length > 0) rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...originButtons));
+  if (kind === "phone" && !menuHidden(gid, "phone.sim")) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
-        new ButtonBuilder().setCustomId(ECON_SHOP_SIM).setLabel("Сим-карта").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId(ECON_SHOP_SIM).setLabel(menuLabel(gid, "phone.sim")).setStyle(ButtonStyle.Secondary),
       ),
     );
   }
-  if (kind === "car") {
+  if (kind === "car" && !menuHidden(gid, "car.plate")) {
     const u = getEconomyUser(member.guild.id, member.id);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder()
           .setCustomId(ECON_SHOP_PLATE)
-          .setLabel("Госномер")
+          .setLabel(menuLabel(gid, "car.plate"))
           .setStyle(ButtonStyle.Secondary)
           .setDisabled(!userCanOpenPlateShop(u)),
       ),
@@ -541,8 +574,8 @@ export function buildShopOriginPickRows(
   return rows;
 }
 
-function inflatedPlateShopPrice(guildId: string, baseRub: number): number {
-  return scaledShopPrice(guildId, baseRub);
+function inflatedPlateShopPrice(guildId: string, key: "plate:reg" | "plate:dig" | "plate:let" | "plate:rgn"): number {
+  return quoteShopPrice(guildId, key);
 }
 
 export function buildShopPlateEmbed(member: GuildMember, lastRoll?: PlateShopLastRoll): EmbedBuilder {
@@ -638,10 +671,10 @@ export function buildShopPlateCarRows(member: GuildMember, carUid: string): Acti
   const car = findOwnedCar(u, carUid);
   const hasPlate = Boolean(car && carPlateParts(car));
   const unattached = listUnattachedPlates(u);
-  const digCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
-  const letCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
-  const regioCost = inflatedPlateShopPrice(gid, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
-  const regCost = inflatedPlateShopPrice(gid, SHOP_PLATE_REGISTER_BASE_RUB);
+  const digCost = inflatedPlateShopPrice(gid, "plate:dig");
+  const letCost = inflatedPlateShopPrice(gid, "plate:let");
+  const regioCost = inflatedPlateShopPrice(gid, "plate:rgn");
+  const regCost = inflatedPlateShopPrice(gid, "plate:reg");
 
   const changeRow = new ActionRowBuilder<ButtonBuilder>().addComponents(
     new ButtonBuilder()
@@ -725,7 +758,7 @@ export function buildShopCarSellConfirmRows(uid?: string): ActionRowBuilder<Butt
         .setLabel("Продать")
         .setStyle(ButtonStyle.Danger),
     ),
-    shopNavBottomRow(uid ? ECON_SHOP_CAR_SELL : ECON_SHOP_CAR_SELL_CANCEL, "Отменить"),
+    shopNavBottomRow(uid ? ECON_SHOP_CAR_SELL : ECON_SHOP_CAR_SELL_CANCEL, UI.CANCEL),
   ];
 }
 
@@ -739,7 +772,7 @@ function buildShopConfirmRows(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(confirmId).setLabel(confirmLabel).setStyle(confirmStyle),
     ),
-    shopNavBottomRow(cancelBackId, "Отменить"),
+    shopNavBottomRow(cancelBackId, UI.CANCEL),
   ];
 }
 
@@ -778,11 +811,11 @@ export function buildShopPhoneBuyConfirmRows(member: GuildMember, pid: string, o
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_PHONE_FULL_PREFIX}${pid}`)
-        .setLabel("Купить за полную стоимость")
+        .setLabel(UI.BUY_FULL)
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_PHONE_TRADE_PREFIX}${pid}`)
-        .setLabel("Обменять свою")
+        .setLabel(UI.TRADE)
         .setStyle(ButtonStyle.Primary)
         .setDisabled(!hasTrade),
     ),
@@ -824,11 +857,11 @@ export function buildShopCarBuyConfirmRows(member: GuildMember, cid: string, ori
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_CAR_FULL_PREFIX}${cid}`)
-        .setLabel("Купить за полную стоимость")
+        .setLabel(UI.BUY_FULL)
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_CAR_TRADE_PREFIX}${cid}`)
-        .setLabel("Обменять свою")
+        .setLabel(UI.TRADE)
         .setStyle(ButtonStyle.Primary)
         .setDisabled(!hasTrade),
     ),
@@ -878,11 +911,11 @@ export function buildShopApartmentBuyConfirmRows(member: GuildMember, aid: strin
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_APT_FULL_PREFIX}${aid}`)
-        .setLabel("Купить за полную стоимость")
+        .setLabel(UI.BUY_FULL)
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_APT_TRADE_PREFIX}${aid}`)
-        .setLabel("Обменять свою")
+        .setLabel(UI.TRADE)
         .setStyle(ButtonStyle.Primary)
         .setDisabled(!hasTrade),
     ),
@@ -1156,7 +1189,7 @@ export function buildShopAptTradePickRows(member: GuildMember, aid: string): Act
 
 export function buildShopPhoneSellPickEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const lines = ["Выберите телефон для продажи:", ""];
+  const lines = ["Выбери телефон для продажи:", ""];
   for (const rec of listOwnedPhones(u)) {
     const cur = getPhoneDef(rec.id);
     if (!cur) continue;
@@ -1191,7 +1224,7 @@ export function buildShopPhoneSellPickRows(member: GuildMember): ActionRowBuilde
 
 export function buildShopCarSellPickEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const lines = ["Выберите авто для продажи. Госномер уйдёт в неприкрепленные.", ""];
+  const lines = ["Выбери авто для продажи. Госномер уйдёт в неприкреплённые.", ""];
   for (const rec of listOwnedCars(u)) {
     const cur = getCarDef(rec.id);
     if (!cur) continue;
@@ -1226,7 +1259,7 @@ export function buildShopCarSellPickRows(member: GuildMember): ActionRowBuilder<
 
 export function buildShopAptSellPickEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const lines = ["Выберите жильё для продажи:", ""];
+  const lines = ["Выбери жильё для продажи:", ""];
   for (const rec of listOwnedApartmentsByOrigin(u, origin)) {
     const cur = getApartmentDef(rec.id);
     if (!cur) continue;
@@ -1267,7 +1300,7 @@ export function buildShopPlateAttachEmbed(member: GuildMember, carUid: string): 
   const lines = [
     `Авто: ${formatCarWithPlateLine(car)}`,
     "",
-    "Выберите неприкрепленный номер:",
+    "Выбери неприкреплённый номер:",
     unattached.length ? unattached.map((p) => `• **${formatVehiclePlate(p)}**`).join("\n") : "• нет",
   ];
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Прикрепить госномер").setDescription(lines.join("\n"));
@@ -1317,7 +1350,7 @@ export function buildShopPlateAttachConfirmRows(carUid: string, parts: VehiclePl
         .setLabel("Прикрепить")
         .setStyle(ButtonStyle.Success),
     ),
-    shopNavBottomRow(`${ECON_SHOP_PLATE_ATT_PREFIX}${carUid}`, "Отменить"),
+    shopNavBottomRow(`${ECON_SHOP_PLATE_ATT_PREFIX}${carUid}`, UI.CANCEL),
   ];
 }
 
@@ -1341,7 +1374,7 @@ export function buildShopPlateDetachConfirmRows(carUid: string): ActionRowBuilde
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(`${ECON_SHOP_PLATE_DET_OK_PREFIX}${carUid}`).setLabel("Снять").setStyle(ButtonStyle.Danger),
     ),
-    shopNavBottomRow(`${ECON_SHOP_PLATE_CAR_PREFIX}${carUid}`, "Отменить"),
+    shopNavBottomRow(`${ECON_SHOP_PLATE_CAR_PREFIX}${carUid}`, UI.CANCEL),
   ];
 }
 
@@ -1445,21 +1478,32 @@ export function buildShopHousePickEmbed(member: GuildMember): EmbedBuilder {
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Жильё").setDescription(lines.join("\n"));
 }
 
-export function buildShopHousePickRows(backId: string): ActionRowBuilder<ButtonBuilder>[] {
-  return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${ECON_SHOP_HOUSE_ORIGIN_PREFIX}soviet`)
-        .setLabel("Советское")
-        .setStyle(ButtonStyle.Primary),
-      new ButtonBuilder()
-        .setCustomId(`${ECON_SHOP_HOUSE_ORIGIN_PREFIX}foreign`)
-        .setLabel("Заморское")
-        .setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(ECON_SHOP_HOUSE_RENT_MENU).setLabel("Аренда").setStyle(ButtonStyle.Success),
-    ),
-    shopNavBottomRow(backId),
-  ];
+export function buildShopHousePickRows(backId: string, guildId?: string): ActionRowBuilder<ButtonBuilder>[] {
+  const gid = guildId ?? "";
+  const buttons = [
+    !gid || !menuHidden(gid, "house.soviet")
+      ? new ButtonBuilder()
+          .setCustomId(`${ECON_SHOP_HOUSE_ORIGIN_PREFIX}soviet`)
+          .setLabel(gid ? menuLabel(gid, "house.soviet") : "Советское")
+          .setStyle(ButtonStyle.Primary)
+      : undefined,
+    !gid || !menuHidden(gid, "house.foreign")
+      ? new ButtonBuilder()
+          .setCustomId(`${ECON_SHOP_HOUSE_ORIGIN_PREFIX}foreign`)
+          .setLabel(gid ? menuLabel(gid, "house.foreign") : "Заморское")
+          .setStyle(ButtonStyle.Secondary)
+      : undefined,
+    !gid || !menuHidden(gid, "house.rent")
+      ? new ButtonBuilder()
+          .setCustomId(ECON_SHOP_HOUSE_RENT_MENU)
+          .setLabel(gid ? menuLabel(gid, "house.rent") : "Аренда")
+          .setStyle(ButtonStyle.Success)
+      : undefined,
+  ].filter((button): button is ButtonBuilder => Boolean(button));
+  const rows: ActionRowBuilder<ButtonBuilder>[] = [];
+  if (buttons.length > 0) rows.push(new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons));
+  rows.push(shopNavBottomRow(backId));
+  return rows;
 }
 
 export function buildShopHouseRentEmbed(member: GuildMember): EmbedBuilder {
@@ -1522,7 +1566,7 @@ export function parseOriginFromSuffix(suffix: string): CatalogOrigin | undefined
 export function buildShopPhoneListEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const owned = listOwnedPhonesByOrigin(u, origin);
-  const catalogLines = phonesByOrigin(origin).map((p) => {
+  const catalogLines = phonesByOrigin(origin, member.guild.id).map((p) => {
     const price = inflatedCatalogPhonePrice(member.guild.id, p.id);
     return `• **${p.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(p)}`;
   });
@@ -1543,7 +1587,7 @@ export function buildShopPhoneListEmbed(member: GuildMember, origin: CatalogOrig
 }
 
 export function buildShopPhoneDetailsEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
-  const lines = phonesByOrigin(origin).map((p) => {
+  const lines = phonesByOrigin(origin, member.guild.id).map((p) => {
     const price = inflatedCatalogPhonePrice(member.guild.id, p.id);
     return `• **${p.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(p)}`;
   });
@@ -1553,19 +1597,21 @@ export function buildShopPhoneDetailsEmbed(member: GuildMember, origin: CatalogO
     .setDescription(["Полная цена модели и статы от покупки (без зачёта).", "", ...lines].join("\n"));
 }
 
-export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigin, page = 0): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  if (listOwnedPhonesByOrigin(u, origin).length > 0) {
+  const hasSell = listOwnedPhonesByOrigin(u, origin).length > 0;
+  if (hasSell) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(ECON_SHOP_PHONE_SELL).setLabel("Продать телефон").setStyle(ButtonStyle.Danger),
       ),
     );
   }
-  const list = phonesByOrigin(origin);
-  for (let i = 0; i < list.length; i += 3) {
-    const slice = list.slice(i, i + 3);
+  const list = phonesByOrigin(origin, member.guild.id);
+  const window = catalogWindow(list, 3, (hasSell ? 1 : 0) + 1, page);
+  for (let i = 0; i < window.slice.length; i += 3) {
+    const slice = window.slice.slice(i, i + 3);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((p) => {
@@ -1580,6 +1626,7 @@ export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigi
       ),
     );
   }
+  if (window.pages > 1) rows.push(catalogPagerRow(ECON_SHOP_PHONE_PAGE_PREFIX, origin, window.page, window.pages));
   rows.push(shopDetailsNavBottomRow(`${ECON_SHOP_PHONE_DETAILS_PREFIX}${origin}`, ECON_SHOP_PHONE));
   return rows;
 }
@@ -1587,7 +1634,7 @@ export function buildShopPhoneListRows(member: GuildMember, origin: CatalogOrigi
 export function buildShopCarListEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const owned = listOwnedCarsByOrigin(u, origin);
-  const catalogLines = carsByOrigin(origin).map((c) => {
+  const catalogLines = carsByOrigin(origin, member.guild.id).map((c) => {
     const price = inflatedCatalogCarPrice(member.guild.id, c.id);
     const cd = (c.courierShiftCdMs / 3600000).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
     return `• **${c.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(c)} · доставка КД **${cd} ч**`;
@@ -1609,7 +1656,7 @@ export function buildShopCarListEmbed(member: GuildMember, origin: CatalogOrigin
 }
 
 export function buildShopCarDetailsEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
-  const lines = carsByOrigin(origin).map((c) => {
+  const lines = carsByOrigin(origin, member.guild.id).map((c) => {
     const price = inflatedCatalogCarPrice(member.guild.id, c.id);
     const cd = (c.courierShiftCdMs / 3600000).toLocaleString("ru-RU", { maximumFractionDigits: 2 });
     return `• **${c.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(c)} · доставка КД **${cd} ч**`;
@@ -1620,19 +1667,21 @@ export function buildShopCarDetailsEmbed(member: GuildMember, origin: CatalogOri
     .setDescription(["Полная цена модели и статы от покупки (без зачёта). Госномер при обмене переходит в неприкрепленные.", "", ...lines].join("\n"));
 }
 
-export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin, page = 0): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  if (listOwnedCarsByOrigin(u, origin).length > 0) {
+  const hasSell = listOwnedCarsByOrigin(u, origin).length > 0;
+  if (hasSell) {
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId(ECON_SHOP_CAR_SELL).setLabel("Продать авто").setStyle(ButtonStyle.Danger),
       ),
     );
   }
-  const list = carsByOrigin(origin);
-  for (let i = 0; i < list.length; i += 3) {
-    const slice = list.slice(i, i + 3);
+  const list = carsByOrigin(origin, member.guild.id);
+  const window = catalogWindow(list, 3, (hasSell ? 1 : 0) + 1, page);
+  for (let i = 0; i < window.slice.length; i += 3) {
+    const slice = window.slice.slice(i, i + 3);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((c) => {
@@ -1647,6 +1696,7 @@ export function buildShopCarListRows(member: GuildMember, origin: CatalogOrigin)
       ),
     );
   }
+  if (window.pages > 1) rows.push(catalogPagerRow(ECON_SHOP_CAR_PAGE_PREFIX, origin, window.page, window.pages));
   rows.push(shopDetailsNavBottomRow(`${ECON_SHOP_CAR_DETAILS_PREFIX}${origin}`, ECON_SHOP_CAR));
   return rows;
 }
@@ -1675,7 +1725,7 @@ export function buildShopHouseListEmbed(member: GuildMember, origin: CatalogOrig
   }
   lines.push(...shopApartmentTradeInLines(), shopPlainSellLine(APARTMENT_SELL_REFUND_RATE));
   lines.push("На кнопках — **полная** цена. После нажатия можно купить ещё одну или обменять свою.");
-  const catalogLines = apartmentsByOrigin(origin).map((a) => {
+  const catalogLines = apartmentsByOrigin(origin, gid).map((a) => {
     const price = inflatedCatalogApartmentPrice(gid, a.id);
     const utility = inflatedApartmentUtilityRub(gid, a.id);
     return `• **${a.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(a)} · ЖКХ **${fmt(utility)}** ₽/мес.`;
@@ -1686,7 +1736,7 @@ export function buildShopHouseListEmbed(member: GuildMember, origin: CatalogOrig
 
 export function buildShopHouseDetailsEmbed(member: GuildMember, origin: CatalogOrigin): EmbedBuilder {
   const gid = member.guild.id;
-  const lines = apartmentsByOrigin(origin).map((a) => {
+  const lines = apartmentsByOrigin(origin, gid).map((a) => {
     const price = inflatedCatalogApartmentPrice(gid, a.id);
     const utility = inflatedApartmentUtilityRub(gid, a.id);
     return `• **${a.label}** — **${fmt(price)}** ₽ · ${catalogStatGainLabel(a)} · ЖКХ **${fmt(utility)}** ₽/мес.`;
@@ -1704,7 +1754,7 @@ export function buildShopHouseDetailsEmbed(member: GuildMember, origin: CatalogO
     );
 }
 
-export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigin): ActionRowBuilder<ButtonBuilder>[] {
+export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigin, page = 0): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
   if (listOwnedApartmentsByOrigin(u, origin).length > 0) {
@@ -1717,9 +1767,10 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
       ),
     );
   }
-  const list = apartmentsByOrigin(origin);
-  for (let i = 0; i < list.length; i += 4) {
-    const slice = list.slice(i, i + 4);
+  const list = apartmentsByOrigin(origin, member.guild.id);
+  const window = catalogWindow(list, 4, (rows.length > 0 ? 1 : 0) + 1, page);
+  for (let i = 0; i < window.slice.length; i += 4) {
+    const slice = window.slice.slice(i, i + 4);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((a) => {
@@ -1738,6 +1789,7 @@ export function buildShopHouseListRows(member: GuildMember, origin: CatalogOrigi
       ),
     );
   }
+  if (window.pages > 1) rows.push(catalogPagerRow(ECON_SHOP_HOUSE_PAGE_PREFIX, origin, window.page, window.pages));
   rows.push(shopDetailsNavBottomRow(`${ECON_SHOP_HOUSE_DETAILS_PREFIX}${origin}`, ECON_SHOP_HOUSE));
   return rows;
 }
@@ -1773,8 +1825,8 @@ export function buildShopAnimalsRows(member: GuildMember): ActionRowBuilder<Butt
 
 export function buildShopAnimalsBuyEmbed(member: GuildMember): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
-  const catalog = PET_MODELS.map((p) => {
-    const cost = scaledShopPrice(member.guild.id, p.purchaseRub);
+  const catalog = petsForSale(member.guild.id).map((p) => {
+    const cost = quoteShopPrice(member.guild.id, `pet:${p.id}`);
     const ps = scaledEconomyPsIncome(member.guild.id, p.dailyPsRub);
     const owned = userOwnsPetType(u, p.id) ? " · **уже есть**" : "";
     return `• **${p.label}** — **${fmt(cost)}** ₽ · **+${fmt(ps)} СР/сут**${owned}`;
@@ -1794,9 +1846,9 @@ export function buildShopAnimalsBuyEmbed(member: GuildMember): EmbedBuilder {
 }
 
 export function buildShopAnimalsDetailsEmbed(member: GuildMember): EmbedBuilder {
-  const lines = PET_MODELS.map((p) => {
-    const cost = scaledShopPrice(member.guild.id, p.purchaseRub);
-    const upkeep = scaledEconomyExpense(member.guild.id, p.dailyUpkeepRub);
+  const lines = petsForSale(member.guild.id).map((p) => {
+    const cost = quoteShopPrice(member.guild.id, `pet:${p.id}`);
+    const upkeep = quoteShopPrice(member.guild.id, `petu:${p.id}`);
     const ps = scaledEconomyPsIncome(member.guild.id, p.dailyPsRub);
     return [
       `• **${p.label}** — **${fmt(cost)}** ₽ · содержание **${fmt(upkeep)}** ₽/сут · **+${fmt(ps)} СР/сут**`,
@@ -1809,15 +1861,17 @@ export function buildShopAnimalsDetailsEmbed(member: GuildMember): EmbedBuilder 
     .setDescription(["Полная цена, без зачёта. Можно держать несколько **разных** типов.", "", ...lines].join("\n"));
 }
 
-export function buildShopAnimalsBuyRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
+export function buildShopAnimalsBuyRows(member: GuildMember, page = 0): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
-  for (let i = 0; i < PET_MODELS.length; i += 3) {
-    const slice = PET_MODELS.slice(i, i + 3);
+  const list = petsForSale(member.guild.id);
+  const window = catalogWindow(list, 3, 1, page);
+  for (let i = 0; i < window.slice.length; i += 3) {
+    const slice = window.slice.slice(i, i + 3);
     rows.push(
       new ActionRowBuilder<ButtonBuilder>().addComponents(
         ...slice.map((p) => {
-          const cost = scaledShopPrice(member.guild.id, p.purchaseRub);
+          const cost = quoteShopPrice(member.guild.id, `pet:${p.id}`);
           const ps = scaledEconomyPsIncome(member.guild.id, p.dailyPsRub);
           const block = petOwnershipBlockReason(u, p);
           const base = shopItemButtonLabel(p.label, cost);
@@ -1831,6 +1885,7 @@ export function buildShopAnimalsBuyRows(member: GuildMember): ActionRowBuilder<B
       ),
     );
   }
+  if (window.pages > 1) rows.push(catalogPagerRow(ECON_SHOP_PET_PAGE_PREFIX, "all", window.page, window.pages));
   rows.push(shopDetailsNavBottomRow(ECON_SHOP_ANIMALS_DETAILS, ECON_SHOP_ANIMALS));
   return rows;
 }
@@ -1841,7 +1896,7 @@ export function buildShopAnimalsOwnedEmbed(member: GuildMember): EmbedBuilder {
   const lines = [
     pets.length
       ? pets.map((p) => `• ${formatOwnedPetLine(p)}`).join("\n")
-      : "Пока **нет** питомцев. Купите в разделе **Купить**.",
+      : "Пока **нет** питомцев. Купи в разделе **Купить**.",
   ];
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Животные · свои").setDescription(lines.join("\n"));
 }
@@ -1871,7 +1926,7 @@ export function buildShopPetViewEmbed(member: GuildMember, uid: string): EmbedBu
   if (!rec) return undefined;
   const def = getPetDef(rec.id);
   const gid = member.guild.id;
-  const upkeep = def ? scaledEconomyExpense(gid, def.dailyUpkeepRub) : 0;
+  const upkeep = def ? quoteShopPrice(gid, `petu:${def.id}`) : 0;
   const ps = def ? scaledEconomyPsIncome(gid, def.dailyPsRub) : 0;
   const lines = [
     `Тип: **${def?.label ?? rec.id}**`,
@@ -1934,7 +1989,7 @@ export function purchasePet(member: GuildMember, petId: string): { ok: true } | 
   const u = getEconomyUser(member.guild.id, member.id);
   const block = petOwnershipBlockReason(u, def);
   if (block) return { ok: false, reply: block };
-  const cost = scaledShopPrice(member.guild.id, def.purchaseRub);
+  const cost = quoteShopPrice(member.guild.id, `pet:${def.id}`);
   if (u.rubles < cost) return { ok: false, reply: shopShortageLine(u.rubles, cost) ?? "Не хватает ₽." };
   let applied = false;
   updateEconomyUser(member.guild.id, member.id, (curU) => {
@@ -1971,8 +2026,8 @@ export function renameOwnedPet(
   return { ok: true, name };
 }
 
-function inflatedSimShopPrice(guildId: string, baseRub: number): number {
-  return scaledShopPrice(guildId, baseRub);
+function inflatedSimShopPrice(guildId: string, key: "sim:op" | "sim:mid" | "sim:last" | "sim:reg" | "sim:start"): number {
+  return quoteShopPrice(guildId, key);
 }
 
 type ShopSimEmbedOpts = { showHints?: boolean };
@@ -1997,10 +2052,10 @@ function shopSimStatusLines(member: GuildMember, opts: ShopSimEmbedOpts = {}): s
 export function buildShopSimEmbed(member: GuildMember, lastRoll?: SimShopLastRoll): EmbedBuilder {
   const u = getEconomyUser(member.guild.id, member.id);
   const hasSim = userHasSimNumber(u);
-  const regCost = SHOP_SIM_REGISTER_BASE_RUB;
+  const regCost = quoteShopPrice(member.guild.id, "sim:reg");
   const lines = [...shopSimStatusLines(member, { showHints: !hasSim })];
   if (!hasSim) {
-    lines.push("", `Первая сим-карта — **${regCost} ₽** (+**${SHOP_SIM_START_BALANCE_RUB} ₽** на баланс сим).`);
+    lines.push("", `Первая сим-карта — **${regCost} ₽** (+**${quoteShopPrice(member.guild.id, "sim:start")} ₽** на баланс сим).`);
   }
   if (lastRoll) lines.push(...formatSimRollEmbedFooter(lastRoll));
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Сим-карта").setDescription(lines.join("\n"));
@@ -2011,7 +2066,7 @@ export function buildShopSimChangeEmbed(member: GuildMember, lastRoll?: SimShopL
     ...shopSimStatusLines(member),
     "",
     "Престиж = блоки (код/середина/конец) + весь номер + множители сочетаний.",
-    "Выберите блок. Два других могут совпасть с чужим номером.",
+    "Выбери блок. Два других могут совпасть с чужим номером.",
   ];
   if (lastRoll) lines.push(...formatSimRollEmbedFooter(lastRoll));
   return new EmbedBuilder()
@@ -2034,7 +2089,7 @@ export function buildShopSimDetailsEmbed(member: GuildMember): EmbedBuilder {
 export function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const hasSim = userHasSimNumber(u);
-  const regCost = SHOP_SIM_REGISTER_BASE_RUB;
+  const regCost = quoteShopPrice(member.guild.id, "sim:reg");
   const rows: ActionRowBuilder<ButtonBuilder>[] = [];
 
   if (!hasSim) {
@@ -2068,7 +2123,7 @@ export function buildShopSimRows(member: GuildMember): ActionRowBuilder<ButtonBu
       new ButtonBuilder().setCustomId(ECON_SHOP_SIM_DETAILS).setLabel("Условия").setStyle(ButtonStyle.Secondary),
     ),
   );
-  rows.push(shopNavBottomRow(ECON_SHOP_PHONE, "К телефону"));
+  rows.push(shopNavBottomRow(ECON_SHOP_PHONE, UI.TO_PHONE));
   return rows;
 }
 
@@ -2076,9 +2131,9 @@ export function buildShopSimChangeRows(member: GuildMember): ActionRowBuilder<Bu
   const u = getEconomyUser(member.guild.id, member.id);
   const gid = member.guild.id;
   const hasSim = userHasSimNumber(u);
-  const opCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_OPERATOR_BASE_RUB);
-  const midCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_MID_BASE_RUB);
-  const lastCost = inflatedSimShopPrice(gid, SHOP_SIM_CHANGE_LAST_BASE_RUB);
+  const opCost = inflatedSimShopPrice(gid, "sim:op");
+  const midCost = inflatedSimShopPrice(gid, "sim:mid");
+  const lastCost = inflatedSimShopPrice(gid, "sim:last");
 
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
@@ -2177,12 +2232,12 @@ export function registerSimNumber(
   const u = getEconomyUser(member.guild.id, member.id);
   if (!u.hasPhone) return { ok: false, reply: "Сначала купите **телефон**." };
   if (userHasSimNumber(u)) return { ok: false, reply: "Сим-карта **уже оформлена**." };
-  const cost = SHOP_SIM_REGISTER_BASE_RUB;
+  const cost = quoteShopPrice(member.guild.id, "sim:reg");
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${cost} ₽**.` };
   const taken = guildTakenSimNumberKeys(member.guild.id, member.id);
   const parts = rollUniqueSimNumberParts(taken);
   const simPatch = patchUserSimWithPrestige(member.guild.id, member.id, parts, cost, {
-    simBalanceRub: SHOP_SIM_START_BALANCE_RUB,
+    simBalanceRub: quoteShopPrice(member.guild.id, "sim:start"),
   });
   if (!simPatch.ok) return { ok: false, reply: `Нужно **${cost} ₽**.` };
   remitShopPurchaseVatToTreasury(member.guild.id, cost);
@@ -2200,7 +2255,7 @@ export function changeSimOperator(
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = parseSimNumberParts(u);
   if (!cur) return { ok: false, reply: "Сначала **оформите** симку." };
-  const cost = inflatedSimShopPrice(member.guild.id, SHOP_SIM_CHANGE_OPERATOR_BASE_RUB);
+  const cost = inflatedSimShopPrice(member.guild.id, "sim:op");
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   const taken = guildTakenSimNumberKeys(member.guild.id, member.id);
   const next = {
@@ -2220,7 +2275,7 @@ export function changeSimMid(
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = parseSimNumberParts(u);
   if (!cur) return { ok: false, reply: "Сначала **оформите** симку." };
-  const cost = inflatedSimShopPrice(member.guild.id, SHOP_SIM_CHANGE_MID_BASE_RUB);
+  const cost = inflatedSimShopPrice(member.guild.id, "sim:mid");
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   const taken = guildTakenSimNumberKeys(member.guild.id, member.id);
   const next = {
@@ -2240,7 +2295,7 @@ export function changeSimLast(
   const u = getEconomyUser(member.guild.id, member.id);
   const cur = parseSimNumberParts(u);
   if (!cur) return { ok: false, reply: "Сначала **оформите** симку." };
-  const cost = inflatedSimShopPrice(member.guild.id, SHOP_SIM_CHANGE_LAST_BASE_RUB);
+  const cost = inflatedSimShopPrice(member.guild.id, "sim:last");
   if (u.rubles < cost) return { ok: false, reply: `Нужно **${fmt(cost)}** ₽.` };
   const taken = guildTakenSimNumberKeys(member.guild.id, member.id);
   const next = {

@@ -37,7 +37,10 @@ wait_service_active() {
 
 echo "DiscordNashBot: git pull..."
 git fetch origin main >/dev/null 2>&1 || fail "нет связи с GitHub"
-git pull --ff-only origin main >/dev/null 2>&1 || git reset --hard origin/main >/dev/null 2>&1 || fail "не удалось обновить код"
+# Только fast-forward: не затираем локальные правки на сервере через reset --hard.
+if ! git pull --ff-only origin main >/dev/null 2>&1; then
+	fail "git pull --ff-only не прошёл (локальные коммиты/правки на сервере). Разрулите вручную, без reset --hard."
+fi
 
 echo "DiscordNashBot: npm ci (лог: data/deploy-last.log)..."
 : >"$LOG"

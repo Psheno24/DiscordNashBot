@@ -13,16 +13,16 @@ import { renderProfileCardPng, type ProfileCardRenderOptions } from "./profileCa
 import {
   getProfileFrameColor,
   isProfileFrameColorId,
-  PROFILE_COLOR_CHANGE_PRICE_RUB,
   PROFILE_FRAME_COLORS,
   type ProfileFrameColorId,
 } from "./profileThemes.js";
 import { shopNavBottomRow } from "./economyShopUi.js";
+import { quoteShopPrice } from "./economyMacro.js";
 import { getEconomyUser, trySpendEconomyUserRubles, updateEconomyUser } from "./userStore.js";
+import { APPEARANCE, UI } from "../ui/copy.js";
+import { PANEL_COLOR } from "../ui/theme.js";
 
 const ECON_SHOP_HUB_BACK = "econ:shop:hub";
-
-const PANEL_COLOR = 0x2b2d31;
 
 export const ECON_SHOP_APPEARANCE = "econ:shop:appearance";
 export const ECON_SHOP_APPEARANCE_CARD = "econ:shop:appearance:card";
@@ -44,41 +44,38 @@ export function buildShopAppearanceEmbed(member: GuildMember): EmbedBuilder {
     .setDescription(
       [
         `Баланс: **${fmt(u.rubles)}** ₽ · рамка **${cur.label}**`,
-        `Смена цвета — **${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)}** ₽. Фон карточки всегда **чёрный**.`,
-        "**Примерить** — превью. **Моя карточка** — досье как сейчас.",
+        `Смена цвета — **${fmt(quoteShopPrice(member.guild.id, "frame:color"))}** ₽.`,
+        "Выбери цвет — превью. **Моя карточка** — текущее досье.",
       ].join("\n"),
     );
 }
 
 export function buildShopAppearanceRows(): ActionRowBuilder<ButtonBuilder>[] {
-  const colorRow = new ActionRowBuilder<ButtonBuilder>();
-  for (const c of PROFILE_FRAME_COLORS) {
-    const short = c.label.length > 12 ? `${c.label.slice(0, 10)}…` : c.label;
-    colorRow.addComponents(
-      new ButtonBuilder()
-        .setCustomId(`${ECON_SHOP_APPEARANCE_COLOR_TRY_PREFIX}${c.id}`)
-        .setLabel(`Примерить: ${short}`)
-        .setStyle(ButtonStyle.Secondary),
-    );
+  const row1 = new ActionRowBuilder<ButtonBuilder>();
+  const row2 = new ActionRowBuilder<ButtonBuilder>();
+  for (const [i, c] of PROFILE_FRAME_COLORS.entries()) {
+    const btn = new ButtonBuilder()
+      .setCustomId(`${ECON_SHOP_APPEARANCE_COLOR_TRY_PREFIX}${c.id}`)
+      .setLabel(c.label)
+      .setStyle(ButtonStyle.Secondary);
+    if (i < 3) row1.addComponents(btn);
+    else row2.addComponents(btn);
   }
-  return [
-    colorRow,
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder()
-        .setCustomId(ECON_SHOP_APPEARANCE_CARD)
-        .setLabel("Моя карточка")
-        .setStyle(ButtonStyle.Success),
-    ),
-    shopNavBottomRow(ECON_SHOP_HUB_BACK),
-  ];
+  row2.addComponents(
+    new ButtonBuilder()
+      .setCustomId(ECON_SHOP_APPEARANCE_CARD)
+      .setLabel(APPEARANCE.myCard)
+      .setStyle(ButtonStyle.Success),
+  );
+  return [row1, row2, shopNavBottomRow(ECON_SHOP_HUB_BACK)];
 }
 
-function buildColorPreviewBuyRows(colorId: ProfileFrameColorId): ActionRowBuilder<ButtonBuilder>[] {
+function buildColorPreviewBuyRows(guildId: string, colorId: ProfileFrameColorId): ActionRowBuilder<ButtonBuilder>[] {
   return [
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_APPEARANCE_COLOR_BUY_PREFIX}${colorId}`)
-        .setLabel(`Купить · ${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)} ₽`)
+        .setLabel(`${UI.BUY} · ${fmt(quoteShopPrice(guildId, "frame:color"))} ₽`)
         .setStyle(ButtonStyle.Success),
     ),
     shopNavBottomRow(ECON_SHOP_APPEARANCE),
@@ -101,8 +98,8 @@ export async function buildProfileCardMessagePayload(
   return {
     file,
     content: [
-      `**Превью рамки · ${frameDef.label}** · ${target.displayName}`,
-      `_Водяной знак «ПРЕВЬЮ» — только пример. После **Купить** рамка сохранится без него._`,
+      `**Превью · ${frameDef.label}** · ${target.displayName}`,
+      `_Знак «ПРЕВЬЮ» только на примере. После **${UI.BUY}** рамка сохранится без него._`,
     ].join("\n"),
   };
 }
@@ -120,9 +117,10 @@ export async function replyWithProfileCardImage(
   }
   try {
     const { file, content } = await buildProfileCardMessagePayload(member, options);
-    const components = options.watermark && options.previewFrameColorId
-      ? buildColorPreviewBuyRows(options.previewFrameColorId)
-      : [];
+    const components =
+      options.watermark && options.previewFrameColorId
+        ? buildColorPreviewBuyRows(member.guild.id, options.previewFrameColorId)
+        : [];
     await interaction.editReply({
       content: content ?? undefined,
       files: [file],
@@ -143,19 +141,19 @@ export function isAppearanceShopButton(id: string): boolean {
   );
 }
 
-export async function handleAppearanceShopButton(interaction: ButtonInteraction, member: GuildMember): Promise<boolean> {
+export async function handleAppearanceShopButton(
+  interaction: ButtonInteraction,
+  member: GuildMember,
+): Promise<boolean> {
   const id = interaction.customId;
-
   if (id === ECON_SHOP_APPEARANCE) {
     await replyOrUpdateAppearanceMenu(interaction, member);
     return true;
   }
-
   if (id === ECON_SHOP_APPEARANCE_CARD) {
     await replyWithProfileCardImage(interaction, member, {});
     return true;
   }
-
   if (id.startsWith(ECON_SHOP_APPEARANCE_COLOR_TRY_PREFIX)) {
     const colorId = id.slice(ECON_SHOP_APPEARANCE_COLOR_TRY_PREFIX.length);
     if (!isProfileFrameColorId(colorId)) {
@@ -166,7 +164,7 @@ export async function handleAppearanceShopButton(interaction: ButtonInteraction,
     const def = getProfileFrameColor(colorId);
     if (u.profileCardColor === colorId) {
       await interaction.reply({
-        content: `Рамка **${def.label}** уже активна. Откройте **«Моя карточка»**.`,
+        content: `Рамка **${def.label}** уже активна. Открой **«Моя карточка»**.`,
         flags: MessageFlags.Ephemeral,
       });
       return true;
@@ -177,7 +175,6 @@ export async function handleAppearanceShopButton(interaction: ButtonInteraction,
     });
     return true;
   }
-
   if (id.startsWith(ECON_SHOP_APPEARANCE_COLOR_BUY_PREFIX)) {
     const colorId = id.slice(ECON_SHOP_APPEARANCE_COLOR_BUY_PREFIX.length);
     if (!isProfileFrameColorId(colorId)) {
@@ -193,10 +190,11 @@ export async function handleAppearanceShopButton(interaction: ButtonInteraction,
       });
       return true;
     }
-    const spend = trySpendEconomyUserRubles(member.guild.id, member.id, PROFILE_COLOR_CHANGE_PRICE_RUB);
+    const framePrice = quoteShopPrice(member.guild.id, "frame:color");
+    const spend = trySpendEconomyUserRubles(member.guild.id, member.id, framePrice);
     if (!spend.ok) {
       await interaction.reply({
-        content: `Нужно **${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)}** ₽.`,
+        content: `Нужно **${fmt(framePrice)}** ₽.`,
         flags: MessageFlags.Ephemeral,
       });
       return true;
@@ -210,12 +208,11 @@ export async function handleAppearanceShopButton(interaction: ButtonInteraction,
       guildId: member.guild.id,
       type: "job:shift",
       actorUserId: member.id,
-      text: `${member.toString()} сменил рамку карточки на **${def.label}** (−${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)} ₽).`,
+      text: `${member.toString()} сменил рамку карточки на **${def.label}** (−${fmt(framePrice)} ₽).`,
     });
     await replyWithProfileCardImage(interaction, member, {});
     return true;
   }
-
   return false;
 }
 
@@ -235,7 +232,7 @@ async function replyOrUpdateAppearanceMenu(interaction: ButtonInteraction, membe
     if (!interaction.replied && !interaction.deferred) {
       try {
         await interaction.reply({
-          content: "Не удалось открыть оформление. Попробуйте ещё раз.",
+          content: "Не удалось открыть оформление. Попробуй ещё раз.",
           flags: MessageFlags.Ephemeral,
         });
       } catch {

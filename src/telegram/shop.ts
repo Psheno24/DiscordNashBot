@@ -2,7 +2,7 @@
  * Магазин терминала в Telegram: те же действия, что в Discord,
  * с раскладкой кнопок «один ряд — один смысл», чтобы подписи были видны целиком.
  */
-import type { Client, GuildMember } from "discord.js";
+import { ChannelType, type Client, type GuildMember } from "discord.js";
 import type { EmbedBuilder } from "discord.js";
 import {
   apartmentShopShortLabel,
@@ -11,7 +11,7 @@ import {
   getApartmentDef,
   getCarDef,
   getPhoneDef,
-  PET_MODELS,
+  petsForSale,
   phonesByOrigin,
   type CatalogOrigin,
   type HousingRentPlan,
@@ -94,36 +94,20 @@ import {
   sellOwnedCar,
   sellOwnedPhone,
 } from "../economy/economyShopActions.js";
-import {
-  SHOP_PLATE_CHANGE_DIGITS_BASE_RUB,
-  SHOP_PLATE_CHANGE_LETTERS_BASE_RUB,
-  SHOP_PLATE_CHANGE_REGION_BASE_RUB,
-  SHOP_PLATE_REGISTER_BASE_RUB,
-  formatVehiclePlate,
-} from "../economy/economyLicensePlate.js";
-import {
-  SHOP_SIM_CHANGE_LAST_BASE_RUB,
-  SHOP_SIM_CHANGE_MID_BASE_RUB,
-  SHOP_SIM_CHANGE_OPERATOR_BASE_RUB,
-  SHOP_SIM_REGISTER_BASE_RUB,
-  userHasSimNumber,
-} from "../economy/economySimNumber.js";
+import { formatVehiclePlate } from "../economy/economyLicensePlate.js";
+import { userHasSimNumber } from "../economy/economySimNumber.js";
 import {
   inflatedCatalogApartmentPrice,
   inflatedCatalogCarPrice,
   inflatedCatalogPhonePrice,
   inflatedHousingRentPrice,
-  scaledShopPrice,
+  quoteShopPrice,
 } from "../economy/economyMacro.js";
 import { remitShopPurchaseVatToTreasury } from "../economy/taxTreasury.js";
 import { clearSovietHousingRentPatch } from "../economy/economyHousingUtil.js";
 import { economyUserClearTier2PlusJobPatch } from "../economy/economyHousing.js";
 import { beginShopTradeDraft, selectedShopTradeUids, toggleShopTradeUid } from "../economy/shopTradeDraft.js";
-import {
-  addLotteryTickets,
-  getLotteryState,
-  LOTTERY_TICKET_PRICE_RUB,
-} from "../economy/lotteryStore.js";
+import { addLotteryTickets, getLotteryState } from "../economy/lotteryStore.js";
 import {
   ensureDueLotteryDraws,
   LOTTERY_JACKPOT_CHANCES,
@@ -135,7 +119,6 @@ import { renderProfileCardPng } from "../economy/profileCardRender.js";
 import {
   getProfileFrameColor,
   isProfileFrameColorId,
-  PROFILE_COLOR_CHANGE_PRICE_RUB,
   PROFILE_FRAME_COLORS,
   type ProfileFrameColorId,
 } from "../economy/profileThemes.js";
@@ -146,6 +129,17 @@ import {
   updateEconomyUser,
 } from "../economy/userStore.js";
 import { economyMarkdownToTelegramHtml, economyTelegramScreen } from "../economy/panel.js";
+import { buildVoiceJoinPhraseEmbed } from "../economy/economyShopVoiceUi.js";
+import {
+  assignVoiceJoinSound,
+  buyVoiceJoinPhrase,
+  clearVoiceJoinSound,
+  enqueueMemberJoinPhrase,
+  listGuildJoinSounds,
+  voiceJoinPhrasePriceRub,
+  type GuildJoinSound,
+} from "../voice/joinPhrase.js";
+import { menuHidden, menuLabel } from "../economy/shopCatalog.js";
 import { patchTelegramUiState } from "./bridgeStore.js";
 import {
   btnLabel,
@@ -198,6 +192,17 @@ function shopNav(back: string, backLabel = "← Назад"): InlineBtn[] {
   return navRow(back, backLabel);
 }
 
+function tgMenuRows(guildId: string, groups: [string, string][][]): InlineBtn[][] {
+  const rows: InlineBtn[][] = [];
+  for (const group of groups) {
+    const buttons = group
+      .filter(([menuId]) => !menuHidden(guildId, menuId))
+      .map(([menuId, data]) => ({ text: btnLabel(menuLabel(guildId, menuId)), callback_data: data }));
+    if (buttons.length > 0) rows.push(row(...buttons));
+  }
+  return rows;
+}
+
 function screen(text: string, ...rows: InlineBtn[][]): ScreenPayload {
   return { text, markup: kb(...rows) };
 }
@@ -216,7 +221,7 @@ function lotteryHubText(member: GuildMember): string {
   return economyTelegramScreen(
     "Лотерея",
     [
-      `Билет — **${fmt(LOTTERY_TICKET_PRICE_RUB)}** ₽`,
+      `Билет — **${fmt(quoteShopPrice(member.guild.id, "lottery:ticket"))}** ₽`,
       `Джекпот: **${fmt(st.jackpotRub)}** ₽ · в продаже: **${st.ticketsSold}**`,
       `Розыгрыш: **${drawAt}** (21:00 МСК)`,
       "",
@@ -240,9 +245,12 @@ function lotteryDetailsText(): string {
 export function screenShopHub(member: GuildMember, note?: string): ScreenPayload {
   return screen(
     fromEmbed(buildShopHubEmbed(member), note),
-    row({ text: "Телефон", callback_data: "s:ph" }, { text: "Авто", callback_data: "s:car" }),
-    row({ text: "Жильё", callback_data: "s:hs" }, { text: "Животные", callback_data: "s:an" }),
-    row({ text: "Лотерея", callback_data: "s:lt" }, { text: "Оформление", callback_data: "s:ap" }),
+    ...tgMenuRows(member.guild.id, [
+      [["hub.phone", "s:ph"], ["hub.car", "s:car"]],
+      [["hub.house", "s:hs"], ["hub.animals", "s:an"]],
+      [["hub.lottery", "s:lt"], ["hub.appearance", "s:ap"]],
+      [["hub.voice", "s:vj"]],
+    ]),
     shopNav("m", "← Меню"),
   );
 }
@@ -250,21 +258,23 @@ export function screenShopHub(member: GuildMember, note?: string): ScreenPayload
 function phoneMenu(member: GuildMember, note?: string): ScreenPayload {
   return screen(
     fromEmbed(buildShopOriginPickEmbed("Телефон", member, "phone"), note),
-    row({ text: "Советское", callback_data: "s:ph:s" }),
-    row({ text: "Заморское", callback_data: "s:ph:f" }),
-    row({ text: "Сим-карта", callback_data: "s:sim" }),
+    ...tgMenuRows(member.guild.id, [
+      [["phone.soviet", "s:ph:s"]],
+      [["phone.foreign", "s:ph:f"]],
+      [["phone.sim", "s:sim"]],
+    ]),
     shopNav("s"),
   );
 }
 
 function carMenu(member: GuildMember, note?: string): ScreenPayload {
   const u = getEconomyUser(member.guild.id, member.id);
-  const rows: InlineBtn[][] = [
-    row({ text: "Советское", callback_data: "s:car:s" }),
-    row({ text: "Заморское", callback_data: "s:car:f" }),
-  ];
-  if (userCanOpenPlateShop(u)) {
-    rows.push(row({ text: "Госномер", callback_data: "s:pl" }));
+  const rows: InlineBtn[][] = tgMenuRows(member.guild.id, [
+    [["car.soviet", "s:car:s"]],
+    [["car.foreign", "s:car:f"]],
+  ]);
+  if (userCanOpenPlateShop(u) && !menuHidden(member.guild.id, "car.plate")) {
+    rows.push(row({ text: btnLabel(menuLabel(member.guild.id, "car.plate")), callback_data: "s:pl" }));
   }
   rows.push(shopNav("s"));
   return screen(fromEmbed(buildShopOriginPickEmbed("Авто", member, "car"), note), ...rows);
@@ -277,7 +287,7 @@ function phoneList(member: GuildMember, origin: CatalogOrigin, note?: string): S
   if (listOwnedPhonesByOrigin(u, origin).length > 0) {
     rows.push(row({ text: "Продать", callback_data: `s:ph:sl:${oc}` }));
   }
-  for (const p of phonesByOrigin(origin)) {
+  for (const p of phonesByOrigin(origin, member.guild.id)) {
     const price = inflatedCatalogPhonePrice(member.guild.id, p.id);
     rows.push(row(itemBtn(p.label, price, `s:ph:i:${p.id}`)));
   }
@@ -293,7 +303,7 @@ function carList(member: GuildMember, origin: CatalogOrigin, note?: string): Scr
   if (listOwnedCarsByOrigin(u, origin).length > 0) {
     rows.push(row({ text: "Продать", callback_data: `s:car:sl:${oc}` }));
   }
-  for (const c of carsByOrigin(origin)) {
+  for (const c of carsByOrigin(origin, member.guild.id)) {
     const price = inflatedCatalogCarPrice(member.guild.id, c.id);
     rows.push(row(itemBtn(c.label, price, `s:car:i:${c.id}`)));
   }
@@ -403,9 +413,11 @@ function carSellPick(member: GuildMember, origin: CatalogOrigin, note?: string):
 function houseMenu(member: GuildMember, note?: string): ScreenPayload {
   return screen(
     fromEmbed(buildShopHousePickEmbed(member), note),
-    row({ text: "Советское", callback_data: "s:hs:s" }),
-    row({ text: "Заморское", callback_data: "s:hs:f" }),
-    row({ text: "Аренда", callback_data: "s:hs:rent" }),
+    ...tgMenuRows(member.guild.id, [
+      [["house.soviet", "s:hs:s"]],
+      [["house.foreign", "s:hs:f"]],
+      [["house.rent", "s:hs:rent"]],
+    ]),
     shopNav("s"),
   );
 }
@@ -417,7 +429,7 @@ function houseList(member: GuildMember, origin: CatalogOrigin, note?: string): S
   if (listOwnedApartmentsByOrigin(u, origin).length > 0) {
     rows.push(row({ text: "Продать", callback_data: `s:hs:sl:${oc}` }));
   }
-  for (const a of apartmentsByOrigin(origin)) {
+  for (const a of apartmentsByOrigin(origin, member.guild.id)) {
     const price = inflatedCatalogApartmentPrice(member.guild.id, a.id);
     rows.push(row(itemBtn(apartmentShopShortLabel(a.label), price, `s:hs:i:${a.id}`)));
   }
@@ -510,8 +522,8 @@ function animalsMenu(member: GuildMember, note?: string): ScreenPayload {
 function animalsBuy(member: GuildMember, note?: string): ScreenPayload {
   const gid = member.guild.id;
   const rows: InlineBtn[][] = [];
-  for (const p of PET_MODELS) {
-    const cost = scaledShopPrice(gid, p.purchaseRub);
+  for (const p of petsForSale(member.guild.id)) {
+    const cost = quoteShopPrice(gid, `pet:${p.id}`);
     rows.push(row(itemBtn(p.label, cost, `s:an:b:${p.id}`)));
   }
   rows.push(shopNav("s:an"));
@@ -557,10 +569,10 @@ function plateCar(member: GuildMember, carUid: string, note?: string): ScreenPay
   const gid = member.guild.id;
   const car = findOwnedCar(u, carUid);
   const hasPlate = Boolean(car?.plate);
-  const dig = scaledShopPrice(gid, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
-  const letC = scaledShopPrice(gid, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
-  const rgn = scaledShopPrice(gid, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
-  const reg = scaledShopPrice(gid, SHOP_PLATE_REGISTER_BASE_RUB);
+  const dig = quoteShopPrice(gid, "plate:dig");
+  const letC = quoteShopPrice(gid, "plate:let");
+  const rgn = quoteShopPrice(gid, "plate:rgn");
+  const reg = quoteShopPrice(gid, "plate:reg");
   const rows: InlineBtn[][] = [];
   if (hasPlate) {
     rows.push(row(itemBtn("Цифры", dig, `s:pl:dig:${carUid}`)));
@@ -579,10 +591,11 @@ function plateCar(member: GuildMember, carUid: string, note?: string): ScreenPay
 
 function simMenu(member: GuildMember, note?: string): ScreenPayload {
   syncSimPrestige(member);
-  const u = getEconomyUser(member.guild.id, member.id);
+  const gid = member.guild.id;
+  const u = getEconomyUser(gid, member.id);
   const rows: InlineBtn[][] = [];
   if (!userHasSimNumber(u)) {
-    rows.push(row(itemBtn("Купить сим", SHOP_SIM_REGISTER_BASE_RUB, "s:sim:reg")));
+    rows.push(row(itemBtn("Купить сим", quoteShopPrice(gid, "sim:reg"), "s:sim:reg")));
   } else {
     rows.push(row({ text: "Пополнить", callback_data: "s:sim:top" }));
     rows.push(row({ text: "Изменить номер", callback_data: "s:sim:ch" }));
@@ -595,9 +608,9 @@ function simMenu(member: GuildMember, note?: string): ScreenPayload {
 function simChange(member: GuildMember, note?: string): ScreenPayload {
   const u = getEconomyUser(member.guild.id, member.id);
   const gid = member.guild.id;
-  const op = scaledShopPrice(gid, SHOP_SIM_CHANGE_OPERATOR_BASE_RUB);
-  const mid = scaledShopPrice(gid, SHOP_SIM_CHANGE_MID_BASE_RUB);
-  const last = scaledShopPrice(gid, SHOP_SIM_CHANGE_LAST_BASE_RUB);
+  const op = quoteShopPrice(gid, "sim:op");
+  const mid = quoteShopPrice(gid, "sim:mid");
+  const last = quoteShopPrice(gid, "sim:last");
   return screen(
     fromEmbed(buildShopSimChangeEmbed(member), note),
     row(itemBtn("Оператор", op, "s:sim:op")),
@@ -620,17 +633,16 @@ function simTopup(member: GuildMember, note?: string): ScreenPayload {
 }
 
 function lotteryMenu(member: GuildMember, note?: string): ScreenPayload {
+  const ticket = quoteShopPrice(member.guild.id, "lottery:ticket");
   const qtys = [1, 5, 10, 25, 50];
-  const rows = qtys.map((q) =>
-    row(itemBtn(`${q} шт`, q * LOTTERY_TICKET_PRICE_RUB, `s:lt:q:${q}`)),
-  );
+  const rows = qtys.map((q) => row(itemBtn(`${q} шт`, q * ticket, `s:lt:q:${q}`)));
   rows.push(row({ text: "Условия", callback_data: "s:lt:d" }));
   rows.push(shopNav("s"));
   return screen(withNote(lotteryHubText(member), note ? mdNote(note) : undefined), ...rows);
 }
 
 function lotteryConfirm(member: GuildMember, qty: number): ScreenPayload {
-  const total = qty * LOTTERY_TICKET_PRICE_RUB;
+  const total = qty * quoteShopPrice(member.guild.id, "lottery:ticket");
   const body = economyTelegramScreen(
     "Подтверждение",
     `Купить билетов: **${qty}**\nСумма: **${fmt(total)}** ₽\n\nСписание с личного счёта → джекпот.`,
@@ -651,17 +663,67 @@ function appearanceMenu(member: GuildMember, note?: string): ScreenPayload {
   return screen(fromEmbed(buildShopAppearanceEmbed(member), note), ...rows);
 }
 
-function appearanceBuyConfirm(colorId: ProfileFrameColorId): ScreenPayload {
+function appearanceBuyConfirm(member: GuildMember, colorId: ProfileFrameColorId): ScreenPayload {
   const def = getProfileFrameColor(colorId);
+  const price = quoteShopPrice(member.guild.id, "frame:color");
   const body = economyTelegramScreen(
     "Оформление · покупка",
-    `Рамка **${def.label}** — **${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)}** ₽.\nПревью выше (если отправилось). Подтверди покупку.`,
+    `Рамка **${def.label}** — **${fmt(price)}** ₽.\nПревью выше (если отправилось). Подтверди покупку.`,
   );
   return screen(
     body,
-    row(itemBtn("Купить рамку", PROFILE_COLOR_CHANGE_PRICE_RUB, `s:ap:buy:${colorId}`)),
+    row(itemBtn("Купить рамку", price, `s:ap:buy:${colorId}`)),
     shopNav("s:ap"),
   );
+}
+
+const TG_VOICE_PAGE = 6;
+
+async function voiceMenu(member: GuildMember, page = 0, note?: string, confirm = false): Promise<ScreenPayload> {
+  let sounds: GuildJoinSound[] | null = null;
+  try {
+    sounds = await listGuildJoinSounds(member.guild);
+  } catch (e) {
+    console.error("tg voice join sounds", e);
+  }
+  const u = getEconomyUser(member.guild.id, member.id);
+  const rows: InlineBtn[][] = [];
+  if (!u.voiceJoinPhrase) {
+    const buyLabel = btnLabel(`Купить · ${fmt(voiceJoinPhrasePriceRub(member.guild.id))} ₽`);
+    if (confirm) {
+      rows.push(row({ text: btnLabel(`Ок · ${fmt(voiceJoinPhrasePriceRub(member.guild.id))} ₽`), callback_data: "s:vj:ok" }));
+      rows.push(shopNav("s:vj", "Отмена"));
+    } else {
+      rows.push(row({ text: buyLabel, callback_data: "s:vj:buy" }));
+      rows.push(shopNav("s"));
+    }
+  } else {
+    const list = sounds ?? [];
+    const pages = Math.max(1, Math.ceil(list.length / TG_VOICE_PAGE) || 1);
+    const safe = Math.min(Math.max(0, page), pages - 1);
+    const slice = list.slice(safe * TG_VOICE_PAGE, safe * TG_VOICE_PAGE + TG_VOICE_PAGE);
+    for (const sound of slice) {
+      const mark = sound.soundId === u.voiceJoinSoundId ? "✓ " : "";
+      const emoji = sound.emojiName ? `${sound.emojiName} ` : "";
+      rows.push(
+        row({
+          text: btnLabel(`${mark}${emoji}${sound.name}`),
+          callback_data: `s:vj:id:${sound.soundId}`,
+        }),
+      );
+    }
+    const nav: InlineBtn[] = [];
+    if (safe > 0) nav.push({ text: "←", callback_data: `s:vj:g:${safe - 1}` });
+    if (safe < pages - 1) nav.push({ text: "→", callback_data: `s:vj:g:${safe + 1}` });
+    if (nav.length) rows.push(nav);
+    if (u.voiceJoinSoundId) {
+      rows.push(
+        row({ text: "Прослушать", callback_data: "s:vj:hear" }, { text: "Убрать звук", callback_data: "s:vj:clr" }),
+      );
+    }
+    rows.push(shopNav("s"));
+  }
+  return screen(fromEmbed(buildVoiceJoinPhraseEmbed(member, sounds), note), ...rows);
 }
 
 export type ShopPresent = (payload: ScreenPayload) => Promise<void>;
@@ -1347,7 +1409,7 @@ export async function routeShopCallback(opts: {
   if (data.startsWith("s:lt:ok:")) {
     const qty = Number.parseInt(data.slice("s:lt:ok:".length), 10);
     if (!Number.isFinite(qty) || qty < 1) return true;
-    const total = qty * LOTTERY_TICKET_PRICE_RUB;
+    const total = qty * quoteShopPrice(gid, "lottery:ticket");
     const spend = trySpendEconomyUserRubles(gid, uid, total);
     if (!spend.ok) {
       await present(lotteryMenu(member, `Не хватает ₽ (нужно **${fmt(total)}**).`));
@@ -1361,7 +1423,7 @@ export async function routeShopCallback(opts: {
       guildId: gid,
       type: "job:shift",
       actorUserId: uid,
-      text: `${member.toString()} купил лотерейных билетов: **${qty}** × **${fmt(LOTTERY_TICKET_PRICE_RUB)}** ₽`,
+      text: `${member.toString()} купил лотерейных билетов: **${qty}** × **${fmt(quoteShopPrice(gid, "lottery:ticket"))}** ₽`,
     });
     await toast("Куплено");
     await present(lotteryMenu(member, `Куплено билетов: **${qty}**.`));
@@ -1405,11 +1467,11 @@ export async function routeShopCallback(opts: {
       const cap = economyMarkdownToTelegramHtml(
         `**Превью рамки · ${getProfileFrameColor(colorId).label}**\n_Водяной знак «ПРЕВЬЮ» — только пример._`,
       );
-      await sendPhoto(cap, png, appearanceBuyConfirm(colorId).markup);
+      await sendPhoto(cap, png, appearanceBuyConfirm(member, colorId).markup);
       await toast();
     } catch (e) {
       console.error("tg appearance try", e);
-      await present(appearanceBuyConfirm(colorId));
+      await present(appearanceBuyConfirm(member, colorId));
     }
     return true;
   }
@@ -1425,9 +1487,10 @@ export async function routeShopCallback(opts: {
       await toast("Уже активна");
       return true;
     }
-    const spend = trySpendEconomyUserRubles(gid, uid, PROFILE_COLOR_CHANGE_PRICE_RUB);
+    const framePrice = quoteShopPrice(gid, "frame:color");
+    const spend = trySpendEconomyUserRubles(gid, uid, framePrice);
     if (!spend.ok) {
-      await toast(`Нужно ${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)} ₽`);
+      await toast(`Нужно ${fmt(framePrice)} ₽`);
       await present(appearanceMenu(member));
       return true;
     }
@@ -1437,7 +1500,7 @@ export async function routeShopCallback(opts: {
       guildId: gid,
       type: "job:shift",
       actorUserId: uid,
-      text: `${member.toString()} сменил рамку карточки на **${def.label}** (−${fmt(PROFILE_COLOR_CHANGE_PRICE_RUB)} ₽).`,
+      text: `${member.toString()} сменил рамку карточки на **${def.label}** (−${fmt(framePrice)} ₽).`,
     });
     try {
       const png = await renderProfileCardPng(member, {});
@@ -1450,6 +1513,65 @@ export async function routeShopCallback(opts: {
     } catch {
       await present(appearanceMenu(member, `Рамка **${def.label}** сохранена.`));
     }
+    return true;
+  }
+
+  // —— Фраза при входе в голосовой ——
+  if (data === "s:vj" || data.startsWith("s:vj:g:")) {
+    const page = data.startsWith("s:vj:g:") ? Number.parseInt(data.slice("s:vj:g:".length), 10) : 0;
+    await present(await voiceMenu(member, Number.isFinite(page) ? page : 0));
+    return true;
+  }
+  if (data === "s:vj:buy") {
+    await present(await voiceMenu(member, 0, undefined, true));
+    return true;
+  }
+  if (data === "s:vj:ok") {
+    const result = buyVoiceJoinPhrase(member);
+    if (!result.ok && result.kind === "funds") {
+      await present(
+        await voiceMenu(
+          member,
+          0,
+          `Нужно **${fmt(voiceJoinPhrasePriceRub(gid))}** ₽. На счёте **${fmt(result.balance)}** ₽.`,
+          true,
+        ),
+      );
+      return true;
+    }
+    await toast(result.ok ? "Куплено" : "Уже куплено");
+    await present(await voiceMenu(member, 0, result.ok ? "Куплено. Выбери звук." : "Фраза уже куплена."));
+    return true;
+  }
+  if (data === "s:vj:clr") {
+    clearVoiceJoinSound(gid, uid);
+    await present(await voiceMenu(member, 0, "Звук снят. При входе ничего не играет, пока не выберешь новый."));
+    return true;
+  }
+  if (data === "s:vj:hear") {
+    const fresh = await member.guild.members.fetch(member.id).catch(() => member);
+    const channel = fresh.voice.channel;
+    let note = "Зайди в голосовой канал, чтобы прослушать.";
+    if (channel?.type === ChannelType.GuildStageVoice) note = "Фраза играет в обычном голосовом, не на трибуне.";
+    else if (channel && fresh.guild.afkChannelId === channel.id) note = "В канале AFK фраза не играет.";
+    else if (channel?.type === ChannelType.GuildVoice) {
+      enqueueMemberJoinPhrase(opts.client, fresh, channel);
+      note = "Слушай в голосовом.";
+    }
+    await present(await voiceMenu(member, 0, note));
+    return true;
+  }
+  if (data.startsWith("s:vj:id:")) {
+    const soundId = data.slice("s:vj:id:".length);
+    const assigned = await assignVoiceJoinSound(member, soundId);
+    await toast(assigned.ok ? "Звук выбран" : assigned.reason.replace(/\*\*/g, "").slice(0, 180));
+    await present(
+      await voiceMenu(
+        member,
+        0,
+        assigned.ok ? `Звук **${assigned.name}** будет играть при входе.` : assigned.reason,
+      ),
+    );
     return true;
   }
 

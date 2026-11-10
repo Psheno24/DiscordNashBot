@@ -944,7 +944,7 @@ export async function handleBetButton(interaction: ButtonInteraction): Promise<b
           .setStyle(ButtonStyle.Primary),
         new ButtonBuilder()
           .setCustomId(`${BET_MENU_MORE_ABORT_PREFIX}${eventId}`)
-          .setLabel("Отменить")
+          .setLabel("Отмена")
           .setStyle(ButtonStyle.Secondary),
       );
       const isEphemeralMessage = Boolean(interaction.message?.flags?.has(MessageFlags.Ephemeral));

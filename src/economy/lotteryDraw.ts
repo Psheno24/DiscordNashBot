@@ -5,13 +5,13 @@ import {
   ensureJackpotFloor,
   getLotteryState,
   getStoredLotteryState,
-  LOTTERY_TICKET_PRICE_RUB,
   saveLotteryState,
   type LotteryTicketEntry,
 } from "./lotteryStore.js";
 import { applyUnregisteredVehiclePenalty } from "./economyLicensePlate.js";
 import { getEconomyUser, addEconomyUserRubles } from "./userStore.js";
 import { mskTodayYmd } from "./mskCalendar.js";
+import { quoteShopPrice } from "./economyMacro.js";
 
 /** Период лотереи: сутки до розыгрыша в 21:00 МСК (дата «сегодня» до 21:00, после — уже завтрашний период). */
 export function lotteryPeriodMskYmd(nowMs: number = Date.now()): string {
@@ -71,10 +71,10 @@ function pickJackpotWinner(tickets: LotteryTicketEntry[]): { entry: LotteryTicke
   return { entry: tickets[idx]!, tier };
 }
 
-function rollPerTicketRefund(): number {
+function rollPerTicketRefund(ticketPrice: number): number {
   const r = Math.random() * 100;
-  if (r < LOTTERY_REFUND_CHANCES.full) return LOTTERY_TICKET_PRICE_RUB;
-  if (r < LOTTERY_REFUND_CHANCES.full + LOTTERY_REFUND_CHANCES.half) return Math.floor(LOTTERY_TICKET_PRICE_RUB / 2);
+  if (r < LOTTERY_REFUND_CHANCES.full) return ticketPrice;
+  if (r < LOTTERY_REFUND_CHANCES.full + LOTTERY_REFUND_CHANCES.half) return Math.floor(ticketPrice / 2);
   return 0;
 }
 
@@ -144,11 +144,12 @@ export function runLotteryDrawForGuild(
     payouts.push({ userId: jackpotPick.entry.userId, rub: prize, label });
   }
 
+  const ticketPrice = quoteShopPrice(guild.id, "lottery:ticket");
   for (const t of st.tickets) {
-    const refund = rollPerTicketRefund();
+    const refund = rollPerTicketRefund(ticketPrice);
     if (refund > 0) {
       jackpot -= refund;
-      payouts.push({ userId: t.userId, rub: refund, label: refund === LOTTERY_TICKET_PRICE_RUB ? "возврат билета" : "половина билета" });
+      payouts.push({ userId: t.userId, rub: refund, label: refund === ticketPrice ? "возврат билета" : "половина билета" });
     }
   }
 

@@ -16,14 +16,14 @@ export function economyJobTitle(id: JobId): string {
   return TITLES[id] ?? id;
 }
 
-/** Короткие подписи для Telegram-кнопок (полный заголовок — в тексте экрана). */
+/** Короткие подписи для кнопок каталога (Telegram / узкие ряды). */
 const BUTTON_TITLES: Record<JobId, string> = {
   courier: "Доставка",
   waiter: "Брокер",
   watchman: "Кладбище",
   dispatcher: "Колл-центр",
   assembler: "Склад",
-  expediter: "Развлечения",
+  expediter: "Развлекательный",
   officeAnalyst: "Офис",
   shadowFixer: "Схемы",
   soleProp: "ИП",

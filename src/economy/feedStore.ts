@@ -1,6 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+import { createJsonStore } from "../storage/jsonStore.js";
 
 export type FeedEventType =
   | "voice:earn"
@@ -27,38 +25,21 @@ interface StoreShape {
   guilds: Record<string, FeedEvent[]>;
 }
 
-const storePath = () => {
-  const dir = join(process.cwd(), "data");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, "economy-feed.json");
-};
-
-function readStore(): StoreShape {
-  const p = storePath();
-  if (!existsSync(p)) return { guilds: {} };
-  try {
-    return JSON.parse(readFileSync(p, "utf-8")) as StoreShape;
-  } catch {
-    return { guilds: {} };
-  }
-}
-
-function writeStore(s: StoreShape) {
-  writeJsonAtomicSync(storePath(), s);
-}
+const feedStore = createJsonStore<StoreShape>({
+  fileName: "economy-feed.json",
+  empty: () => ({ guilds: {} }),
+});
 
 export function listFeedEvents(guildId: string): FeedEvent[] {
-  const s = readStore();
-  return s.guilds[guildId] ?? [];
+  return feedStore.read().guilds[guildId] ?? [];
 }
 
 export function appendFeedEvent(ev: FeedEvent, max = 50): FeedEvent[] {
-  const s = readStore();
+  const s = feedStore.read();
   if (!s.guilds[ev.guildId]) s.guilds[ev.guildId] = [];
   const arr = s.guilds[ev.guildId]!;
   arr.push(ev);
   while (arr.length > max) arr.shift();
-  writeStore(s);
+  feedStore.write(s);
   return arr;
 }
-

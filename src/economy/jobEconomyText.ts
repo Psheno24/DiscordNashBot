@@ -1,5 +1,4 @@
-import { scaleSignedIncome } from "./economyMacro.js";
-import { COURIER_SIM_MONTHLY_FEE_RUB } from "./economyCatalog.js";
+import { quoteShopPrice, scaleSignedIncome } from "./economyMacro.js";
 import {
   SHIFT_PAY_MIN_APPLY_CD_MS,
   shiftPayCoeffEmbedBlock,
@@ -191,7 +190,7 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
       main = [
         "**КД:** **3** ч пешком · **2** ч с велом · с авто короче (до **~1 ч**).",
         `**Оплата:** **${fmtJobIncomeRange(guildId, 6_500, 8_000)}** ₽ · × **ранг** т1.`,
-        `**Сим:** **${locFmt(COURIER_SIM_MONTHLY_FEE_RUB)}** ₽/30 сут с баланса сим.`,
+        `**Сим:** **${locFmt(quoteShopPrice(guildId, "sim:month"))}** ₽/30 сут с баланса сим.`,
       ].join("\n\n");
       break;
     case "waiter":
@@ -251,7 +250,7 @@ export function buildJobDetailMainBlock(guildId: string, jobId: JobId, opts: { p
         "**Суточный оклад** только от **баланса бизнеса** (потолок **500 млн** ₽). Без капитала — **0** ₽.",
         "Затухающая отдача (не линейный %) × ранг × **престиж** × риск. Около **7 млн** чуть выгоднее полного гринда офиса. Престиж линейно от очков, полный набор лучших покупок — **×2**.",
         "Каждый следующий миллион на балансе даёт **меньше**, чем предыдущий. Дальше сильнее **ранг, престиж и эффективность** (персонал / контроль).",
-        "**Контроль:** с **3**-го дня подряд шанс **+0.1** к эффективности (**30%**, при неудаче **+10%**/день; после удачи снова **30%** без новой паузы). **Реклама / персонал** — в панели ИП.",
+        "**Контроль:** с **3**-го дня подряд шанс **+0.1** к эффективности (**30%**, при неудаче **+10%**/день; после удачи снова **30%** без новой паузы). **Персонал** — временный буст выше ×1.",
         "**Навыки:** " + formatJobSkillReqText({ skill: "discipline", minLevel: 167 }) + " · **жильё**.",
       ].join("\n\n");
       break;

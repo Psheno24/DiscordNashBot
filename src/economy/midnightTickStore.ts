@@ -1,41 +1,24 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { mskTodayYmd } from "./mskCalendar.js";
-import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+import { createJsonStore } from "../storage/jsonStore.js";
 
 interface MidnightTickState {
   /** YYYY-MM-DD — последний успешно завершённый суточный тик (МСК). */
   lastCompletedMskYmd?: string;
 }
 
-const storePath = () => {
-  const dir = join(process.cwd(), "data");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, "economy-midnight-tick.json");
-};
-
-function readState(): MidnightTickState {
-  const p = storePath();
-  if (!existsSync(p)) return {};
-  try {
-    return JSON.parse(readFileSync(p, "utf-8")) as MidnightTickState;
-  } catch {
-    return {};
-  }
-}
-
-function writeState(state: MidnightTickState): void {
-  writeJsonAtomicSync(storePath(), state);
-}
+const tickJson = createJsonStore<MidnightTickState>({
+  fileName: "economy-midnight-tick.json",
+  empty: () => ({}),
+});
 
 export function getLastCompletedMidnightTickYmd(): string | undefined {
-  const ymd = readState().lastCompletedMskYmd;
+  const ymd = tickJson.read().lastCompletedMskYmd;
   if (typeof ymd === "string" && /^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd;
   return undefined;
 }
 
 export function setLastCompletedMidnightTickYmd(ymd: string): void {
-  writeState({ lastCompletedMskYmd: ymd });
+  tickJson.write({ lastCompletedMskYmd: ymd });
 }
 
 /** Суточный тик нужен, если полночь МСК для сегодня уже наступила, а тик ещё не завершён. */

@@ -27,10 +27,6 @@ import {
 import { cancelRentAndBikeOnAssetPurchase } from "./economyHousingUtil.js";
 import { economyUserClearTier2PlusJobPatch, housingRentUnusedRefundRub } from "./economyHousing.js";
 import {
-  SHOP_PLATE_CHANGE_DIGITS_BASE_RUB,
-  SHOP_PLATE_CHANGE_LETTERS_BASE_RUB,
-  SHOP_PLATE_CHANGE_REGION_BASE_RUB,
-  SHOP_PLATE_REGISTER_BASE_RUB,
   formatVehiclePlate,
   rollUniqueVehiclePlateDigits,
   rollUniqueVehiclePlateLetters,
@@ -45,7 +41,7 @@ import {
   inflatedCatalogCarPrice,
   inflatedCatalogPhonePrice,
   nextHousingUtilityDueMs,
-  scaledShopPrice,
+  quoteShopPrice,
 } from "./economyMacro.js";
 import { remitShopPurchaseVatToTreasury } from "./taxTreasury.js";
 import { getEconomyUser, listEconomyUsers, updateEconomyUser, type EconomyUser } from "./userStore.js";
@@ -64,8 +60,8 @@ function asUidList(uids: string | string[]): string[] {
   return [...new Set(list.filter((u) => u.length > 0))];
 }
 
-function inflatedPlateShopPrice(guildId: string, baseRub: number): number {
-  return scaledShopPrice(guildId, baseRub);
+function inflatedPlateShopPrice(guildId: string, key: "plate:reg" | "plate:dig" | "plate:let" | "plate:rgn"): number {
+  return quoteShopPrice(guildId, key);
 }
 
 function applyNet(rubles: number, net: number): number {
@@ -447,7 +443,7 @@ export function registerVehiclePlateForCar(
   const car = findOwnedCar(u, carUid);
   if (!car) return { ok: false, reply: "Авто не найдено." };
   if (carPlateParts(car)) return { ok: false, reply: "На этом авто госномер **уже есть**. Снимите его, чтобы оформить новый." };
-  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_REGISTER_BASE_RUB);
+  const cost = inflatedPlateShopPrice(member.guild.id, "plate:reg");
   if (u.rubles < cost) return { ok: false, reply: shopShortageReply(u.rubles, cost) };
   const taken = guildTakenVehiclePlateKeys(member.guild.id);
   const parts = rollUniqueVehiclePlateParts(taken);
@@ -461,7 +457,7 @@ export function changeVehiclePlateDigitsForCar(
   const car = findOwnedCar(getEconomyUser(member.guild.id, member.id), carUid);
   const cur = car ? carPlateParts(car) : undefined;
   if (!cur) return { ok: false, reply: "Сначала **оформите** или прикрепите госномер." };
-  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_DIGITS_BASE_RUB);
+  const cost = inflatedPlateShopPrice(member.guild.id, "plate:dig");
   const except = vehiclePlateKey(cur);
   const taken = guildTakenVehiclePlateKeys(member.guild.id, except);
   const next = { ...cur, digits: rollUniqueVehiclePlateDigits(taken, { l1: cur.l1, l2: cur.l2, region: cur.region }) };
@@ -475,7 +471,7 @@ export function changeVehiclePlateLettersForCar(
   const car = findOwnedCar(getEconomyUser(member.guild.id, member.id), carUid);
   const cur = car ? carPlateParts(car) : undefined;
   if (!cur) return { ok: false, reply: "Сначала **оформите** или прикрепите госномер." };
-  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_LETTERS_BASE_RUB);
+  const cost = inflatedPlateShopPrice(member.guild.id, "plate:let");
   const except = vehiclePlateKey(cur);
   const taken = guildTakenVehiclePlateKeys(member.guild.id, except);
   const next = { ...cur, ...rollUniqueVehiclePlateLetters(taken, { digits: cur.digits, region: cur.region }) };
@@ -489,7 +485,7 @@ export function changeVehiclePlateRegionForCar(
   const car = findOwnedCar(getEconomyUser(member.guild.id, member.id), carUid);
   const cur = car ? carPlateParts(car) : undefined;
   if (!cur) return { ok: false, reply: "Сначала **оформите** или прикрепите госномер." };
-  const cost = inflatedPlateShopPrice(member.guild.id, SHOP_PLATE_CHANGE_REGION_BASE_RUB);
+  const cost = inflatedPlateShopPrice(member.guild.id, "plate:rgn");
   const except = vehiclePlateKey(cur);
   const taken = guildTakenVehiclePlateKeys(member.guild.id, except);
   const next = { ...cur, region: rollUniqueVehiclePlateRegion(taken, { l1: cur.l1, digits: cur.digits, l2: cur.l2 }) };

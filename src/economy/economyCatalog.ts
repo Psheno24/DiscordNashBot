@@ -1,5 +1,15 @@
 import { roundEconomyPrice } from "./economyRound.js";
 import { withCatalogStatDeltas, type CatalogOrigin } from "./economyStatPoints.js";
+import {
+  listApartmentsForSale,
+  listCarsForSale,
+  listPetsForSale,
+  listPhonesForSale,
+  resolveApartmentDef,
+  resolveCarDef,
+  resolvePetDef,
+  resolvePhoneDef,
+} from "./shopCatalog.js";
 
 export type { CatalogOrigin };
 
@@ -21,7 +31,7 @@ export type PhoneModelId =
   | "phone_for_signature";
 
 export interface PhoneDef {
-  id: PhoneModelId;
+  id: string;
   label: string;
   priceRub: number;
   origin: CatalogOrigin;
@@ -111,13 +121,13 @@ export const PHONE_TRADE_IN_RATE = 0.5;
 /** Возврат при продаже телефона без замены (доля каталожной цены). */
 export const PHONE_SELL_REFUND_RATE = PHONE_TRADE_IN_RATE;
 
-export function getPhoneDef(id: string | undefined): PhoneDef | undefined {
+export function getPhoneDef(id: string | undefined, guildId?: string): PhoneDef | undefined {
   if (!id) return undefined;
-  return PHONE_MODELS.find((p) => p.id === id);
+  return resolvePhoneDef(id, guildId);
 }
 
-export function phonesByOrigin(origin: CatalogOrigin): PhoneDef[] {
-  return PHONE_MODELS.filter((p) => p.origin === origin);
+export function phonesByOrigin(origin: CatalogOrigin, guildId?: string): PhoneDef[] {
+  return listPhonesForSale(origin, guildId);
 }
 
 export function phoneTradeInRub(cur: PhoneDef | undefined): number {
@@ -143,7 +153,7 @@ export type CarModelId =
   | "car_for_porsche";
 
 export interface CarDef {
-  id: CarModelId;
+  id: string;
   label: string;
   priceRub: number;
   origin: CatalogOrigin;
@@ -245,13 +255,13 @@ export const CAR_MODELS = CAR_MODELS_BASE.map((item) =>
 export const CAR_TRADE_IN_RATE = 0.75;
 export const CAR_SELL_REFUND_RATE = 0.45;
 
-export function getCarDef(id: string | undefined): CarDef | undefined {
+export function getCarDef(id: string | undefined, guildId?: string): CarDef | undefined {
   if (!id) return undefined;
-  return CAR_MODELS.find((c) => c.id === id);
+  return resolveCarDef(id, guildId);
 }
 
-export function carsByOrigin(origin: CatalogOrigin): CarDef[] {
-  return CAR_MODELS.filter((c) => c.origin === origin);
+export function carsByOrigin(origin: CatalogOrigin, guildId?: string): CarDef[] {
+  return listCarsForSale(origin, guildId);
 }
 
 export function carTradeInRub(cur: CarDef | undefined): number {
@@ -325,7 +335,7 @@ export type ApartmentId =
   | "apt_for_estate";
 
 export interface ApartmentDef {
-  id: ApartmentId;
+  id: string;
   label: string;
   priceRub: number;
   origin: CatalogOrigin;
@@ -453,13 +463,13 @@ export const APARTMENT_MODELS = APARTMENT_MODELS_BASE.map((item) =>
   withCatalogStatDeltas({ ...item, origin: item.origin as CatalogOrigin }),
 ) as ApartmentDef[];
 
-export function getApartmentDef(id: string | undefined): ApartmentDef | undefined {
+export function getApartmentDef(id: string | undefined, guildId?: string): ApartmentDef | undefined {
   if (!id) return undefined;
-  return APARTMENT_MODELS.find((a) => a.id === id);
+  return resolveApartmentDef(id, guildId);
 }
 
-export function apartmentsByOrigin(origin: CatalogOrigin): ApartmentDef[] {
-  return APARTMENT_MODELS.filter((a) => a.origin === origin);
+export function apartmentsByOrigin(origin: CatalogOrigin, guildId?: string): ApartmentDef[] {
+  return listApartmentsForSale(origin, guildId);
 }
 
 /** Краткое имя для кнопки магазина (район из скобок или первое слово полного названия). */
@@ -531,7 +541,7 @@ export type PetId =
   | "pet_lion";
 
 export interface PetDef {
-  id: PetId;
+  id: string;
   label: string;
   purchaseRub: number;
   dailyUpkeepRub: number;
@@ -631,9 +641,13 @@ export const PET_MODELS: PetDef[] = [
 
 export const PET_TRADE_IN_RATE = 0.5;
 
-export function getPetDef(id: string | undefined): PetDef | undefined {
+export function getPetDef(id: string | undefined, guildId?: string): PetDef | undefined {
   if (!id) return undefined;
-  return PET_MODELS.find((p) => p.id === id);
+  return resolvePetDef(id, guildId);
+}
+
+export function petsForSale(guildId?: string): PetDef[] {
+  return listPetsForSale(guildId);
 }
 
 export function petTradeInRub(cur: PetDef | undefined): number {
@@ -645,14 +659,27 @@ export function petPurchaseCostRub(_cur: PetDef | undefined, next: PetDef): numb
   return next.purchaseRub;
 }
 
+function tierByPrice(order: string[], aptId: string, origin: CatalogOrigin): number {
+  const built = order.indexOf(aptId);
+  if (built >= 0) return built;
+  const def = getApartmentDef(aptId);
+  if (!def || def.origin !== origin) return -1;
+  let idx = -1;
+  for (let i = 0; i < order.length; i++) {
+    const base = APARTMENT_MODELS.find((a) => a.id === order[i]);
+    if (base && def.priceRub >= base.priceRub) idx = i;
+  }
+  return idx;
+}
+
 function sovietAptTierIndex(aptId: string | undefined): number {
   if (!aptId) return -1;
-  return SOVIET_APT_ORDER.indexOf(aptId as ApartmentId);
+  return tierByPrice(SOVIET_APT_ORDER, aptId, "soviet");
 }
 
 function foreignAptTierIndex(aptId: string | undefined): number {
   if (!aptId) return -1;
-  return FOREIGN_APT_ORDER.indexOf(aptId as ApartmentId);
+  return tierByPrice(FOREIGN_APT_ORDER, aptId, "foreign");
 }
 
 function apartmentLabelBySovietIndex(idx: number): string | undefined {

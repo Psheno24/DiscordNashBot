@@ -1,6 +1,5 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+import { quoteShopPrice } from "./economyMacro.js";
+import { createJsonStore } from "../storage/jsonStore.js";
 
 export const LOTTERY_TICKET_PRICE_RUB = 1_000;
 export const LOTTERY_MIN_JACKPOT_RUB = 100_000;
@@ -23,24 +22,17 @@ interface StoreShape {
   guilds: Record<string, GuildLotteryState>;
 }
 
-const storePath = () => {
-  const dir = join(process.cwd(), "data");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, "economy-lottery.json");
-};
+const lotteryJson = createJsonStore<StoreShape>({
+  fileName: "economy-lottery.json",
+  empty: () => ({ guilds: {} }),
+});
 
 function readStore(): StoreShape {
-  const p = storePath();
-  if (!existsSync(p)) return { guilds: {} };
-  try {
-    return JSON.parse(readFileSync(p, "utf-8")) as StoreShape;
-  } catch {
-    return { guilds: {} };
-  }
+  return lotteryJson.read();
 }
 
 function writeStore(s: StoreShape) {
-  writeJsonAtomicSync(storePath(), s);
+  lotteryJson.write(s);
 }
 
 function defaultState(periodMskYmd: string): GuildLotteryState {
@@ -79,7 +71,7 @@ export function addLotteryTickets(
   nowMs: number = Date.now(),
 ): GuildLotteryState {
   const st = getLotteryState(guildId, periodMskYmd);
-  const spend = count * LOTTERY_TICKET_PRICE_RUB;
+  const spend = count * quoteShopPrice(guildId, "lottery:ticket");
   st.jackpotRub += spend;
   st.ticketsSold += count;
   for (let i = 0; i < count; i++) {

@@ -6,7 +6,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
-    "test": "npm run typecheck",
+    "test": "npm run typecheck && node --import tsx --test src/**/*.test.ts",
     "start": "node dist/index.js",
     "dev": "tsx watch src/index.ts",
     "clear-guild-commands": "node dist/clear-guild-commands.js"
@@ -15,6 +15,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@discordjs/voice": "^0.19.2",
     "@napi-rs/canvas": "^1.0.0",
     "dejavu-fonts-ttf": "^2.37.3",
     "discord.js": "^14.16.3",

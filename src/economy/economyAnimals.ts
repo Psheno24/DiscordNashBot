@@ -1,7 +1,7 @@
 import { getPetDef } from "./economyCatalog.js";
 import { applyUnregisteredVehiclePenalty } from "./economyLicensePlate.js";
 import { listOwnedPets } from "./economyAssets.js";
-import { scaledEconomyExpense, scaledEconomyPsIncome } from "./economyMacro.js";
+import { quoteShopPrice, scaledEconomyPsIncome } from "./economyMacro.js";
 import { appendFeedEvent } from "./feedStore.js";
 import { getEconomyUser, patchEconomyUser, updateEconomyUser } from "./userStore.js";
 
@@ -34,7 +34,7 @@ export function processPetMskMidnightForUser(
     const nextPets = listOwnedPets(cur).map((rec) => {
       const pet = getPetDef(rec.id);
       if (!pet) return rec;
-      const upkeep = scaledEconomyExpense(guildId, pet.dailyUpkeepRub);
+      const upkeep = quoteShopPrice(guildId, `petu:${pet.id}`);
       if (rubles < upkeep) {
         paused.push(pet.label);
         return { ...rec, pausedNoFunds: true };

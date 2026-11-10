@@ -1,6 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+import { createJsonStore } from "../storage/jsonStore.js";
 
 interface Store {
   /** channelId → messageId панели терминала */
@@ -9,24 +7,17 @@ interface Store {
   feedMessages: Record<string, string>;
 }
 
-const storePath = () => {
-  const dir = join(process.cwd(), "data");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, "economy-panels.json");
-};
+const panelsJson = createJsonStore<Store>({
+  fileName: "economy-panels.json",
+  empty: () => ({ terminalMessages: {}, feedMessages: {} }),
+});
 
 function readStore(): Store {
-  const p = storePath();
-  if (!existsSync(p)) return { terminalMessages: {}, feedMessages: {} };
-  try {
-    return JSON.parse(readFileSync(p, "utf-8")) as Store;
-  } catch {
-    return { terminalMessages: {}, feedMessages: {} };
-  }
+  return panelsJson.read();
 }
 
 function writeStore(s: Store) {
-  writeJsonAtomicSync(storePath(), s);
+  panelsJson.write(s);
 }
 
 export function getEconomyTerminalPanelMessageId(channelId: string): string | undefined {

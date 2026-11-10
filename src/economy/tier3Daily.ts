@@ -26,6 +26,7 @@ import {
   type Tier3JobId,
 } from "./tier3Jobs.js";
 import { processPetMskMidnightForUser } from "./economyAnimals.js";
+import { settleVoiceJoinFees } from "../voice/joinPhrase.js";
 import { tier3RankTitle } from "./tier3RankTitles.js";
 
 /**
@@ -66,6 +67,7 @@ export async function processEconomyMskMidnightTick(client: Client): Promise<voi
       processPetMskMidnightForUser(guild.id, userId, today, now, mention);
     }
     processWeeklySolePropCapitalTax(guild.id, today, now);
+    settleVoiceJoinFees(guild.id, now);
     for (const { userId } of entries) {
       let u = getEconomyUser(guild.id, userId);
       if (u.economyLastMskYmd === today) continue;

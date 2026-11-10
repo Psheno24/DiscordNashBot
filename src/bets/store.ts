@@ -1,6 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+import { createJsonStore } from "../storage/jsonStore.js";
 
 export type BetStatus = "open" | "closed" | "resolved" | "cancelled";
 
@@ -42,24 +40,17 @@ interface StoreShape {
   guilds: Record<string, Record<string, BetEvent>>;
 }
 
-const storePath = () => {
-  const dir = join(process.cwd(), "data");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, "bets.json");
-};
+const betsJson = createJsonStore<StoreShape>({
+  fileName: "bets.json",
+  empty: () => ({ guilds: {} }),
+});
 
 function readStore(): StoreShape {
-  const p = storePath();
-  if (!existsSync(p)) return { guilds: {} };
-  try {
-    return JSON.parse(readFileSync(p, "utf-8")) as StoreShape;
-  } catch {
-    return { guilds: {} };
-  }
+  return betsJson.read();
 }
 
 function writeStore(s: StoreShape) {
-  writeJsonAtomicSync(storePath(), s);
+  betsJson.write(s);
 }
 
 /** Миграция: один объект → массив; дополняем oddsAtPlacement из текущих опций. */

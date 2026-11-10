@@ -5,13 +5,9 @@ import {
   getPetDef,
   getPhoneDef,
   migrateCatalogItemId,
-  type ApartmentId,
   type CarDef,
-  type CarModelId,
   type CatalogOrigin,
-  type PetId,
   type PhoneDef,
-  type PhoneModelId,
 } from "./economyCatalog.js";
 import {
   formatVehiclePlate,
@@ -24,12 +20,12 @@ import type { EconomyUser, HousingKind } from "./userStore.js";
 
 export interface OwnedPhoneRecord {
   uid: string;
-  id: PhoneModelId;
+  id: string;
 }
 
 export interface OwnedCarRecord {
   uid: string;
-  id: CarModelId;
+  id: string;
   plate?: VehiclePlateParts;
 }
 
@@ -37,13 +33,13 @@ export interface UnattachedPlateRecord extends VehiclePlateParts {}
 
 export interface OwnedApartmentRecord {
   uid: string;
-  id: ApartmentId;
+  id: string;
   purchasedAtMs: number;
 }
 
 export interface OwnedPetRecord {
   uid: string;
-  id: PetId;
+  id: string;
   name: string;
   pausedNoFunds?: boolean;
 }
@@ -60,24 +56,33 @@ function asUid(raw: unknown, fallback: string): string {
   return typeof raw === "string" && UID_RE.test(raw) ? raw : fallback;
 }
 
-function asPhoneId(raw: unknown): PhoneModelId | undefined {
+function keepCatalogId(raw: unknown, known: string | undefined, prefix: "cph" | "ccr" | "cap" | "cpt"): string | undefined {
+  if (known) return known;
   if (typeof raw !== "string") return undefined;
-  return getPhoneDef(migrateCatalogItemId(raw))?.id;
+  return new RegExp(`^${prefix}_[a-f0-9]{8}$`).test(raw) ? raw : undefined;
 }
 
-function asCarId(raw: unknown): CarModelId | undefined {
+function asPhoneId(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
-  return getCarDef(migrateCatalogItemId(raw))?.id;
+  const id = migrateCatalogItemId(raw);
+  return keepCatalogId(id, id ? getPhoneDef(id)?.id : undefined, "cph");
 }
 
-function asAptId(raw: unknown): ApartmentId | undefined {
+function asCarId(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
-  return getApartmentDef(migrateCatalogItemId(raw))?.id;
+  const id = migrateCatalogItemId(raw);
+  return keepCatalogId(id, id ? getCarDef(id)?.id : undefined, "ccr");
 }
 
-function asPetId(raw: unknown): PetId | undefined {
+function asAptId(raw: unknown): string | undefined {
   if (typeof raw !== "string") return undefined;
-  return getPetDef(raw)?.id;
+  const id = migrateCatalogItemId(raw);
+  return keepCatalogId(id, id ? getApartmentDef(id)?.id : undefined, "cap");
+}
+
+function asPetId(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  return keepCatalogId(raw, getPetDef(raw)?.id, "cpt");
 }
 
 export function sanitizePetName(raw: string, fallback: string): string {
@@ -154,7 +159,7 @@ function parseApartmentRecords(raw: unknown): OwnedApartmentRecord[] {
 
 function parsePetRecords(raw: unknown): OwnedPetRecord[] {
   if (!Array.isArray(raw)) return [];
-  const seen = new Set<PetId>();
+  const seen = new Set<string>();
   const out: OwnedPetRecord[] = [];
   for (let i = 0; i < raw.length; i++) {
     const rec = raw[i];
@@ -471,10 +476,10 @@ export function statsFromOwnedAssets(assets: NormalizedAssets): { prestigePoints
 
 export function assetHousingMirrors(assets: NormalizedAssets): {
   housingKind: HousingKind;
-  ownedApartmentId?: ApartmentId;
+  ownedApartmentId?: string;
   ownedApartmentPurchasedAtMs?: number;
   housingForeignKind?: "owned";
-  ownedForeignApartmentId?: ApartmentId;
+  ownedForeignApartmentId?: string;
   ownedForeignApartmentPurchasedAtMs?: number;
 } {
   const sov = [...assets.ownedApartments].filter((a) => getApartmentDef(a.id)?.origin === "soviet");
@@ -493,8 +498,8 @@ export function assetHousingMirrors(assets: NormalizedAssets): {
 
 export function assetPhoneCarMirrors(assets: NormalizedAssets): {
   hasPhone?: boolean;
-  phoneModelId?: PhoneModelId;
-  ownedCarId?: CarModelId;
+  phoneModelId?: string;
+  ownedCarId?: string;
   vehiclePlateL1?: string;
   vehiclePlateDigits?: string;
   vehiclePlateL2?: string;

@@ -1,5 +1,3 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import {
   housingRentPlanPeriodMs,
   housingRentPlanPriceRub,
@@ -20,7 +18,7 @@ import { migrateLegacySim5ToParts, parseSimNumberParts } from "./economySimNumbe
 import { computeSimPrestige } from "./economySimPrestige.js";
 import { nextHousingUtilityDueMs } from "./economyMacro.js";
 import { SHIFT_PAY_FREE_CD_MS, SHIFT_PAY_MID_CD_MS } from "./shiftPayCoeff.js";
-import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+import { createJsonStore } from "../storage/jsonStore.js";
 import { ECONOMY_SKILL_MAX, computeLegacySkillJobEligible } from "./skills.js";
 
 export { ECONOMY_SKILL_MAX };
@@ -226,30 +224,39 @@ export interface EconomyUser {
 
   /** Цвет рамки карточки (магазин → оформление). */
   profileCardColor?: string;
+
+  /** Куплена фраза при входе в голосовой (магазин). */
+  voiceJoinPhrase?: boolean;
+  /** sound_id своего звука саундборда сервера. */
+  voiceJoinSoundId?: string;
+  /** Имя звука на момент выбора. */
+  voiceJoinSoundName?: string;
+  /** Месяц (YYYY-MM), за который подписка на фразу уже списана. */
+  voiceJoinBillYm?: string;
+  /** Не хватило ₽ на ежемесячную плату — фраза не играет. */
+  voiceJoinPaused?: boolean;
 }
 
 interface StoreShape {
   guilds: Record<string, Record<string, EconomyUser>>;
 }
 
-const storePath = () => {
-  const dir = join(process.cwd(), "data");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, "economy-users.json");
-};
+const usersStore = createJsonStore<StoreShape>({
+  fileName: "economy-users.json",
+  empty: () => ({ guilds: {} }),
+});
 
 function readStore(): StoreShape {
-  const p = storePath();
-  if (!existsSync(p)) return { guilds: {} };
-  try {
-    return JSON.parse(readFileSync(p, "utf-8")) as StoreShape;
-  } catch {
-    return { guilds: {} };
-  }
+  return usersStore.read();
 }
 
 function writeStore(s: StoreShape) {
-  writeJsonAtomicSync(storePath(), s);
+  usersStore.write(s);
+}
+
+/** Сброс кэша для unit-тестов (после смены NASHBOT_DATA_DIR). */
+export function resetEconomyUserStoreCacheForTests(): void {
+  usersStore.resetCache();
 }
 
 function stableLegacySimDigits(userId: string): string {
@@ -285,6 +292,33 @@ function normalizeLastWorkAtByJob(
     out[legacyJobId] = Math.max(out[legacyJobId] ?? 0, legacyLastWorkAt);
   }
   return Object.keys(out).length ? out : undefined;
+}
+
+function normalizeVoiceJoinPhrase(u: Partial<EconomyUser> | undefined): Pick<
+  EconomyUser,
+  "voiceJoinPhrase" | "voiceJoinSoundId" | "voiceJoinSoundName" | "voiceJoinBillYm" | "voiceJoinPaused"
+> {
+  const raw = u as
+    | {
+        voiceJoinPhrase?: unknown;
+        voiceJoinSoundId?: unknown;
+        voiceJoinSoundName?: unknown;
+        voiceJoinBillYm?: unknown;
+        voiceJoinPaused?: unknown;
+      }
+    | undefined;
+  if (raw?.voiceJoinPhrase !== true) return {};
+  const soundId = typeof raw.voiceJoinSoundId === "string" && /^\d{1,32}$/.test(raw.voiceJoinSoundId) ? raw.voiceJoinSoundId : undefined;
+  const soundName =
+    soundId && typeof raw.voiceJoinSoundName === "string" ? raw.voiceJoinSoundName.replace(/\s+/g, " ").trim().slice(0, 32) : "";
+  const billYm = typeof raw.voiceJoinBillYm === "string" && /^\d{4}-\d{2}$/.test(raw.voiceJoinBillYm) ? raw.voiceJoinBillYm : undefined;
+  return {
+    voiceJoinPhrase: true,
+    voiceJoinSoundId: soundId,
+    voiceJoinSoundName: soundName.length > 0 ? soundName : undefined,
+    voiceJoinBillYm: billYm,
+    voiceJoinPaused: raw.voiceJoinPaused === true ? true : undefined,
+  };
 }
 
 /** Unix ms последней смены на указанной работе (для КД между сменами). */
@@ -658,6 +692,7 @@ function normalizeUser(u: Partial<EconomyUser> | undefined, userIdForMigration?:
       typeof (u as any)?.profileCardColor === "string" && (u as any).profileCardColor.length > 0
         ? (u as any).profileCardColor
         : undefined,
+    ...normalizeVoiceJoinPhrase(u),
   };
 
   return out;

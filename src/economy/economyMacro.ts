@@ -3,7 +3,6 @@ import {
   getApartmentDef,
   getCarDef,
   getPhoneDef,
-  housingRentPlanPriceRub,
   shopApartmentPurchaseCostRub,
   shopCarPurchaseCostRub,
   shopPhonePurchaseCostRub,
@@ -15,6 +14,7 @@ import {
 import { isMskFirstCalendarDay, mskMonthFirstDayMs, mskTodayYmd } from "./mskCalendar.js";
 import { roundEconomyPrice, roundEconomyPs } from "./economyRound.js";
 import { getShopVatPercent } from "./taxTreasury.js";
+import { getShopPriceDef, shopPriceBase, shopPriceInflationOn } from "./shopPrices.js";
 
 export { roundEconomyPrice } from "./economyRound.js";
 
@@ -46,10 +46,24 @@ export function getLastMonthInflationPercent(guildId: string): number {
   return Math.round(v * 100) / 100;
 }
 
-/** Цена в магазине с учётом инфляции (сим и лотерея — без инфляции). */
+/** Сырой множитель инфляции. Живые цены магазина идут через `quoteShopPrice`. */
 export function scaledShopPrice(guildId: string, baseRub: number, fixed: boolean = false): number {
   if (fixed) return roundEconomyPrice(baseRub);
   return roundEconomyPrice(baseRub * getShopPriceMultiplier(guildId));
+}
+
+/**
+ * Итоговая цена позиции магазина.
+ * База и флаг инфляции берутся из админки; без правки — умолчание из кода.
+ * Содержание животных без инфляции по-прежнему индексируется вместе с доходами.
+ */
+export function quoteShopPrice(guildId: string, id: string): number {
+  const def = getShopPriceDef(id);
+  const base = shopPriceBase(guildId, id);
+  if (!def) return roundEconomyPrice(base);
+  if (shopPriceInflationOn(guildId, id)) return roundEconomyPrice(base * getShopPriceMultiplier(guildId));
+  if (def.whenNoInflation === "income") return scaledEconomyExpense(guildId, base);
+  return roundEconomyPrice(base);
 }
 
 /** Доход/штраф/расход с учётом индексации экономики (округление как у цен в магазине). */
@@ -310,24 +324,24 @@ export async function processAllGuildsMacroMonth(
 }
 
 function scaleCatalogPhone(guildId: string, p: PhoneDef): PhoneDef {
-  return { ...p, priceRub: scaledShopPrice(guildId, p.priceRub) };
+  return { ...p, priceRub: quoteShopPrice(guildId, `phone:${p.id}`) };
 }
 
 function scaleCatalogCar(guildId: string, c: CarDef): CarDef {
-  return { ...c, priceRub: scaledShopPrice(guildId, c.priceRub) };
+  return { ...c, priceRub: quoteShopPrice(guildId, `car:${c.id}`) };
 }
 
 function scaleCatalogApartment(guildId: string, a: ApartmentDef): ApartmentDef {
   return {
     ...a,
-    priceRub: scaledShopPrice(guildId, a.priceRub),
-    monthlyUtilityRub: scaledShopPrice(guildId, a.monthlyUtilityRub),
+    priceRub: quoteShopPrice(guildId, `apt:${a.id}`),
+    monthlyUtilityRub: quoteShopPrice(guildId, `aptu:${a.id}`),
   };
 }
 
-/** Аренда советского жилья — с инфляцией магазина (`shopPriceMultiplier`), как квартиры и ЖКХ. */
+/** Аренда советского жилья — база и инфляция из админки цен. */
 export function inflatedHousingRentPrice(guildId: string, plan: HousingRentPlan): number {
-  return scaledShopPrice(guildId, housingRentPlanPriceRub(plan));
+  return quoteShopPrice(guildId, `rent:${plan}`);
 }
 
 export function inflatedPhonePurchaseCost(
@@ -357,21 +371,17 @@ export function inflatedApartmentPurchaseCost(
 }
 
 export function inflatedCatalogPhonePrice(guildId: string, phoneId: string | undefined): number {
-  const p = getPhoneDef(phoneId);
-  return p ? scaledShopPrice(guildId, p.priceRub) : 0;
+  return getPhoneDef(phoneId) ? quoteShopPrice(guildId, `phone:${phoneId}`) : 0;
 }
 
 export function inflatedCatalogCarPrice(guildId: string, carId: string | undefined): number {
-  const c = getCarDef(carId);
-  return c ? scaledShopPrice(guildId, c.priceRub) : 0;
+  return getCarDef(carId) ? quoteShopPrice(guildId, `car:${carId}`) : 0;
 }
 
 export function inflatedCatalogApartmentPrice(guildId: string, aptId: string | undefined): number {
-  const a = getApartmentDef(aptId);
-  return a ? scaledShopPrice(guildId, a.priceRub) : 0;
+  return getApartmentDef(aptId) ? quoteShopPrice(guildId, `apt:${aptId}`) : 0;
 }
 
 export function inflatedApartmentUtilityRub(guildId: string, aptId: string | undefined): number {
-  const a = getApartmentDef(aptId);
-  return a ? scaledShopPrice(guildId, a.monthlyUtilityRub) : 0;
+  return getApartmentDef(aptId) ? quoteShopPrice(guildId, `aptu:${aptId}`) : 0;
 }

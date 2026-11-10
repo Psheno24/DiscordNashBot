@@ -10,6 +10,10 @@ import {
   handleNeuroTaxModalSubmit,
 } from "./neurocontrol/settingsTree.js";
 import { registerVoiceLadder } from "./voice/voiceLadder.js";
+import { registerVoiceJoinPhrases } from "./voice/joinPhrase.js";
+import { handleVoiceJoinPhraseSelect } from "./economy/economyShopVoiceUi.js";
+import { handleShopCatalogModal, handleShopCatalogSelect } from "./neurocontrol/shopCatalogAdmin.js";
+import { handleShopPriceModal, handleShopPriceSelect } from "./neurocontrol/shopPricesAdmin.js";
 import {
   ensureEconomyFeedPanel,
   ensureEconomyTerminalPanel,
@@ -101,6 +105,7 @@ client.on(Events.MessageDelete, async (msg) => {
 
 registerMemberJoin(client);
 registerVoiceLadder(client);
+registerVoiceJoinPhrases(client);
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
@@ -147,6 +152,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
       return;
     }
 
+    if (interaction.isStringSelectMenu()) {
+      if (await handleVoiceJoinPhraseSelect(interaction)) return;
+      if (await handleShopPriceSelect(interaction)) return;
+      if (await handleShopCatalogSelect(interaction)) return;
+      return;
+    }
+
     if (interaction.isChannelSelectMenu()) {
       const chHandled = await handleNeuroChannelsSelect(interaction);
       if (chHandled) {
@@ -161,6 +173,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (interaction.isModalSubmit()) {
       const handled =
         (await handleNeuroTaxModalSubmit(interaction)) ||
+        (await handleShopPriceModal(interaction)) ||
+        (await handleShopCatalogModal(interaction)) ||
         (await handleBetModal(interaction)) ||
         (await handleEconomyModal(interaction));
       if (!handled) return;

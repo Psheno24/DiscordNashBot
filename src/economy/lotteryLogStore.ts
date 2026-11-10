@@ -1,6 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+import { createJsonStore } from "../storage/jsonStore.js";
 
 export type LotteryDrawReason = "scheduled" | "catch-up" | "startup";
 
@@ -25,24 +23,17 @@ interface StoreShape {
   guilds: Record<string, LotteryDrawLogEntry[]>;
 }
 
-const storePath = () => {
-  const dir = join(process.cwd(), "data");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, "economy-lottery-logs.json");
-};
+const lotteryLogJson = createJsonStore<StoreShape>({
+  fileName: "economy-lottery-logs.json",
+  empty: () => ({ guilds: {} }),
+});
 
 function readStore(): StoreShape {
-  const p = storePath();
-  if (!existsSync(p)) return { guilds: {} };
-  try {
-    return JSON.parse(readFileSync(p, "utf-8")) as StoreShape;
-  } catch {
-    return { guilds: {} };
-  }
+  return lotteryLogJson.read();
 }
 
 function writeStore(s: StoreShape) {
-  writeJsonAtomicSync(storePath(), s);
+  lotteryLogJson.write(s);
 }
 
 export function listLotteryDrawLogs(guildId: string): LotteryDrawLogEntry[] {

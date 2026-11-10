@@ -1,6 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+import { createJsonStore } from "../storage/jsonStore.js";
 
 export interface GuildConfig {
   welcomeChannelId?: string;
@@ -37,34 +35,71 @@ export interface GuildConfig {
   macroQuarterInflationAccumPercent?: number;
   /** Макро только по расписанию (1-е число МСК); после миграции v2 — сброс ошибочных множителей. */
   macroScheduleV2?: boolean;
+  /** Правки цен магазина: база и включена ли инфляция. Ключ — id из shopPrices. */
+  shopPrices?: Record<string, ShopPriceOverride>;
+  /** Состав магазина и подписи пунктов меню. */
+  shopCatalog?: ShopCatalogConfig;
+}
+
+export type ShopCatalogKind = "phone" | "car" | "apt" | "pet";
+
+export interface ShopCatalogItem {
+  id: string;
+  kind: ShopCatalogKind;
+  label: string;
+  priceRub: number;
+  origin?: "soviet" | "foreign";
+  meetsCourierMinimum?: boolean;
+  speedKmh?: number;
+  courierShiftHours?: number;
+  monthlyUtilityRub?: number;
+  dailyUpkeepRub?: number;
+  dailyPsRub?: number;
+  requiresPhone?: boolean;
+}
+
+export interface ShopMenuPatch {
+  label?: string;
+  hidden?: boolean;
+}
+
+export interface ShopCatalogConfig {
+  /** Встроенные и свои id, скрытые из продажи. */
+  hidden?: string[];
+  /** Подписи встроенных позиций. Свои товары хранят имя в себе. */
+  labels?: Record<string, string>;
+  custom?: ShopCatalogItem[];
+  menus?: Record<string, ShopMenuPatch>;
+}
+
+export interface ShopPriceOverride {
+  rub?: number;
+  inflation?: boolean;
 }
 
 interface StoreShape {
   guilds: Record<string, GuildConfig>;
 }
 
-const storePath = () => {
-  const dir = join(process.cwd(), "data");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, "guild-config.json");
-};
+const guildConfigJson = createJsonStore<StoreShape>({
+  fileName: "guild-config.json",
+  empty: () => ({ guilds: {} }),
+});
 
 function readStore(): StoreShape {
-  const p = storePath();
-  if (!existsSync(p)) return { guilds: {} };
-  try {
-    return JSON.parse(readFileSync(p, "utf-8")) as StoreShape;
-  } catch {
-    return { guilds: {} };
-  }
+  return guildConfigJson.read();
 }
 
 function writeStore(s: StoreShape) {
-  writeJsonAtomicSync(storePath(), s);
+  guildConfigJson.write(s);
 }
 
 export function getGuildConfig(guildId: string): GuildConfig {
   return readStore().guilds[guildId] ?? {};
+}
+
+export function listGuildConfigs(): { guildId: string; config: GuildConfig }[] {
+  return Object.entries(readStore().guilds).map(([guildId, config]) => ({ guildId, config }));
 }
 
 export function setGuildConfig(guildId: string, next: GuildConfig) {

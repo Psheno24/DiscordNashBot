@@ -11,7 +11,7 @@ export const NEURO_MAIN_INFO = "neuro:main:info";
 export const NEURO_ADMIN_ECON = "neuroAdmin:econ";
 export const NEURO_ADMIN_LOTTERY = "neuroAdmin:lottery";
 
-/** Корень «Настройки» (каналы / налоги). */
+/** Корень «Настройки» (каналы / налоги / магазин). */
 export const NEURO_BUTTON_ADMIN_SETTINGS_ROOT = "neuro:admin:settingsRoot";
 
 const HUB_COLOR = 0x0d47a1;
@@ -29,7 +29,7 @@ export function buildAdminHubEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(HUB_COLOR)
     .setTitle("Админ-панель")
-    .setDescription("**Настройки** — каналы и налоги. **Экономика** — ставки и лотерея.");
+    .setDescription("**Настройки** — каналы, налоги и цены магазина. **Экономика** — ставки и лотерея.");
 }
 
 export function buildAdminHubRows(): ActionRowBuilder<ButtonBuilder>[] {

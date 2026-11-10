@@ -1,39 +1,25 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { writeJsonAtomicSync } from "../storage/atomicJson.js";
+import { createJsonStore } from "../storage/jsonStore.js";
 
 interface StoreShape {
   guilds: Record<string, Record<string, number>>;
 }
 
-const filePath = () => {
-  const dir = join(process.cwd(), "data");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  return join(dir, "voice-time.json");
-};
-
-function readStore(): StoreShape {
-  const p = filePath();
-  if (!existsSync(p)) return { guilds: {} };
-  try {
-    return JSON.parse(readFileSync(p, "utf-8")) as StoreShape;
-  } catch {
-    return { guilds: {} };
-  }
-}
+const voiceTimeJson = createJsonStore<StoreShape>({
+  fileName: "voice-time.json",
+  empty: () => ({ guilds: {} }),
+});
 
 export function addVoiceSeconds(guildId: string, userId: string, deltaSeconds: number): number {
   if (deltaSeconds <= 0) return getVoiceSeconds(guildId, userId);
-  const s = readStore();
+  const s = voiceTimeJson.read();
   if (!s.guilds[guildId]) s.guilds[guildId] = {};
-  const prev = s.guilds[guildId][userId] ?? 0;
+  const prev = s.guilds[guildId]![userId] ?? 0;
   const next = prev + deltaSeconds;
-  s.guilds[guildId][userId] = next;
-  writeJsonAtomicSync(filePath(), s);
+  s.guilds[guildId]![userId] = next;
+  voiceTimeJson.write(s);
   return next;
 }
 
 export function getVoiceSeconds(guildId: string, userId: string): number {
-  const s = readStore();
-  return s.guilds[guildId]?.[userId] ?? 0;
+  return voiceTimeJson.read().guilds[guildId]?.[userId] ?? 0;
 }
