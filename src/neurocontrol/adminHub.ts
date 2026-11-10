@@ -14,6 +14,10 @@ export const NEURO_ADMIN_LOTTERY = "neuroAdmin:lottery";
 /** Корень «Настройки» (каналы / налоги / магазин). */
 export const NEURO_BUTTON_ADMIN_SETTINGS_ROOT = "neuro:admin:settingsRoot";
 
+export function isGuildOwner(interaction: { inGuild(): boolean; guild: { ownerId: string } | null; user: { id: string } }): boolean {
+  return interaction.inGuild() && interaction.guild?.ownerId === interaction.user.id;
+}
+
 const HUB_COLOR = 0x0d47a1;
 
 export function buildNeuroMainPanelRows(): ActionRowBuilder<ButtonBuilder>[] {
@@ -29,7 +33,7 @@ export function buildAdminHubEmbed(): EmbedBuilder {
   return new EmbedBuilder()
     .setColor(HUB_COLOR)
     .setTitle("Админ-панель")
-    .setDescription("**Настройки** — каналы, налоги и цены магазина. **Экономика** — ставки и лотерея.");
+    .setDescription("**Настройки** — каналы и налоги. Цены и состав магазина открыты **создателю сервера**. **Экономика** — ставки и лотерея.");
 }
 
 export function buildAdminHubRows(): ActionRowBuilder<ButtonBuilder>[] {

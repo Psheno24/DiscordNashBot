@@ -5,7 +5,6 @@ import {
   EmbedBuilder,
   MessageFlags,
   ModalBuilder,
-  PermissionsBitField,
   StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -25,7 +24,7 @@ import {
   shopPriceIsOverridden,
   type ShopPriceGroup,
 } from "../economy/shopPrices.js";
-import { NEURO_BUTTON_ADMIN_SETTINGS_ROOT } from "./adminHub.js";
+import { isGuildOwner, NEURO_BUTTON_ADMIN_SETTINGS_ROOT } from "./adminHub.js";
 
 export const NEURO_SETTINGS_SHOP = "neuro:settings:shop";
 const NEURO_SHOP_GROUP_PREFIX = "neuro:shop:g:";
@@ -35,11 +34,7 @@ const MODAL_SHOP_PRICE_PREFIX = "modal:neuro:shopPrice:";
 const SETTINGS_COLOR = 0x2b2d31;
 
 function canManage(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
-  return (
-    interaction.inGuild() &&
-    (interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild) ||
-      interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator))
-  );
+  return isGuildOwner(interaction);
 }
 
 function fmt(n: number): string {
@@ -47,7 +42,7 @@ function fmt(n: number): string {
 }
 
 function deny(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): Promise<unknown> {
-  return interaction.reply({ content: "Нужны права **Управление сервером**.", flags: MessageFlags.Ephemeral });
+  return interaction.reply({ content: "Цены магазина меняет только **создатель сервера**.", flags: MessageFlags.Ephemeral });
 }
 
 async function showShop(

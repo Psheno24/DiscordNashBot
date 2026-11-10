@@ -5,7 +5,6 @@ import {
   EmbedBuilder,
   MessageFlags,
   ModalBuilder,
-  PermissionsBitField,
   StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -32,6 +31,7 @@ import {
 import { listEconomyUsers } from "../economy/userStore.js";
 import type { ShopCatalogKind } from "../guildConfig/store.js";
 import { setShopPriceOverride, shopPriceBase } from "../economy/shopPrices.js";
+import { isGuildOwner } from "./adminHub.js";
 import { NEURO_SETTINGS_SHOP } from "./shopPricesAdmin.js";
 
 export const NEURO_CATALOG = "neuro:shop:catalog";
@@ -62,11 +62,7 @@ const KINDS: { id: ShopCatalogKind; label: string }[] = [
 ];
 
 function canManage(interaction: ButtonInteraction | StringSelectMenuInteraction | ModalSubmitInteraction): boolean {
-  return (
-    interaction.inGuild() &&
-    (interaction.memberPermissions?.has(PermissionsBitField.Flags.ManageGuild) ||
-      interaction.memberPermissions?.has(PermissionsBitField.Flags.Administrator))
-  );
+  return isGuildOwner(interaction);
 }
 
 function fmt(n: number): string {
@@ -339,7 +335,7 @@ export async function handleShopCatalogButton(interaction: ButtonInteraction): P
     return true;
   }
   if (!canManage(interaction)) {
-    await interaction.reply({ content: "Нужны права **Управление сервером**.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: "Состав магазина меняет только **создатель сервера**.", flags: MessageFlags.Ephemeral });
     return true;
   }
   const gid = interaction.guildId;
@@ -451,7 +447,7 @@ export async function handleShopCatalogSelect(interaction: StringSelectMenuInter
     return true;
   }
   if (!canManage(interaction)) {
-    await interaction.reply({ content: "Нужны права **Управление сервером**.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: "Состав магазина меняет только **создатель сервера**.", flags: MessageFlags.Ephemeral });
     return true;
   }
   const value = interaction.values[0] ?? "";
@@ -469,7 +465,7 @@ export async function handleShopCatalogModal(interaction: ModalSubmitInteraction
     return true;
   }
   if (!canManage(interaction)) {
-    await interaction.reply({ content: "Нужны права **Управление сервером**.", flags: MessageFlags.Ephemeral });
+    await interaction.reply({ content: "Состав магазина меняет только **создатель сервера**.", flags: MessageFlags.Ephemeral });
     return true;
   }
   const gid = interaction.guildId;

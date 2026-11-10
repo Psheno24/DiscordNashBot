@@ -27,7 +27,7 @@ import {
   getSolePropWithdrawFeePercent,
 } from "../economy/taxTreasury.js";
 import { ensureEconomyTerminalPanel } from "../economy/panel.js";
-import { NEURO_BUTTON_ADMIN_SETTINGS_ROOT, NEURO_MAIN_ADMIN } from "./adminHub.js";
+import { isGuildOwner, NEURO_BUTTON_ADMIN_SETTINGS_ROOT, NEURO_MAIN_ADMIN } from "./adminHub.js";
 import { handleShopCatalogButton } from "./shopCatalogAdmin.js";
 import { handleShopPriceAdminButton, NEURO_SETTINGS_SHOP } from "./shopPricesAdmin.js";
 
@@ -87,30 +87,26 @@ function fmtTreasury(guildId: string): string {
   return Number.isInteger(t) ? t.toLocaleString("ru-RU") : t.toLocaleString("ru-RU", { maximumFractionDigits: 2 });
 }
 
-function buildSettingsRootEmbed(guildId: string): EmbedBuilder {
-  return new EmbedBuilder()
-    .setColor(SETTINGS_COLOR)
-    .setTitle("Настройки бота")
-    .setDescription(
-      [
-        "**Каналы** — приветствия, панель, терминал, лента.",
-        "**Налоги** — подоходный, НДС, комиссия ИП и казна.",
-        "**Макро** — индексация доходов и инфляция цен.",
-        "**Магазин** — база каждой цены и включена ли инфляция.",
-        "",
-        `Казна: **${fmtTreasury(guildId)}** ₽`,
-      ].join("\n"),
-    );
+function buildSettingsRootEmbed(guildId: string, owner: boolean): EmbedBuilder {
+  const lines = [
+    "**Каналы** — приветствия, панель, терминал, лента.",
+    "**Налоги** — подоходный, НДС, комиссия ИП и казна.",
+    "**Макро** — индексация доходов и инфляция цен.",
+  ];
+  if (owner) lines.push("**Магазин** — цены, состав товаров и пункты меню. Только создатель сервера.");
+  lines.push("", `Казна: **${fmtTreasury(guildId)}** ₽`);
+  return new EmbedBuilder().setColor(SETTINGS_COLOR).setTitle("Настройки бота").setDescription(lines.join("\n"));
 }
 
-function buildSettingsRootRows(): ActionRowBuilder<ButtonBuilder>[] {
+function buildSettingsRootRows(owner: boolean): ActionRowBuilder<ButtonBuilder>[] {
+  const buttons = [
+    new ButtonBuilder().setCustomId(NEURO_SETTINGS_CHANNELS).setLabel("Каналы").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId(NEURO_SETTINGS_TAXES).setLabel("Налоги").setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(NEURO_SETTINGS_MACRO).setLabel("Макро").setStyle(ButtonStyle.Secondary),
+  ];
+  if (owner) buttons.push(new ButtonBuilder().setCustomId(NEURO_SETTINGS_SHOP).setLabel("Магазин").setStyle(ButtonStyle.Secondary));
   return [
-    new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(NEURO_SETTINGS_CHANNELS).setLabel("Каналы").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(NEURO_SETTINGS_TAXES).setLabel("Налоги").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(NEURO_SETTINGS_MACRO).setLabel("Макро").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(NEURO_SETTINGS_SHOP).setLabel("Магазин").setStyle(ButtonStyle.Secondary),
-    ),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons),
     new ActionRowBuilder<ButtonBuilder>().addComponents(
       new ButtonBuilder().setCustomId(NEURO_MAIN_ADMIN).setLabel("Назад").setStyle(ButtonStyle.Secondary),
     ),
@@ -352,8 +348,8 @@ export async function handleNeuroSettingsTreeButton(interaction: ButtonInteracti
 
   if (id === NEURO_BUTTON_ADMIN_SETTINGS_ROOT) {
     await replyOrUpdateEphemeral(interaction, {
-      embeds: [buildSettingsRootEmbed(gid)],
-      components: buildSettingsRootRows(),
+      embeds: [buildSettingsRootEmbed(gid, isGuildOwner(interaction))],
+      components: buildSettingsRootRows(isGuildOwner(interaction)),
     });
     return true;
   }
