@@ -135,9 +135,8 @@ function buildVoiceJoinPhraseRows(
       .setMaxValues(1)
       .addOptions(
         slice.map((sound) => ({
-          label: (sound.name || "звук").slice(0, 100),
+          label: `${sound.soundId === u.voiceJoinSoundId ? "✓ " : ""}${sound.name || "звук"}`.slice(0, 100),
           value: sound.soundId,
-          ...(sound.soundId === u.voiceJoinSoundId ? { default: true } : {}),
           ...(sound.emojiName ? { emoji: { name: sound.emojiName } } : {}),
         })),
       );

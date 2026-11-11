@@ -148,6 +148,7 @@ export async function listGuildJoinSounds(guild: Guild): Promise<GuildJoinSound[
         ? emoji.name
         : undefined;
     const name = sound.name.replace(/[*`|_]/g, "").replace(/\s+/g, " ").trim().slice(0, 32) || "звук";
+    if (sounds.some((row) => row.soundId === sound.soundId)) continue;
     sounds.push({ soundId: sound.soundId, name, emojiName });
   }
   sounds.sort((a, b) => a.name.localeCompare(b.name, "ru"));
@@ -268,21 +269,31 @@ async function playJoinPhrase(client: Client, job: PhraseJob): Promise<void> {
     channelId: channel.id,
     guildId: guild.id,
     adapterCreator: guild.voiceAdapterCreator,
-    selfDeaf: true,
+    selfDeaf: false,
     selfMute: false,
   });
   try {
     await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+    await me.voice.setDeaf(false).catch(() => undefined);
+    await me.voice.setMute(false).catch(() => undefined);
+    await sleep(400);
   } catch (e) {
     connection.destroy();
     throw e;
   }
 
-  const send = () => channel.sendSoundboardSound({ soundId: sound.soundId, guildId: guild.id });
+  const sourceGuildId = sound.guildId ?? undefined;
+  const send = () => channel.sendSoundboardSound({ soundId: sound.soundId, guildId: sourceGuildId });
   try {
     await send();
   } catch (e) {
-    if (!(e instanceof DiscordAPIError) || (e.status !== 429 && e.code !== 40032)) throw e;
+    const retryable =
+      e instanceof DiscordAPIError && (e.status === 429 || e.code === 40032 || e.code === 50167);
+    if (!retryable) throw e;
+    if (e.code === 50167) {
+      await me.voice.setDeaf(false).catch(() => undefined);
+      await me.voice.setMute(false).catch(() => undefined);
+    }
     await sleep(e.status === 429 ? SOUND_HOLD_MS : 800);
     await send();
   }
