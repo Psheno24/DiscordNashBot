@@ -18,6 +18,7 @@ import { appendFeedEvent } from "../economy/feedStore.js";
 import { mskYearMonth, quoteShopPrice } from "../economy/economyMacro.js";
 import { remitShopPurchaseVatToTreasury } from "../economy/taxTreasury.js";
 import { getEconomyUser, listEconomyUsers, updateEconomyUser } from "../economy/userStore.js";
+import { joinSoundHoldMs } from "./soundDuration.js";
 
 /** Умолчание покупки. Живая цена — `voiceJoinPhrasePriceRub`. */
 export const VOICE_JOIN_PHRASE_PRICE_RUB = 10_000_000;
@@ -29,9 +30,6 @@ export function voiceJoinPhrasePriceRub(guildId: string): number {
 export function voiceJoinMonthPriceRub(guildId: string): number {
   return quoteShopPrice(guildId, "voice:month");
 }
-
-/** Сколько держать бота в канале, пока Discord доигрывает звук саундборда (лимит ~5 с). */
-const SOUND_HOLD_MS = 6_000;
 
 export interface GuildJoinSound {
   soundId: string;
@@ -165,6 +163,8 @@ export async function assignVoiceJoinSound(
   const sounds = await listGuildJoinSounds(member.guild);
   const sound = sounds.find((s) => s.soundId === soundId);
   if (!sound) return { ok: false, reason: "Этого звука нет в саундборде сервера." };
+  const live = member.guild.soundboardSounds.cache.get(sound.soundId);
+  if (live) void joinSoundHoldMs(live);
   updateEconomyUser(member.guild.id, member.id, (cur) => ({
     ...cur,
     voiceJoinPhrase: true,
@@ -247,12 +247,6 @@ async function playJoinPhrase(client: Client, job: PhraseJob): Promise<void> {
   if (!channel || channel.type !== ChannelType.GuildVoice) return;
   if (guild.afkChannelId === channel.id) return;
 
-  const sound = await guild.soundboardSounds.fetch(job.soundId).catch(() => null);
-  if (!sound || !sound.available) {
-    console.warn("ИИ Управление: звук фразы недоступен:", job.soundId);
-    return;
-  }
-
   const me = guild.members.me ?? (await guild.members.fetchMe().catch(() => null));
   if (!me) return;
   const perms = channel.permissionsFor(me);
@@ -265,6 +259,7 @@ async function playJoinPhrase(client: Client, job: PhraseJob): Promise<void> {
     return;
   }
 
+  const soundPromise = guild.soundboardSounds.fetch(job.soundId).catch(() => null);
   const connection = joinVoiceChannel({
     channelId: channel.id,
     guildId: guild.id,
@@ -272,16 +267,24 @@ async function playJoinPhrase(client: Client, job: PhraseJob): Promise<void> {
     selfDeaf: false,
     selfMute: false,
   });
+  const ready = entersState(connection, VoiceConnectionStatus.Ready, 20_000);
+  ready.catch(() => undefined);
+
+  const sound = await soundPromise;
+  if (!sound?.available) {
+    connection.destroy();
+    console.warn("ИИ Управление: звук фразы недоступен:", job.soundId);
+    return;
+  }
+  const holdPromise = joinSoundHoldMs(sound);
   try {
-    await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
-    await me.voice.setDeaf(false).catch(() => undefined);
-    await me.voice.setMute(false).catch(() => undefined);
-    await sleep(400);
+    await ready;
   } catch (e) {
     connection.destroy();
     throw e;
   }
 
+  const started = Date.now();
   const sourceGuildId = sound.guildId ?? undefined;
   const send = () => channel.sendSoundboardSound({ soundId: sound.soundId, guildId: sourceGuildId });
   try {
@@ -294,10 +297,11 @@ async function playJoinPhrase(client: Client, job: PhraseJob): Promise<void> {
       await me.voice.setDeaf(false).catch(() => undefined);
       await me.voice.setMute(false).catch(() => undefined);
     }
-    await sleep(e.status === 429 ? SOUND_HOLD_MS : 800);
+    await sleep(e.status === 429 ? 1_000 : 400);
     await send();
   }
-  await sleep(SOUND_HOLD_MS);
+  const left = (await holdPromise) - (Date.now() - started);
+  if (left > 0) await sleep(left);
 }
 
 export function registerVoiceJoinPhrases(client: Client): void {
