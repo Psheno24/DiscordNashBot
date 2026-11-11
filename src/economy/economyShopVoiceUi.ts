@@ -127,16 +127,20 @@ function buildVoiceJoinPhraseRows(
   const pages = pageCount(list.length);
   const safePage = Math.min(Math.max(0, page), pages - 1);
   const slice = list.slice(safePage * DISCORD_PAGE, safePage * DISCORD_PAGE + DISCORD_PAGE);
-  if (slice.length > 0) {
+  const selected = u.voiceJoinSoundId ? list.find((s) => s.soundId === u.voiceJoinSoundId) : undefined;
+  const selectedOnPage = selected != null && slice.some((s) => s.soundId === selected.soundId);
+  const options = selected && !selectedOnPage ? [selected, ...slice.slice(0, DISCORD_PAGE - 1)] : slice;
+  if (options.length > 0) {
     const menu = new StringSelectMenuBuilder()
       .setCustomId(ECON_SHOP_VOICE_SELECT)
-      .setPlaceholder(pages > 1 ? `Звуки · ${safePage + 1}/${pages}` : "Выбери звук")
+      .setPlaceholder(selected ? `Сейчас: ${selected.name}`.slice(0, 150) : "Выбери звук")
       .setMinValues(1)
       .setMaxValues(1)
       .addOptions(
-        slice.map((sound) => ({
-          label: `${sound.soundId === u.voiceJoinSoundId ? "✓ " : ""}${sound.name || "звук"}`.slice(0, 100),
+        options.map((sound) => ({
+          label: (sound.name || "звук").slice(0, 100),
           value: sound.soundId,
+          default: sound.soundId === u.voiceJoinSoundId,
           ...(sound.emojiName ? { emoji: { name: sound.emojiName } } : {}),
         })),
       );
@@ -148,7 +152,7 @@ function buildVoiceJoinPhraseRows(
     pageButtons.push(
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_VOICE_PAGE_PREFIX}${safePage - 1}`)
-        .setLabel("Пред.")
+        .setLabel("Предыдущие")
         .setStyle(ButtonStyle.Secondary),
     );
   }
@@ -156,7 +160,7 @@ function buildVoiceJoinPhraseRows(
     pageButtons.push(
       new ButtonBuilder()
         .setCustomId(`${ECON_SHOP_VOICE_PAGE_PREFIX}${safePage + 1}`)
-        .setLabel("Дальше")
+        .setLabel("Ещё звуки")
         .setStyle(ButtonStyle.Secondary),
     );
   }
