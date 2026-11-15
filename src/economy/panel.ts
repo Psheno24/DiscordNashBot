@@ -235,8 +235,10 @@ import {
   sellOwnedCar,
   sellOwnedPhone,
   buildShopPlateEmbed,
-  buildShopPlateDetailsEmbed,
+  buildShopPlateGuideEmbed,
+  buildShopPlateGuideRows,
   buildShopPlateRows,
+  parsePlateGuideRef,
   buildShopPlateCarEmbed,
   buildShopPlateCarRows,
   buildShopPlateAttachEmbed,
@@ -297,7 +299,6 @@ import {
   ECON_SHOP_PLATE_DIGITS,
   ECON_SHOP_PLATE_LETTERS,
   ECON_SHOP_PLATE_REGION,
-  ECON_SHOP_PLATE_DETAILS,
   ECON_SHOP_PLATE_CAR_PREFIX,
   ECON_SHOP_PLATE_DIG_PREFIX,
   ECON_SHOP_PLATE_LET_PREFIX,
@@ -4520,10 +4521,11 @@ export async function handleEconomyButton(interaction: ButtonInteraction): Promi
     return true;
   }
 
-  if (id === ECON_SHOP_PLATE_DETAILS) {
+  const plateGuide = parsePlateGuideRef(id);
+  if (plateGuide) {
     await replyOrUpdate(interaction, {
-      embeds: [buildShopPlateDetailsEmbed(member)],
-      components: [shopNavBottomRow(ECON_SHOP_PLATE)],
+      embeds: [buildShopPlateGuideEmbed(member, plateGuide.tab)],
+      components: buildShopPlateGuideRows(plateGuide.tab, plateGuide.carUid),
     });
     return true;
   }

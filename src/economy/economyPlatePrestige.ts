@@ -156,7 +156,7 @@ function digitScore(digits: string): { score: number; label?: string } {
   const extra = DIGIT_EXTRA_BONUSES[digits] ?? 0;
   if (extra > 0) {
     base += extra;
-    label = label ? `${label} +${extra}` : `бонус ${digits} +${extra}`;
+    label = label ? `${label} +${pts(extra)}` : `бонус ${digits} +${pts(extra)}`;
   }
 
   return { score: base, label };
@@ -260,25 +260,28 @@ export function computePlatePrestige(p: VehiclePlateParts): PlatePrestigeBreakdo
 
   if (series.score > 0) {
     base += series.score;
-    lines.push(`серия **+${series.score}** (${series.label})`);
+    lines.push(`серия **+${pts(series.score)}** (${series.label})`);
   }
   if (region.score > 0) {
     base += region.score;
-    lines.push(`регион **+${region.score}** (${region.label})`);
+    lines.push(`регион **+${pts(region.score)}** (${region.label})`);
   }
   if (digit.score > 0) {
     base += digit.score;
-    lines.push(`цифры **+${digit.score}** (${digit.label})`);
+    lines.push(`цифры **+${pts(digit.score)}** (${digit.label})`);
   }
   if (visual.score > 0) {
     base += visual.score;
-    lines.push(`визуал **+${visual.score}** (${visual.label})`);
+    lines.push(`визуал **+${pts(visual.score)}** (${visual.label})`);
   }
 
   const coreSubtotal = series.score + region.score;
   const digitPart = digit.score;
   const visualPart = visual.score;
   const { thematicMult, vanityMult, labels } = comboMultipliers(p, series, digitPart, visualPart);
+  if (series.isStatus && thematicMult === 1) {
+    labels.push(`множителя с регионом **${p.region}** нет`);
+  }
 
   let total: number;
   const multiplierLines = [...labels];
@@ -304,6 +307,203 @@ export function formatPlatePrestigeBreakdownShort(b: PlatePrestigeBreakdown): st
   if (b.multipliers.length) parts.push(b.multipliers.join("; "));
   if (b.total !== b.base) parts.push(`база **${b.base.toLocaleString("ru-RU")}** → **${b.total.toLocaleString("ru-RU")}**`);
   return parts.join(" · ") || "без бонусов";
+}
+
+export function formatPlatePrestigeDetailLines(b: PlatePrestigeBreakdown): string[] {
+  const out = [...b.lines, ...b.multipliers];
+  if (b.total !== b.base) out.push(`база **${b.base.toLocaleString("ru-RU")}** → **${b.total.toLocaleString("ru-RU")}**`);
+  return out;
+}
+
+export type PlateGuideTab = "how" | "series" | "regions" | "combos" | "digits" | "mine";
+
+const PLATE_GUIDE_TABS: readonly PlateGuideTab[] = ["how", "series", "regions", "combos", "digits", "mine"];
+
+export function isPlateGuideTab(v: string): v is PlateGuideTab {
+  return (PLATE_GUIDE_TABS as readonly string[]).includes(v);
+}
+
+function pts(n: number): string {
+  return n.toLocaleString("ru-RU");
+}
+
+function scoreCell(label: string, score: number, width: number): string {
+  const value = pts(score);
+  const gap = Math.max(2, width - label.length - value.length);
+  return `${label}${" ".repeat(gap)}${value}`;
+}
+
+function paired(cells: string[]): string[] {
+  const rows: string[] = [];
+  for (let i = 0; i < cells.length; i += 2) {
+    const right = cells[i + 1];
+    rows.push(right ? `${cells[i]}    ${right}` : cells[i]!);
+  }
+  return rows;
+}
+
+function fence(rows: string[]): string {
+  return ["```", ...rows, "```"].join("\n");
+}
+
+function multToken(mult: number): string {
+  const text = mult.toFixed(2).replace(".", ",").replace(/0$/, "");
+  return `×${text}`;
+}
+
+const SERIES_BANDS: readonly { title: string; min: number; max: number }[] = [
+  { title: "25 000 – 17 000", min: 17_000, max: 25_000 },
+  { title: "12 000 – 10 000", min: 10_000, max: 12_000 },
+  { title: "9 000 – 6 000", min: 6_000, max: 9_000 },
+  { title: "5 500 – 4 000", min: 4_000, max: 5_500 },
+  { title: "3 500 – 1 000", min: 1_000, max: 3_500 },
+];
+
+const REGION_GROUPS: readonly { title: string; codes: readonly string[] }[] = [
+  { title: "Москва", codes: ["77", "97", "99", "777", "177", "799", "797", "199", "197"] },
+  { title: "Московская область", codes: ["50", "90", "190", "750", "790"] },
+  { title: "Санкт-Петербург", codes: ["78", "98", "178"] },
+  { title: "Прочие", codes: ["95", "616", "222", "333", "444", "555", "666"] },
+];
+
+const REGION_TAG: Readonly<Record<string, string>> = {
+  "95": "Чечня",
+  "616": "Татарстан",
+  "222": "красивый",
+  "333": "красивый",
+  "444": "красивый",
+  "555": "красивый",
+  "666": "красивый",
+};
+
+function seriesGuideLines(): string[] {
+  const lines = [
+    "Чем выше серия в списке, тем больше она даёт сама по себе. Множитель с регионом — во вкладке **Сочетания**: он может обогнать более дорогую серию.",
+  ];
+  const used = new Set<string>();
+  for (const band of SERIES_BANDS) {
+    const cells = Object.entries(STATUS_SERIES_SCORES)
+      .filter(([, v]) => v.score >= band.min && v.score <= band.max)
+      .map(([series, v]) => {
+        used.add(series);
+        return scoreCell(series, v.score, 16);
+      });
+    if (!cells.length) continue;
+    lines.push("", `**${band.title}**`, fence(paired(cells)));
+  }
+  const rest = Object.entries(STATUS_SERIES_SCORES).filter(([series]) => !used.has(series));
+  if (rest.length) {
+    lines.push("", "**Остальные**", fence(paired(rest.map(([series, v]) => scoreCell(series, v.score, 16)))));
+  }
+  lines.push("", "Тройные **ААА**, **ВВВ**, **МММ**, **ХХХ**, если такой серии нет в таблице, — **+5 000**.");
+  return lines;
+}
+
+function regionGuideLines(): string[] {
+  const lines = ["Очки региона прибавляются всегда. Отдельный множитель есть только у пар из вкладки **Сочетания**."];
+  const used = new Set<string>();
+  for (const group of REGION_GROUPS) {
+    const cells = group.codes
+      .filter((code) => REGION_SCORES[code])
+      .map((code) => {
+        used.add(code);
+        const tag = REGION_TAG[code];
+        return scoreCell(tag ? `${code} ${tag}` : code, REGION_SCORES[code]!.score, 20);
+      });
+    if (!cells.length) continue;
+    lines.push("", `**${group.title}**`, fence(paired(cells)));
+  }
+  const rest = Object.keys(REGION_SCORES).filter((code) => !used.has(code));
+  if (rest.length) {
+    lines.push(
+      "",
+      "**Ещё**",
+      fence(paired(rest.map((code) => scoreCell(code, REGION_SCORES[code]!.score, 16)))),
+    );
+  }
+  return lines;
+}
+
+function comboGuideLines(): string[] {
+  const bySeries = new Map<string, string[]>();
+  for (const t of THEMATIC_MULTIPLIERS) {
+    const list = bySeries.get(t.series) ?? [];
+    list.push(`${t.region} ${multToken(t.mult)}`);
+    bySeries.set(t.series, list);
+  }
+  const rows: string[] = [];
+  for (const [series, parts] of bySeries) {
+    let line = "";
+    for (const part of parts) {
+      const next = line ? `${line}   ${part}` : `${series}  ${part}`;
+      if (line && next.length > 48) {
+        rows.push(line);
+        line = `     ${part}`;
+      } else {
+        line = next;
+      }
+    }
+    if (line) rows.push(line);
+  }
+  const amo = computePlatePrestige({ l1: "А", digits: "555", l2: "МО", region: "97" }).total;
+  const ccc = computePlatePrestige({ l1: "С", digits: "555", l2: "СС", region: "97" }).total;
+  return [
+    "Множитель берёт **серию + регион + цифры**. Визуал прибавляется после и не умножается. Пары, которой нет в списке, не существует: остаётся просто сумма.",
+    "",
+    fence(rows),
+    "",
+    `Например **АМО + 97** есть (**×1,5**), а **ССС + 97** нет. Поэтому **А 555 МО | 97** даёт **${pts(amo)}**, а **С 555 СС | 97** — **${pts(ccc)}**.`,
+  ];
+}
+
+function digitGuideLines(): string[] {
+  const base: [string, number][] = [
+    ["001 и 007", 2500],
+    ["тройка 111…999", 3000],
+    ["сотня 100…900", 1500],
+    ["палиндром 121", 1200],
+    ["две одинаковые", 500],
+  ];
+  const extra = Object.entries(DIGIT_EXTRA_BONUSES).map(([digits, score]) => scoreCell(digits, score, 12));
+  return [
+    "База цифр одна. Дополнительный бонус прибавляется сверху. **555** — тройка **3 000** и бонус **600**, вместе **3 600**.",
+    "",
+    "**База**",
+    fence(base.map(([label, score]) => scoreCell(label, score, 22))),
+    "",
+    "**Бонус сверху, к тройке**",
+    fence(paired(extra)),
+    "",
+    "Визуал: буква **О** считается как **0**, **В** как **8**. Совпала 1 буква — **+100**, две — **+300**, три — **+1 000**. В множитель визуал не входит.",
+    "",
+    "Тройка цифр и тройка букв, если серия не статусная, дополнительно **×1,5** на цифры и визуал.",
+  ];
+}
+
+function howGuideLines(): string[] {
+  const amo = { l1: "А", digits: "555", l2: "МО", region: "97" };
+  const ccc = { l1: "С", digits: "555", l2: "СС", region: "97" };
+  const ccc77 = computePlatePrestige({ ...ccc, region: "77" }).total;
+  return [
+    "Престиж = **(серия + регион + цифры) × сочетание + визуал**.",
+    "",
+    "Визуал прибавляется после множителя и сам не умножается. Если пары «серия + регион» нет в сочетаниях, множитель **×1** — даже когда серия дороже.",
+    "",
+    "**Пример.** Одинаковые цифры и регион, разная серия.",
+    `**А 555 МО | 97 RUS** — серия АМО **12 000**, вместе с регионом и цифрами **×1,5** → **${pts(computePlatePrestige(amo).total)}**`,
+    `**С 555 СС | 97 RUS** — серия ССС **17 000**, пары с **97** нет → **${pts(computePlatePrestige(ccc).total)}**`,
+    "",
+    `**ССС** множится только с регионом **77** (×1,8). На **77** этот номер был бы **${pts(ccc77)}**.`,
+  ];
+}
+
+/** Текст вкладок «Условия», кроме «Мои номера». */
+export function plateConditionsLines(tab: Exclude<PlateGuideTab, "mine">): string[] {
+  if (tab === "series") return seriesGuideLines();
+  if (tab === "regions") return regionGuideLines();
+  if (tab === "combos") return comboGuideLines();
+  if (tab === "digits") return digitGuideLines();
+  return howGuideLines();
 }
 
 export function platePrestigeRulesTableLines(): string[] {
@@ -368,7 +568,7 @@ function bestRegionSuggestion(parts: VehiclePlateParts, takenKeys: ReadonlySet<s
     const delta = next - now;
     const suggestion = {
       score: delta,
-      text: `С этой серией выгоднее регион **${opt.region}** (${opt.label}), если не занят: **+${delta.toLocaleString("ru-RU")}** престижа.`,
+      text: `регион **${opt.region}** — ${opt.label} — **+${delta.toLocaleString("ru-RU")}**`,
     };
     if (!best || suggestion.score > best.score) best = suggestion;
   }
@@ -389,7 +589,7 @@ function bestSeriesSuggestion(parts: VehiclePlateParts, takenKeys: ReadonlySet<s
     const delta = next - now;
     const suggestion = {
       score: delta,
-      text: `С этим регионом можно собрать серию **${opt.series}** (${opt.label}), если не занято: **+${delta.toLocaleString("ru-RU")}** престижа.`,
+      text: `серия **${opt.series}** — ${opt.label} — **+${delta.toLocaleString("ru-RU")}**`,
     };
     if (!best || suggestion.score > best.score) best = suggestion;
   }
@@ -408,7 +608,7 @@ function bestDigitsSuggestion(parts: VehiclePlateParts, takenKeys: ReadonlySet<s
     const delta = next - now;
     const suggestion = {
       score: delta,
-      text: `По цифрам здесь часто лучше **${digits}** (если свободно): **+${delta.toLocaleString("ru-RU")}** престижа.`,
+      text: `цифры **${digits}** — **+${delta.toLocaleString("ru-RU")}**`,
     };
     if (!best || suggestion.score > best.score) best = suggestion;
   }
@@ -425,6 +625,12 @@ export function buildPlateUpgradeTips(
     .sort((a, b) => b.score - a.score)
     .slice(0, Math.max(1, maxTips));
   return suggestions.map((s) => s.text);
+}
+
+export function formatPlateGrowthLines(parts: VehiclePlateParts, takenKeys: ReadonlySet<string>): string[] {
+  const tips = buildPlateUpgradeTips(parts, takenKeys);
+  if (!tips.length) return ["Куда расти: свободных сочетаний лучше этого номера нет."];
+  return ["Куда расти, если свободно:", ...tips.map((tip) => `· ${tip}`)];
 }
 
 export type PlateShopLastRoll = {

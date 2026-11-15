@@ -37,13 +37,17 @@ import {
 import {
   formatVehiclePlate,
   formatVehiclePlateFromUser,
+  vehiclePlateKey,
   type VehiclePlateParts,
 } from "./economyLicensePlate.js";
 import {
   computePlatePrestige,
-  platePrestigeRulesTableLines,
+  formatPlateGrowthLines,
+  formatPlatePrestigeDetailLines,
   formatPlateRollEmbedFooter,
-  PLATE_SHOP_PRESTIGE_HINT_LINES,
+  isPlateGuideTab,
+  plateConditionsLines,
+  type PlateGuideTab,
   type PlateShopLastRoll,
 } from "./economyPlatePrestige.js";
 import {
@@ -76,7 +80,6 @@ import {
   findOwnedPhone,
   formatCarWithPlateLine,
   formatOwnedPetLine,
-  listAttachedPlates,
   listOwnedApartmentsByOrigin,
   listOwnedCars,
   listOwnedCarsByOrigin,
@@ -149,6 +152,7 @@ export {
   sellSovietApartment,
   syncVehiclePlatePrestige,
 } from "./economyShopActions.js";
+import { takenVehiclePlateKeys } from "./economyShopActions.js";
 
 export { ECON_BUTTON_MENU, ECON_NAV_BACK_TO_MENU };
 
@@ -227,6 +231,7 @@ export const ECON_SHOP_PLATE_DIGITS = "econ:shop:plate:dig";
 export const ECON_SHOP_PLATE_LETTERS = "econ:shop:plate:let";
 export const ECON_SHOP_PLATE_REGION = "econ:shop:plate:regio";
 export const ECON_SHOP_PLATE_DETAILS = "econ:shop:plate:details";
+export const ECON_SHOP_PLATE_TAB_PREFIX = "econ:shop:plate:tab:";
 export const ECON_SHOP_PLATE_CAR_PREFIX = "econ:shop:plateCar:";
 export const ECON_SHOP_PLATE_DIG_PREFIX = "econ:shop:plateDig:";
 export const ECON_SHOP_PLATE_LET_PREFIX = "econ:shop:plateLet:";
@@ -621,35 +626,114 @@ export function buildShopPlateEmbed(member: GuildMember, lastRoll?: PlateShopLas
     "**Неприкрепленные:**",
     unattached.length ? unattached.map((p) => `• **${formatVehiclePlate(p)}**`).join("\n") : "• нет",
     "",
-    "Неприкрепленные номера престижа **не** дают. Престиж = серия + цифры + регион + визуал + множители сочетаний.",
+    "Неприкрепленные номера престижа **не** дают. Формула, серии и множители — кнопка **Условия**.",
   ];
-  if (!lastRoll) {
-    lines.push("", ...PLATE_SHOP_PRESTIGE_HINT_LINES);
-  }
   const attachedPrestige = (u.vehiclePlatePrestige ?? 0);
   if (attachedPrestige > 0) lines.push(`Престиж с авто: **${fmt(attachedPrestige)}**`);
   if (lastRoll) lines.push(...formatPlateRollEmbedFooter(lastRoll));
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Госномер").setDescription(lines.join("\n"));
 }
 
-export function buildShopPlateDetailsEmbed(member: GuildMember): EmbedBuilder {
+const PLATE_GUIDE_BUTTONS: readonly { tab: PlateGuideTab; label: string }[] = [
+  { tab: "how", label: "Как считается" },
+  { tab: "series", label: "Серии" },
+  { tab: "regions", label: "Регионы" },
+  { tab: "combos", label: "Сочетания" },
+  { tab: "digits", label: "Цифры" },
+  { tab: "mine", label: "Мои номера" },
+];
+
+const PLATE_GUIDE_TITLES: Record<PlateGuideTab, string> = {
+  how: "Госномер · условия",
+  series: "Госномер · серии",
+  regions: "Госномер · регионы",
+  combos: "Госномер · сочетания",
+  digits: "Госномер · цифры",
+  mine: "Госномер · мои номера",
+};
+
+function plateGuideCustomId(tab: PlateGuideTab, carUid?: string): string {
+  return carUid ? `${ECON_SHOP_PLATE_TAB_PREFIX}${tab}:${carUid}` : `${ECON_SHOP_PLATE_TAB_PREFIX}${tab}`;
+}
+
+export function parsePlateGuideRef(id: string): { tab: PlateGuideTab; carUid?: string } | undefined {
+  if (id === ECON_SHOP_PLATE_DETAILS) return { tab: "how" };
+  if (!id.startsWith(ECON_SHOP_PLATE_TAB_PREFIX)) return undefined;
+  const rest = id.slice(ECON_SHOP_PLATE_TAB_PREFIX.length);
+  const sep = rest.indexOf(":");
+  const tabRaw = sep === -1 ? rest : rest.slice(0, sep);
+  const uidRaw = sep === -1 ? "" : rest.slice(sep + 1);
+  const tab: PlateGuideTab = isPlateGuideTab(tabRaw) ? tabRaw : "how";
+  const carUid = /^[a-zA-Z0-9]{2,16}$/.test(uidRaw) ? uidRaw : undefined;
+  return { tab, carUid };
+}
+
+function fitEmbedLines(lines: string[], max = 3900): string[] {
+  const out: string[] = [];
+  let used = 0;
+  for (const line of lines) {
+    const next = used + line.length + 1;
+    if (out.length > 0 && next > max) {
+      out.push("Дальше не влезает в сообщение. Разбор каждого номера — на его авто.");
+      break;
+    }
+    out.push(line);
+    used = next;
+  }
+  return out;
+}
+
+function plateMineLines(member: GuildMember): string[] {
   const u = getEconomyUser(member.guild.id, member.id);
-  const attached = listAttachedPlates(u);
-  const unattached = listUnattachedPlates(u);
-  const lines = [...platePrestigeRulesTableLines()];
-  if (attached.length > 0) {
-    lines.push("", "**Прикрепленные (дают престиж):**");
-    for (const p of attached) {
-      lines.push(`• **${formatVehiclePlate(p)}** — **${fmt(computePlatePrestige(p).total)}** престижа`);
+  const takenAll = takenVehiclePlateKeys(member.guild.id);
+  const lines: string[] = [];
+  const cars = listOwnedCars(u).filter((c) => carPlateParts(c));
+  if (!cars.length) {
+    lines.push("Прикреплённых номеров нет. Престиж даёт только номер, который стоит на авто.");
+  }
+  for (const car of cars) {
+    const plate = carPlateParts(car);
+    if (!plate) continue;
+    const taken = new Set(takenAll);
+    taken.delete(vehiclePlateKey(plate));
+    const breakdown = computePlatePrestige(plate);
+    if (lines.length) lines.push("");
+    lines.push(`**${getCarDef(car.id)?.label ?? "авто"}**`);
+    lines.push(`**${formatVehiclePlate(plate)}** — **${fmt(breakdown.total)}**`);
+    lines.push(...formatPlatePrestigeDetailLines(breakdown));
+    lines.push(...formatPlateGrowthLines(plate, taken));
+  }
+  const spare = listUnattachedPlates(u);
+  if (spare.length) {
+    lines.push("", "**В запасе, престижа нет:**");
+    for (const plate of spare) {
+      lines.push(`· **${formatVehiclePlate(plate)}** — на авто было бы **${fmt(computePlatePrestige(plate).total)}**`);
     }
   }
-  if (unattached.length > 0) {
-    lines.push("", "**Неприкрепленные (престижа нет):**");
-    for (const p of unattached) {
-      lines.push(`• **${formatVehiclePlate(p)}**`);
-    }
-  }
-  return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Госномер · условия").setDescription(lines.join("\n"));
+  return lines;
+}
+
+export function buildShopPlateGuideEmbed(member: GuildMember, tab: PlateGuideTab): EmbedBuilder {
+  const lines = tab === "mine" ? plateMineLines(member) : plateConditionsLines(tab);
+  return new EmbedBuilder()
+    .setColor(PANEL_COLOR)
+    .setTitle(PLATE_GUIDE_TITLES[tab])
+    .setDescription(fitEmbedLines(lines).join("\n"));
+}
+
+export function buildShopPlateGuideRows(tab: PlateGuideTab, carUid?: string): ActionRowBuilder<ButtonBuilder>[] {
+  const buttons = PLATE_GUIDE_BUTTONS.map((item) =>
+    new ButtonBuilder()
+      .setCustomId(plateGuideCustomId(item.tab, carUid))
+      .setLabel(item.label)
+      .setStyle(item.tab === tab ? ButtonStyle.Primary : ButtonStyle.Secondary),
+  );
+  const backId = carUid ? `${ECON_SHOP_PLATE_CAR_PREFIX}${carUid}` : ECON_SHOP_PLATE;
+  return [
+    new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons.slice(0, 3)),
+    new ActionRowBuilder<ButtonBuilder>().addComponents(...buttons.slice(3)),
+    shopNavBottomRow(backId),
+  ];
 }
 
 export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<ButtonBuilder>[] {
@@ -671,7 +755,7 @@ export function buildShopPlateRows(member: GuildMember): ActionRowBuilder<Button
   }
   rows.push(
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_PLATE_DETAILS).setLabel("Условия").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(plateGuideCustomId("how")).setLabel("Условия").setStyle(ButtonStyle.Secondary),
     ),
   );
   rows.push(shopNavBottomRow(ECON_SHOP_CAR));
@@ -689,9 +773,14 @@ export function buildShopPlateCarEmbed(member: GuildMember, carUid: string, last
     `Авто: ${formatCarWithPlateLine(car)}`,
     plate ? `Госномер: **${formatVehiclePlate(plate)}**` : "Госномер: **нет** (можно оформить или прикрепить из запаса).",
   ];
-  if (platePrestige) lines.push(`Престиж этого номера: **${fmt(platePrestige.total)}**`);
-  if (!lastRoll) lines.push("", ...PLATE_SHOP_PRESTIGE_HINT_LINES);
-  if (lastRoll) lines.push(...formatPlateRollEmbedFooter(lastRoll));
+  if (plate && platePrestige) {
+    lines.push(`Престиж этого номера: **${fmt(platePrestige.total)}**`);
+    if (lastRoll) lines.push(...formatPlateRollEmbedFooter(lastRoll));
+    const taken = takenVehiclePlateKeys(member.guild.id, vehiclePlateKey(plate));
+    const detail = formatPlatePrestigeDetailLines(platePrestige);
+    if (detail.length) lines.push("", ...detail);
+    lines.push("", ...formatPlateGrowthLines(plate, taken));
+  }
   return new EmbedBuilder().setColor(PANEL_COLOR).setTitle("Госномер · авто").setDescription(lines.join("\n"));
 }
 
@@ -751,7 +840,7 @@ export function buildShopPlateCarRows(member: GuildMember, carUid: string): Acti
     changeRow,
     actionRow,
     new ActionRowBuilder<ButtonBuilder>().addComponents(
-      new ButtonBuilder().setCustomId(ECON_SHOP_PLATE_DETAILS).setLabel("Условия").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(plateGuideCustomId("how", carUid)).setLabel("Условия").setStyle(ButtonStyle.Secondary),
     ),
     shopNavBottomRow(ECON_SHOP_PLATE),
   ];

@@ -64,7 +64,7 @@ import {
   buildShopPlateAttachEmbed,
   buildShopPlateCarEmbed,
   buildShopPlateDetachConfirmEmbed,
-  buildShopPlateDetailsEmbed,
+  buildShopPlateGuideEmbed,
   buildShopPlateEmbed,
   buildShopSimChangeEmbed,
   buildShopSimDetailsEmbed,
@@ -77,6 +77,7 @@ import {
   renameOwnedPet,
   syncSimPrestige,
 } from "../economy/economyShopUi.js";
+import { isPlateGuideTab, type PlateGuideTab } from "../economy/economyPlatePrestige.js";
 import { buildShopAppearanceEmbed } from "../economy/economyShopAppearanceUi.js";
 import {
   attachVehiclePlateToCar,
@@ -623,9 +624,30 @@ function plateHub(member: GuildMember, note?: string): ScreenPayload {
     if (!getCarDef(c.id)) continue;
     rows.push(row({ text: btnLabel(shortCarLabel(c)), callback_data: `s:pl:c:${c.uid}` }));
   }
-  rows.push(row({ text: "Условия", callback_data: "s:pl:d" }));
+  rows.push(row({ text: "Условия", callback_data: "s:pl:g:how" }));
   rows.push(shopNav("s:car"));
   return screen(fromEmbed(buildShopPlateEmbed(member), note), ...rows);
+}
+
+const PLATE_GUIDE_TG: { tab: PlateGuideTab; label: string }[] = [
+  { tab: "how", label: "Как считается" },
+  { tab: "series", label: "Серии" },
+  { tab: "regions", label: "Регионы" },
+  { tab: "combos", label: "Сочетания" },
+  { tab: "digits", label: "Цифры" },
+  { tab: "mine", label: "Мои номера" },
+];
+
+function plateGuide(member: GuildMember, tab: PlateGuideTab, carUid?: string): ScreenPayload {
+  const back = carUid ? `s:pl:c:${carUid}` : "s:pl";
+  const buttons = PLATE_GUIDE_TG.map((item) => ({
+    text: btnLabel(item.tab === tab ? `· ${item.label}` : item.label),
+    callback_data: carUid ? `s:pl:g:${item.tab}:${carUid}` : `s:pl:g:${item.tab}`,
+  }));
+  const rows: InlineBtn[][] = [];
+  for (let i = 0; i < buttons.length; i += 2) rows.push(row(...buttons.slice(i, i + 2)));
+  rows.push(shopNav(back));
+  return screen(fromEmbed(buildShopPlateGuideEmbed(member, tab)), ...rows);
 }
 
 function plateCar(member: GuildMember, carUid: string, note?: string): ScreenPayload | null {
@@ -651,6 +673,7 @@ function plateCar(member: GuildMember, carUid: string, note?: string): ScreenPay
       rows.push(row({ text: "Прикрепить номер", callback_data: `s:pl:att:${carUid}` }));
     }
   }
+  rows.push(row({ text: "Условия", callback_data: `s:pl:g:how:${carUid}` }));
   rows.push(shopNav("s:pl"));
   return screen(fromEmbed(emb, note), ...rows);
 }
@@ -1047,8 +1070,18 @@ export async function routeShopCallback(opts: {
     await present(plateHub(member));
     return true;
   }
-  if (data === "s:pl:d") {
-    await present(screen(fromEmbed(buildShopPlateDetailsEmbed(member)), shopNav("s:pl")));
+  if (data === "s:pl:d" || data.startsWith("s:pl:g:")) {
+    let tab: PlateGuideTab = "how";
+    let carUid: string | undefined;
+    if (data.startsWith("s:pl:g:")) {
+      const rest = data.slice("s:pl:g:".length);
+      const sep = rest.indexOf(":");
+      const tabRaw = sep === -1 ? rest : rest.slice(0, sep);
+      const uidRaw = sep === -1 ? "" : rest.slice(sep + 1);
+      if (isPlateGuideTab(tabRaw)) tab = tabRaw;
+      if (/^[a-zA-Z0-9]{2,16}$/.test(uidRaw)) carUid = uidRaw;
+    }
+    await present(plateGuide(member, tab, carUid));
     return true;
   }
   if (data.startsWith("s:pl:c:")) {

@@ -68,6 +68,10 @@ function applyNet(rubles: number, net: number): number {
   return Math.max(0, rubles - net);
 }
 
+export function takenVehiclePlateKeys(guildId: string, exceptKey?: string): Set<string> {
+  return guildTakenVehiclePlateKeys(guildId, exceptKey);
+}
+
 function guildTakenVehiclePlateKeys(guildId: string, exceptKey?: string): Set<string> {
   const taken = new Set<string>();
   for (const { user } of listEconomyUsers(guildId)) {
