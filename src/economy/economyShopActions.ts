@@ -13,6 +13,7 @@ import {
 import {
   carPlateParts,
   collectUserPlateKeys,
+  creditedPlatePrestigeTotal,
   findOwnedApartment,
   findOwnedCar,
   findOwnedPhone,
@@ -414,7 +415,9 @@ function mutateCarPlate(
   if (taken.has(vehiclePlateKey(nextPlate))) {
     return { ok: false, reply: "Такой госномер уже занят." };
   }
-  const before = carPlateParts(car) ? computePlatePrestige(carPlateParts(car)!).total : 0;
+  const cars = listOwnedCars(u);
+  const beforeCredit = creditedPlatePrestigeTotal(cars);
+  const afterCredit = creditedPlatePrestigeTotal(applyCarPlate(cars, carUid, nextPlate));
   const breakdown = computePlatePrestige(nextPlate);
   let applied = false;
   updateEconomyUser(member.guild.id, member.id, (cur) => {
@@ -434,7 +437,7 @@ function mutateCarPlate(
   return {
     ok: true,
     plate,
-    lastRoll: plateLastRoll(action, plate, breakdown, breakdown.total - before, tips),
+    lastRoll: plateLastRoll(action, plate, breakdown, afterCredit - beforeCredit, tips),
   };
 }
 

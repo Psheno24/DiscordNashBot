@@ -74,6 +74,8 @@ import { housingRentUnusedRefundRub } from "./economyHousing.js";
 import {
   carPlateParts,
   encodePlateKey,
+  platePrestigeShares,
+  type PlatePrestigeShare,
   findOwnedApartment,
   findOwnedCar,
   findOwnedPet,
@@ -626,7 +628,7 @@ export function buildShopPlateEmbed(member: GuildMember, lastRoll?: PlateShopLas
     "**Неприкрепленные:**",
     unattached.length ? unattached.map((p) => `• **${formatVehiclePlate(p)}**`).join("\n") : "• нет",
     "",
-    "Неприкрепленные номера престижа **не** дают. Формула, серии и множители — кнопка **Условия**.",
+    "Неприкрепленные номера престижа **не** дают. На авто полностью идут лучший на заморской и лучший на советской, остальные — **×0,1**. Формула — кнопка **Условия**.",
   ];
   const attachedPrestige = (u.vehiclePlatePrestige ?? 0);
   if (attachedPrestige > 0) lines.push(`Престиж с авто: **${fmt(attachedPrestige)}**`);
@@ -683,9 +685,29 @@ function fitEmbedLines(lines: string[], max = 3900): string[] {
   return out;
 }
 
+function plateSideWord(origin: PlatePrestigeShare["origin"]): string | undefined {
+  if (origin === "foreign") return "заморской";
+  if (origin === "soviet") return "советской";
+  return undefined;
+}
+
+function plateCreditLine(share: PlatePrestigeShare | undefined, where: "car" | "mine"): string | undefined {
+  if (!share) return undefined;
+  const side = plateSideWord(share.origin);
+  if (share.full && side) {
+    return where === "mine"
+      ? `в престиж полностью — лучший на ${side}`
+      : `В престиж идёт полностью — лучший номер на ${side}.`;
+  }
+  return where === "mine"
+    ? `в престиж **×0,1** — **${fmt(share.credited)}**`
+    : `В престиж идёт **×0,1** — **${fmt(share.credited)}**. Полностью считаются только лучший на заморской и лучший на советской.`;
+}
+
 function plateMineLines(member: GuildMember): string[] {
   const u = getEconomyUser(member.guild.id, member.id);
   const takenAll = takenVehiclePlateKeys(member.guild.id);
+  const shares = new Map(platePrestigeShares(listOwnedCars(u)).map((share) => [share.carUid, share]));
   const lines: string[] = [];
   const cars = listOwnedCars(u).filter((c) => carPlateParts(c));
   if (!cars.length) {
@@ -697,9 +719,10 @@ function plateMineLines(member: GuildMember): string[] {
     const taken = new Set(takenAll);
     taken.delete(vehiclePlateKey(plate));
     const breakdown = computePlatePrestige(plate);
+    const credit = plateCreditLine(shares.get(car.uid), "mine");
     if (lines.length) lines.push("");
     lines.push(`**${getCarDef(car.id)?.label ?? "авто"}**`);
-    lines.push(`**${formatVehiclePlate(plate)}** — **${fmt(breakdown.total)}**`);
+    lines.push(`**${formatVehiclePlate(plate)}** — **${fmt(breakdown.total)}**${credit ? ` · ${credit}` : ""}`);
     lines.push(...formatPlatePrestigeDetailLines(breakdown));
     lines.push(...formatPlateGrowthLines(plate, taken));
   }
@@ -775,6 +798,8 @@ export function buildShopPlateCarEmbed(member: GuildMember, carUid: string, last
   ];
   if (plate && platePrestige) {
     lines.push(`Престиж этого номера: **${fmt(platePrestige.total)}**`);
+    const credit = plateCreditLine(platePrestigeShares(listOwnedCars(u)).find((share) => share.carUid === car.uid), "car");
+    if (credit) lines.push(credit);
     if (lastRoll) lines.push(...formatPlateRollEmbedFooter(lastRoll));
     const taken = takenVehiclePlateKeys(member.guild.id, vehiclePlateKey(plate));
     const detail = formatPlatePrestigeDetailLines(platePrestige);
@@ -1447,16 +1472,22 @@ export function buildShopPlateAttachRows(member: GuildMember, carUid: string): A
 }
 
 export function buildShopPlateAttachConfirmEmbed(member: GuildMember, carUid: string, parts: VehiclePlateParts): EmbedBuilder | undefined {
-  const car = findOwnedCar(getEconomyUser(member.guild.id, member.id), carUid);
+  const u = getEconomyUser(member.guild.id, member.id);
+  const car = findOwnedCar(u, carUid);
   if (!car) return undefined;
   const prestige = computePlatePrestige(parts).total;
+  const preview = platePrestigeShares(listOwnedCars(u).map((c) => (c.uid === carUid ? { ...c, plate: parts } : c))).find(
+    (share) => share.carUid === carUid,
+  );
+  const credit = plateCreditLine(preview, "car");
   return new EmbedBuilder()
     .setColor(PANEL_COLOR)
     .setTitle("Подтверждение")
     .setDescription(
       [
         `Прикрепить **${formatVehiclePlate(parts)}** к **${getCarDef(car.id)?.label ?? "авто"}**?`,
-        `Престиж номера: **${fmt(prestige)}** (начнёт действовать после крепления).`,
+        `Престиж номера: **${fmt(prestige)}**.`,
+        credit ?? "После крепления номер начнёт давать престиж.",
       ].join("\n"),
     );
 }

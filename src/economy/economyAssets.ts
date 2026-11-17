@@ -375,10 +375,63 @@ export function collectUserPlateKeys(u: EconomyUser, exceptKey?: string): Set<st
   return keys;
 }
 
-export function attachedPlatePrestigeTotal(u: EconomyUser): number {
+/** Доля престижа номера, если он не лучший на своей стороне. */
+export const PLATE_PRESTIGE_OTHER_MULT = 0.1;
+
+export type PlatePrestigeShare = {
+  carUid: string;
+  origin?: CatalogOrigin;
+  /** Престиж самого номера, без доли. */
+  raw: number;
+  /** Сколько номера реально прибавляет к престижу игрока. */
+  credited: number;
+  /** Лучший номер на заморской или на советской машине. */
+  full: boolean;
+};
+
+/**
+ * Полностью считаются два номера: лучший на заморской машине и лучший на советской.
+ * Остальные номера на авто дают десятую часть. При равенстве полностью идёт тот, что раньше в списке.
+ */
+export function platePrestigeShares(cars: readonly OwnedCarRecord[]): PlatePrestigeShare[] {
+  const rows: { carUid: string; origin?: CatalogOrigin; raw: number }[] = [];
+  for (const car of cars) {
+    if (!car.plate || !isValidVehiclePlateParts(car.plate)) continue;
+    rows.push({
+      carUid: car.uid,
+      origin: getCarDef(car.id)?.origin,
+      raw: computePlatePrestige(car.plate).total,
+    });
+  }
+  const bestUid = new Map<CatalogOrigin, string>();
+  for (const origin of ["foreign", "soviet"] as const) {
+    let best: (typeof rows)[number] | undefined;
+    for (const row of rows) {
+      if (row.origin !== origin) continue;
+      if (!best || row.raw > best.raw) best = row;
+    }
+    if (best) bestUid.set(origin, best.carUid);
+  }
+  return rows.map((row) => {
+    const full = row.origin != null && bestUid.get(row.origin) === row.carUid;
+    return {
+      carUid: row.carUid,
+      origin: row.origin,
+      raw: row.raw,
+      credited: full ? row.raw : Math.floor(row.raw * PLATE_PRESTIGE_OTHER_MULT),
+      full,
+    };
+  });
+}
+
+export function creditedPlatePrestigeTotal(cars: readonly OwnedCarRecord[]): number {
   let n = 0;
-  for (const p of listAttachedPlates(u)) n += computePlatePrestige(p).total;
+  for (const share of platePrestigeShares(cars)) n += share.credited;
   return n;
+}
+
+export function attachedPlatePrestigeTotal(u: EconomyUser): number {
+  return creditedPlatePrestigeTotal(listOwnedCars(u));
 }
 
 /** Штраф −10%: есть авто, но ни на одном нет прикреплённого номера. */
@@ -466,11 +519,7 @@ export function statsFromOwnedAssets(assets: NormalizedAssets): { prestigePoints
     prestigePoints += def.prestigeDelta;
     domesticPoints += def.domesticDelta;
   }
-  for (const c of assets.ownedCars) {
-    if (c.plate && isValidVehiclePlateParts(c.plate)) {
-      prestigePoints += computePlatePrestige(c.plate).total;
-    }
-  }
+  prestigePoints += creditedPlatePrestigeTotal(assets.ownedCars);
   return { prestigePoints, domesticPoints };
 }
 
@@ -519,7 +568,7 @@ export function assetPhoneCarMirrors(assets: NormalizedAssets): {
   }
   const attached = assets.ownedCars.map((c) => c.plate).filter((p): p is VehiclePlateParts => Boolean(p && isValidVehiclePlateParts(p)));
   const firstPlate = attached[0];
-  const platePrestige = attached.reduce((n, p) => n + computePlatePrestige(p).total, 0);
+  const platePrestige = creditedPlatePrestigeTotal(assets.ownedCars);
   return {
     hasPhone: phone ? true : undefined,
     phoneModelId: phone?.id,
